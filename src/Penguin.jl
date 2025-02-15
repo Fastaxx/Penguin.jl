@@ -17,4 +17,8 @@ include("operators.jl")
 export AbstractOperators, ẟ_m, δ_p, Σ_m, Σ_p, I
 export DiffusionOps, ConvectionOps
 
+include("boundary.jl")
+export AbstractBoundary, Dirichlet, Neumann, Robin, Periodic
+export AbstractInterfaceBC, ScalarJump, FluxJump, BorderConditions, InterfaceConditions
+
 end

@@ -15,3 +15,8 @@ end
     # Write your tests here.
     include("operators_test.jl")
 end
+
+@testset "Boundary Test" begin
+    # Write your tests here.
+    include("boundary_test.jl")
+end
