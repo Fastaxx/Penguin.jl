@@ -20,4 +20,11 @@ capacity = Capacity(LS, mesh, method="VOFI") # or capacity = Capacity(Φ, mesh, 
 # Define the operators
 operators = DiffusionOps(capacity)
 
-@show size(operators.G)
+# Define the boundary conditions
+bc = Dirichlet(0.0)
+bc1 = Dirichlet(1.0)
+bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:left => bc1, :right => bc1, :top => bc1, :bottom => bc1))
+
+# Define the source term and coefficients
+f(x,y) = 0.0
+D = 1.0
