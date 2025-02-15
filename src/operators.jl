@@ -13,6 +13,27 @@ function Σ_p(n::Int, periodicity::Bool=false) D = 0.5 * spdiagm(0 => ones(n), 1
 function I(n::Int) spdiagm(0 => ones(n)) end
 
 """
+    ∇(operator::AbstractOperators, p::Vector{Float64})
+
+Compute the gradient of a scalar field.
+"""
+function ∇(operator::AbstractOperators, p::Vector{Float64})
+    ∇ = operator.Wꜝ * (operator.G * p[1:div(end,2)] + operator.H * p[div(end,2)+1:end])
+    return ∇
+end
+
+"""
+    ∇₋(operator::AbstractOperators, qω::Vector{Float64}, qγ::Vector{Float64})
+
+Compute the divergence of a vector field.
+"""
+function ∇₋(operator::AbstractOperators, qω::Vector{Float64}, qγ::Vector{Float64})
+    GT = operator.G'
+    HT = operator.H'
+    return -(GT + HT)*qω + HT * qγ
+end
+
+"""
     struct DiffusionOps{N} <: AbstractOperators where N
 
 Struct representing diffusion operators.

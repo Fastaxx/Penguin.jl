@@ -15,6 +15,7 @@ export Capacity
 
 include("operators.jl")
 export AbstractOperators, ẟ_m, δ_p, Σ_m, Σ_p, I
+export ∇, ∇₋
 export DiffusionOps, ConvectionOps
 
 include("boundary.jl")
