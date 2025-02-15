@@ -1,3 +1,13 @@
 using Documenter, Penguin
 
-makedocs(sitename="Penguin.jl", remotes=nothing)
+makedocs(sitename="Penguin.jl", remotes=nothing,
+        pages = [
+            "index.md",
+            "Simulation key blocks" => [
+                "blocks/mesh.md",
+                "blocks/body.md",
+                "blocks/capacity.md",
+                "blocks/operators.md",
+                "blocks/boundary.md",
+            ],
+        ])
