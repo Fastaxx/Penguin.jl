@@ -166,6 +166,7 @@ function ConvectionOps(Capacity::AbstractCapacity, uₒ, uᵧ)
     elseif N == 3
         nx, ny, nz = length(mesh.nodes[1]), length(mesh.nodes[2]), length(mesh.nodes[3])
         Dx_m, Dy_m, Dz_m = kron(I(nz), kron(I(ny), ẟ_m(nx))), kron(I(nz), kron(ẟ_m(ny), I(nx))), kron(ẟ_m(nz), kron(I(ny), I(nx)))
+        Dx_p, Dy_p, Dz_p = kron(I(nz), kron(I(ny), δ_p(nx))), kron(I(nz), kron(δ_p(ny), I(nx))), kron(δ_p(nz), kron(I(ny), I(nx)))
         Sx_m, Sy_m, Sz_m = kron(I(nz), kron(I(ny), Σ_m(nx))), kron(I(nz), kron(Σ_m(ny), I(nx))), kron(Σ_m(nz), kron(I(ny), I(nx)))
         Sx_p, Sy_p, Sz_p = kron(I(nz), kron(I(ny), Σ_p(nx))), kron(I(nz), kron(Σ_p(ny), I(nx))), kron(Σ_p(nz), kron(I(ny), I(nx)))
         G = [Dx_m * Capacity.B[1]; Dy_m * Capacity.B[2]; Dz_m * Capacity.B[3]]
