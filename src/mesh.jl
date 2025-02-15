@@ -85,9 +85,9 @@ Calculate the total number of cells in a mesh.
 - An integer representing the total number of cells in the mesh, calculated as the product of the lengths of the mesh centers.
 
 # Example
-$ x = collect(range(0.0, stop=1.0, length=5))
-$ mesh1D = Mesh((x,))
-$ nC(mesh1D) == 5
+x = collect(range(0.0, stop=1.0, length=5))
+mesh1D = Mesh((x,))
+nC(mesh1D) == 5
 """
 # Function to get the total number of cells in a mesh
 nC(mesh::Mesh{N}) where N = prod(length.(mesh.centers))

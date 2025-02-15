@@ -3,6 +3,13 @@ uuid = "c60b9c7f-4ba0-4cf4-9267-bf5bcdb56d21"
 authors = ["Fastaxx <Fastaxx@github.com> and contributors"]
 version = "1.0.0-DEV"
 
+[deps]
+CartesianGeometry = "5961ddb3-e46d-41f1-806c-0197ba873d0b"
+ImplicitIntegration = "bc256489-3a69-4a66-afc4-127cc87e6182"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+
 [compat]
 julia = "1"
 
