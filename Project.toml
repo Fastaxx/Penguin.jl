@@ -1,0 +1,13 @@
+name = "Penguin"
+uuid = "c60b9c7f-4ba0-4cf4-9267-bf5bcdb56d21"
+authors = ["Fastaxx <Fastaxx@github.com> and contributors"]
+version = "1.0.0-DEV"
+
+[compat]
+julia = "1"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
