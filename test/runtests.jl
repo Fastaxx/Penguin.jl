@@ -10,3 +10,8 @@ end
     # Write your tests here.
     include("capacity_test.jl")
 end
+
+@testset "Operators Test" begin
+    # Write your tests here.
+    include("operators_test.jl")
+end

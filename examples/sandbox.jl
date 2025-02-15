@@ -20,3 +20,4 @@ capacity = Capacity(LS, mesh, method="VOFI") # or capacity = Capacity(Φ, mesh, 
 # Define the operators
 operators = DiffusionOps(capacity)
 
+@show size(operators.G)

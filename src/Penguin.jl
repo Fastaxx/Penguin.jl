@@ -14,7 +14,7 @@ include("capacity.jl")
 export Capacity
 
 include("operators.jl")
-export ẟ_m, δ_p, Σ_m, Σ_p, I
-export AbstractOperators, DiffusionOps
+export AbstractOperators, ẟ_m, δ_p, Σ_m, Σ_p, I
+export DiffusionOps
 
 end
