@@ -9,5 +9,6 @@ makedocs(sitename="Penguin.jl", remotes=nothing,
                 "blocks/capacity.md",
                 "blocks/operators.md",
                 "blocks/boundary.md",
+                "blocks/phase.md",
             ],
         ])
