@@ -22,7 +22,7 @@ include("boundary.jl")
 export AbstractBoundary, Dirichlet, Neumann, Robin, Periodic
 export AbstractInterfaceBC, ScalarJump, FluxJump, BorderConditions, InterfaceConditions
 
-include("Phase.jl")
+include("phase.jl")
 export Phase
 
 end
