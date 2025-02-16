@@ -10,6 +10,7 @@ A `Mesh` is constructed from one or more coordinate vectors. Each vector defines
 1. **nodes** - The boundary positions of each cell.  
 2. **centers** - The coordinate vectors you provided.  
 3. **sizes** - Each cell’s size, adjusted for the first and last cells.
+4. **tag** - A [`MeshTag`] that contains metadata (e.g., border cells).
 
 ## Creating a 1D Mesh
 
@@ -22,11 +23,13 @@ mesh1D = Mesh((x,))
 println(mesh1D.centers) # ([0.0, 0.25, 0.5, 0.75, 1.0],)
 println(mesh1D.sizes)   # ([0.125, 0.25, 0.25, 0.25, 0.125],)
 println(nC(mesh1D))     # 5 total cells
+println(mesh1D.tag.border_cells)
 ```
 
 - **centers**: Cell center positions.  
 - **sizes**: Cell sizes, with half-sizes at the extremes.  
 - **nC(mesh)**: Total number of cells.
+- **tag.border_cells**:Each border cell is stored as `(CartesianIndex(...), (coords...))`.
 
 ## Creating a 2D Mesh
 

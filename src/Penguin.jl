@@ -5,6 +5,7 @@ using StaticArrays
 using CartesianGeometry
 using ImplicitIntegration
 using LinearAlgebra
+using IterativeSolvers
 # Write your package code here.
 
 include("mesh.jl")
@@ -24,5 +25,14 @@ export AbstractInterfaceBC, ScalarJump, FluxJump, BorderConditions, InterfaceCon
 
 include("phase.jl")
 export Phase
+
+include("solver.jl")
+export TimeType, PhaseType, EquationType
+export Solver, solve_system!
+export build_I_bc, build_I_D, build_source, build_g_g
+export BC_border_mono!
+
+include("solver/diffusion.jl")
+export DiffusionSteadyMono, solve_DiffusionSteadyMono!
 
 end

@@ -6,6 +6,7 @@ version = "1.0.0-DEV"
 [deps]
 CartesianGeometry = "5961ddb3-e46d-41f1-806c-0197ba873d0b"
 ImplicitIntegration = "bc256489-3a69-4a66-afc4-127cc87e6182"
+IterativeSolvers = "42fd0dbc-a981-5370-80f2-aaf504508153"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"

@@ -25,3 +25,8 @@ end
     # Write your tests here.
     include("phase_test.jl")
 end
+
+@testset "Solver Test" begin
+    # Write your tests here.
+    include("solver_test.jl")
+end

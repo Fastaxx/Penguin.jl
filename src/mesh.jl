@@ -1,3 +1,7 @@
+mutable struct MeshTag{N}
+    border_cells::Vector{Tuple{CartesianIndex, NTuple{N, Float64}}}
+end
+
 abstract type AbstractMesh end
 
 """
@@ -22,18 +26,25 @@ is defined by its cell centers, boundaries, and the resulting cell sizes.
 # Type of mesh : x--!--x--!--x with x: cell center and !: cell boundary
 # Start by a cell center then a cell boundary and so on  ... and finish by a cell center
 """
-struct Mesh{N} <: AbstractMesh
+mutable struct Mesh{N} <: AbstractMesh
     nodes::NTuple{N, Vector{Float64}}
     centers::NTuple{N, Vector{Float64}}
     sizes::NTuple{N, Vector{Float64}}
+    tag::MeshTag
 
-    function Mesh(nodes::NTuple{N, AbstractVector{<:Real}}) where N
-        centers = ntuple(i -> collect(Float64.(nodes[i])), N)
+    function Mesh(centers::NTuple{N, AbstractVector{<:Real}}) where N
+        centers = ntuple(i -> collect(Float64.(centers[i])), N)
         nodes = ntuple(i -> (centers[i][1:end-1] .+ centers[i][2:end]) ./ 2.0, N)
         # Compute the sizes of the cells : The first and last cells have a size that is half of the others
         sizes = ntuple(i -> diff(nodes[i]), N)
         sizes = ntuple(i -> [sizes[i][1] / 2; sizes[i][1:end]; sizes[i][end] / 2], N)
-        return new{N}(nodes, centers, sizes)
+        
+        temp_mesh = new{N}(nodes, centers, sizes, MeshTag{N}([]))
+
+        # Get the border cells
+        bc = get_border_cells(temp_mesh)
+        temp_mesh.tag = MeshTag{N}(bc)
+        return temp_mesh
     end
 end
 
