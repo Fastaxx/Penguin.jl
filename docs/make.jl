@@ -1,6 +1,6 @@
 using Documenter, Penguin
 
-makedocs(sitename="Penguin.jl", remotes=nothing,
+makedocs(sitename="Penguin.jl", remotes=nothing, modules = [Penguin],
         pages = [
             "index.md",
             "Simulation key blocks" => [
