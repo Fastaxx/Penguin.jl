@@ -28,3 +28,6 @@ bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:left => bc1, :right => b
 # Define the source term and coefficients
 f(x,y) = 0.0
 D = 1.0
+
+# Define the Fluid
+Fluide = Phase(capacity, operator, f, D)

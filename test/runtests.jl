@@ -20,3 +20,8 @@ end
     # Write your tests here.
     include("boundary_test.jl")
 end
+
+@testset "Phase Test" begin
+    # Write your tests here.
+    include("phase_test.jl")
+end
