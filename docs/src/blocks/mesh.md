@@ -16,7 +16,7 @@ A `Mesh` is constructed from one or more coordinate vectors. Each vector defines
 ```julia
 using Penguin
 
-x = collect(range(0.0, stop=1.0, length=5))
+x = range(0.0, stop=1.0, length=5)
 mesh1D = Mesh((x,))
 
 println(mesh1D.centers) # ([0.0, 0.25, 0.5, 0.75, 1.0],)
@@ -33,8 +33,8 @@ println(nC(mesh1D))     # 5 total cells
 ```julia
 using Penguin
 
-x = collect(range(0.0, stop=1.0, length=5))
-y = collect(range(0.0, stop=1.0, length=5))
+x = range(0.0, stop=1.0, length=5)
+y = range(0.0, stop=1.0, length=5)
 mesh2D = Mesh((x, y))
 
 println(mesh2D.centers) # ([0.0, 0.25, 0.5, 0.75, 1.0], [0.0, 0.25, 0.5, 0.75, 1.0])

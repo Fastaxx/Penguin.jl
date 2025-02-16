@@ -54,7 +54,6 @@ by iterating over all cell indices in the mesh and checking each one.
 # Returns
 - `Vector{Tuple{CartesianIndex, NTuple{N, Float64}}}`: A list of tuples representing
   each border cell by its index and center coordinates.
-
 """
 function get_border_cells(mesh::Mesh{N}) where N
     # Number of cells in each dimension
@@ -85,7 +84,7 @@ Calculate the total number of cells in a mesh.
 - An integer representing the total number of cells in the mesh, calculated as the product of the lengths of the mesh centers.
 
 # Example
-x = collect(range(0.0, stop=1.0, length=5))
+x = range(0.0, stop=1.0, length=5)
 mesh1D = Mesh((x,))
 nC(mesh1D) == 5
 """
