@@ -49,10 +49,10 @@ Fluide = Phase(capacity, operator, f, K)
 solver = DarcyFlow(Fluide, bc_p, ic)
 
 # Solve the pressure problem
-solve_DarcyFlow!(solver; method=Base.:\)
+solve_DarcyFlow!(solver; method=IterativeSolvers.gmres)
 
 # Plot the pressure solution
-plot_solution(solver, mesh, circle, capacity)
+#plot_solution(solver, mesh, circle, capacity)
 
 # Solve the velocity problem
 u = solve_darcy_velocity(solver, Fluide)
