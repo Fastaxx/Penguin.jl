@@ -23,5 +23,6 @@ docs/site/
 # environment.
 Manifest.toml
 
-# Ignore .mp4 files
+# Ignore .mp4 files, txt files
+*.txt
 *.mp4

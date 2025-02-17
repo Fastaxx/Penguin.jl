@@ -42,6 +42,7 @@ include("solver/diffusion.jl")
 export DiffusionSteadyMono, solve_DiffusionSteadyMono!
 export DiffusionSteadyDiph, solve_DiffusionSteadyDiph!
 export DiffusionUnsteadyMono, solve_DiffusionUnsteadyMono!
+export DiffusionUnsteadyDiph, solve_DiffusionUnsteadyDiph!
 
 include("vizualize.jl")
 export plot_solution, animate_solution

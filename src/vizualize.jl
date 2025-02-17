@@ -215,7 +215,7 @@ function plot_solution(solver, mesh::Mesh{2}, body::Function, capacity::Capacity
 
             fig = Figure(size=(800, 600))
 
-            x, y = range(mesh.x0[1], stop=mesh.x0[1]+mesh.h[1][1]*length(mesh.h[1]), length=length(mesh.h[1])+1), range(mesh.x0[2], stop=mesh.x0[2]+mesh.h[2][1]*length(mesh.h[2]), length=length(mesh.h[2])+1)
+            x, y = mesh.centers[1], mesh.centers[2]
 
             ax1 = Axis(fig[1, 1], title="Diphasic Unsteady - Phase 1 - Bulk", xlabel="x", ylabel="y", aspect = DataAspect())
             hm1 = heatmap!(ax1, x, y, reshaped_u1ₒ, colormap=:viridis)

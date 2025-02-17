@@ -1,4 +1,4 @@
-# Poisson 2D
+# 2D One‑Phase Poisson Equation
 
 This example demonstrates how to solve a 2D diffusion (Poisson) equation inside a circular region.
 

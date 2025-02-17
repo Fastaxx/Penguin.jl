@@ -1,4 +1,4 @@
-# Poisson 2D Diphasic
+# 2D Two‑Phase Poisson Equation
 
 This example demonstrates how to solve a 2D diffusion (Poisson) equation between two domains.
 

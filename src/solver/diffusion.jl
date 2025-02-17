@@ -187,11 +187,10 @@ Constructs a solver for the unsteady monophasic diffusion problem.
 - `bc_b::BorderConditions`: The border conditions object representing the boundary conditions at the outer border.
 - `bc_i::AbstractBoundary`: The boundary conditions object representing the boundary conditions at the inner border.
 - `Δt::Float64`: The time step size.
-- `Tₑ::Float64`: The final time.
 - `Tᵢ::Vector{Float64}`: The initial temperature distribution.
 """
 function DiffusionUnsteadyMono(phase::Phase, bc_b::BorderConditions, bc_i::AbstractBoundary, Δt::Float64, Tᵢ::Vector{Float64}, scheme::String)
-    println("Création du solveur:")
+    println("Solver creation:")
     println("- Monophasic problem")
     println("- Unsteady problem")
     println("- Diffusion problem")
@@ -301,3 +300,163 @@ function solve_DiffusionUnsteadyMono!(s::Solver, phase::Phase, Δt::Float64, T�
         Tᵢ = s.x
     end
 end
+
+
+
+# Diffusion - Unsteady - Diphasic
+"""
+    DiffusionUnsteadyDiph(phase1::Phase, phase2::Phase, bc_b::BorderConditions, ic::InterfaceConditions, Δt::Float64, Tₑ::Float64, Tᵢ::Vector{Float64})
+
+Creates a solver for an unsteady two-phase diffusion problem.
+
+## Arguments
+- `phase1::Phase`: The first phase of the problem.
+- `phase2::Phase`: The second phase of the problem.
+- `bc_b::BorderConditions`: The boundary conditions of the problem.
+- `ic::InterfaceConditions`: The conditions at the interface between the two phases.
+- `Δt::Float64`: The time interval.
+- `Tᵢ::Vector{Float64}`: The vector of initial temperatures.
+"""
+function DiffusionUnsteadyDiph(phase1::Phase, phase2::Phase, bc_b::BorderConditions, ic::InterfaceConditions, Δt::Float64, Tᵢ::Vector{Float64}, scheme::String)
+    println("Solver creation:")
+    println("- Diphasic problem")
+    println("- Unsteady problem")
+    println("- Diffusion problem")
+    
+    s = Solver(Unsteady, Diphasic, Diffusion, nothing, nothing, nothing, ConvergenceHistory(), [])
+
+    if scheme == "CN"
+        s.A = A_diph_unstead_diff(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Δt, "CN")
+        s.b = b_diph_unstead_diff(phase1.operator, phase2.operator, phase1.source, phase2.source, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Tᵢ, Δt, 0.0, "CN")
+    else
+        s.A = A_diph_unstead_diff(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Δt, "BE")
+        s.b = b_diph_unstead_diff(phase1.operator, phase2.operator, phase1.source, phase2.source, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Tᵢ, Δt, 0.0, "BE")
+    end
+
+    BC_border_diph!(s.A, s.b, bc_b, phase2.capacity.mesh)
+    return s
+end
+
+function A_diph_unstead_diff(operator1::DiffusionOps, operator2::DiffusionOps, capacite1::Capacity, capacite2::Capacity, D1, D2, ic::InterfaceConditions, Δt::Float64, scheme::String)
+    n = prod(operator1.size)
+
+    jump, flux = ic.scalar, ic.flux
+    Iₐ1, Iₐ2 = jump.α₁ * I(n), jump.α₂ * I(n)
+    Iᵦ1, Iᵦ2 = flux.β₁ * I(n), flux.β₂ * I(n)
+    Id1, Id2 = build_I_D(operator1, D1, capacite1), build_I_D(operator2, D2, capacite2)
+
+    # Precompute repeated multiplications
+    WG_G1 = operator1.Wꜝ * operator1.G
+    WG_H1 = operator1.Wꜝ * operator1.H
+    WG_G2 = operator2.Wꜝ * operator2.G
+    WG_H2 = operator2.Wꜝ * operator2.H
+
+    if scheme == "CN"
+        block1 = operator1.V + Δt / 2 * Id1 * operator1.G' * WG_G1
+        block2 = Δt / 2 * Id1 * operator1.G' * WG_H1
+        block3 = operator2.V + Δt / 2 * Id2 * operator2.G' * WG_G2
+        block4 = Δt / 2 * Id2 * operator2.G' * WG_H2
+    else
+        block1 = operator1.V + Δt * Id1 * operator1.G' * WG_G1
+        block2 = Δt * Id1 * operator1.G' * WG_H1
+        block3 = operator2.V + Δt * Id2 * operator2.G' * WG_G2
+        block4 = Δt * Id2 * operator2.G' * WG_H2
+    end
+    block5 = Iᵦ1 * operator1.H' * WG_G1
+    block6 = Iᵦ1 * operator1.H' * WG_H1
+    block7 = Iᵦ2 * operator2.H' * WG_G2
+    block8 = Iᵦ2 * operator2.H' * WG_H2
+
+    # Preallocate the sparse matrix
+    A = spzeros(Float64, 4n, 4n)
+
+    # Assign blocks to the matrix
+    A[1:n, 1:n] = block1
+    A[1:n, n+1:2n] = block2
+    A[1:n, 2n+1:3n] = spzeros(n, n)
+    A[1:n, 3n+1:4n] = spzeros(n, n)
+
+    A[n+1:2n, 1:n] = spzeros(n, n)
+    A[n+1:2n, n+1:2n] = Iₐ1
+    A[n+1:2n, 2n+1:3n] = spzeros(n, n)
+    A[n+1:2n, 3n+1:4n] = -Iₐ2
+
+    A[2n+1:3n, 1:n] = spzeros(n, n)
+    A[2n+1:3n, n+1:2n] = spzeros(n, n)
+    A[2n+1:3n, 2n+1:3n] = block3
+    A[2n+1:3n, 3n+1:4n] = block4
+
+    A[3n+1:4n, 1:n] = block5
+    A[3n+1:4n, n+1:2n] = block6
+    A[3n+1:4n, 2n+1:3n] = block7
+    A[3n+1:4n, 3n+1:4n] = block8
+
+    return A
+end
+
+function b_diph_unstead_diff(operator1::DiffusionOps, operator2::DiffusionOps, f1, f2, capacite1::Capacity, capacite2::Capacity, D1, D2, ic::InterfaceConditions, Tᵢ, Δt::Float64, t::Float64, scheme::String)
+    N = prod(operator1.size)
+    b = zeros(4N)
+
+    jump, flux = ic.scalar, ic.flux
+    Iᵧ1, Iᵧ2 = capacite1.Γ, capacite2.Γ
+    gᵧ, hᵧ = build_g_g(operator1, jump,capacite1), build_g_g(operator2, flux, capacite2)
+
+    fₒn1, fₒn2 = build_source(operator1, f1, t, capacite1), build_source(operator2, f2, t, capacite2)
+    fₒn1p1, fₒn2p1 = build_source(operator1, f1, t+Δt, capacite1), build_source(operator2, f2, t+Δt, capacite2)
+
+    Id1, Id2 = build_I_D(operator1, D1, capacite1), build_I_D(operator2, D2, capacite2)
+
+    Tₒ1, Tᵧ1 = Tᵢ[1:N], Tᵢ[N+1:2N]
+    Tₒ2, Tᵧ2 = Tᵢ[2N+1:3N], Tᵢ[3N+1:end]
+
+    # Build the right-hand side
+    if scheme == "CN"
+        b1 = (operator1.V - Δt/2 * Id1 * operator1.G' * operator1.Wꜝ * operator1.G)*Tₒ1 - Δt/2 * Id1 * operator1.G' * operator1.Wꜝ * operator1.H * Tᵧ1 + Δt/2 * operator1.V * (fₒn1 + fₒn1p1)
+        b3 = (operator2.V - Δt/2 * Id2 * operator2.G' * operator2.Wꜝ * operator2.G)*Tₒ2 - Δt/2 * Id2 * operator2.G' * operator2.Wꜝ * operator2.H * Tᵧ2 + Δt/2 * operator2.V * (fₒn2 + fₒn2p1)
+    else
+        b1 = (operator1.V)*Tₒ1 + Δt * operator1.V * (fₒn1p1)
+        b3 = (operator2.V)*Tₒ2 + Δt * operator2.V * (fₒn2p1)
+    end
+    b2 = gᵧ
+    b4 = Iᵧ2*hᵧ
+    b = vcat(b1, b2, b3, b4)
+
+    return b
+end
+
+function solve_DiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phase2::Phase, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, ic::InterfaceConditions, scheme::String; method::Function = gmres, kwargs...)
+    if s.A === nothing
+        error("Solver is not initialized. Call a solver constructor first.")
+    end
+
+    t = 0.0
+    println("Time: ", t)
+    # Solve for the initial condition
+    solve_system!(s; method, kwargs...)
+
+    push!(s.states, s.x)
+    println("Solver Extremum: ", maximum(abs.(s.x)))
+    Tᵢ = s.x
+
+    # Solve for the next times
+    while t < Tₑ
+        t += Δt
+        println("Time: ", t)
+        if scheme == "CN"
+            s.A = A_diph_unstead_diff(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Δt, "CN")
+            s.b = b_diph_unstead_diff(phase1.operator, phase2.operator, phase1.source, phase2.source, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Tᵢ, Δt, t, "CN")
+        else
+            s.A = A_diph_unstead_diff(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Δt, "BE")
+            s.b = b_diph_unstead_diff(phase1.operator, phase2.operator, phase1.source, phase2.source, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Tᵢ, Δt, t, "BE")
+        end
+        BC_border_diph!(s.A, s.b, bc_b, phase2.capacity.mesh)
+        
+        solve_system!(s; method, kwargs...)
+
+        push!(s.states, s.x)
+        println("Solver Extremum: ", maximum(abs.(s.x)))
+        Tᵢ = s.x
+    end
+end
+
