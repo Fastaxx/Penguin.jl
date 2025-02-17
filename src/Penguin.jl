@@ -54,6 +54,10 @@ export AdvectionDiffusionSteadyDiph, solve_AdvectionDiffusionSteadyDiph!
 export AdvectionDiffusionUnsteadyMono, solve_AdvectionDiffusionUnsteadyMono!
 export AdvectionDiffusionUnsteadyDiph, solve_AdvectionDiffusionUnsteadyDiph!
 
+include("solver/darcy.jl")
+export DarcyFlow, solve_DarcyFlow!, solve_darcy_velocity
+export DarcyFlowUnsteady, solve_DarcyFlowUnsteady!
+
 include("vizualize.jl")
 export plot_solution, animate_solution
 

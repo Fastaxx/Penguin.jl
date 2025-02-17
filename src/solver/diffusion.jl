@@ -19,15 +19,15 @@ function DiffusionSteadyMono(phase::Phase, bc_b::BorderConditions, bc_i::Abstrac
     
     s = Solver(Steady, Monophasic, Diffusion, nothing, nothing, nothing, ConvergenceHistory(), [])
     
-    s.A = A_mono_stead_diff(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_b, bc_i)
-    s.b = b_mono_stead_diff(phase.operator, phase.source, phase.capacity, bc_b, bc_i)
+    s.A = A_mono_stead_diff(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i)
+    s.b = b_mono_stead_diff(phase.operator, phase.source, phase.capacity, bc_i)
 
     BC_border_mono!(s.A, s.b, bc_b, phase.capacity.mesh)
 
     return s
 end
 
-function A_mono_stead_diff(operator::DiffusionOps, capacity::Capacity, D, bc_b::BorderConditions, bc::AbstractBoundary)
+function A_mono_stead_diff(operator::DiffusionOps, capacity::Capacity, D, bc::AbstractBoundary)
     n = prod(operator.size)
     Iₐ, Iᵦ = build_I_bc(operator, bc)
     Iᵧ =  capacity.Γ
@@ -42,7 +42,7 @@ function A_mono_stead_diff(operator::DiffusionOps, capacity::Capacity, D, bc_b::
     return A
 end
 
-function b_mono_stead_diff(operator::DiffusionOps, f::Function, capacite::Capacity, bc_b::BorderConditions, bc::AbstractBoundary)
+function b_mono_stead_diff(operator::DiffusionOps, f::Function, capacite::Capacity, bc::AbstractBoundary)
     N = prod(operator.size)
     b = zeros(2N)
 
