@@ -38,4 +38,7 @@ export DiffusionSteadyMono, solve_DiffusionSteadyMono!
 
 include("vizualize.jl")
 export plot_solution
+
+include("convergence.jl")
+export check_convergence
 end

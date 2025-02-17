@@ -30,3 +30,8 @@ end
     # Write your tests here.
     include("solver_test.jl")
 end
+
+@testset "Convergence Test" begin
+    # Write your tests here.
+    include("convergence_test.jl")
+end
