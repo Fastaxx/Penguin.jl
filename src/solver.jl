@@ -455,3 +455,70 @@ end
 function cell_to_index(mesh::Mesh{3}, cell::CartesianIndex)
     return LinearIndices((length(mesh.centers[1])+1, length(mesh.centers[2])+1, length(mesh.centers[3])+1))[cell]
 end
+
+function BC_border_diph!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Float64}, bc_b::BorderConditions, mesh::AbstractMesh)
+    # Collect boundary cells by side
+    left_cells = Vector{CartesianIndex}()
+    right_cells = Vector{CartesianIndex}()
+    top_cells = Vector{CartesianIndex}()
+    bottom_cells = Vector{CartesianIndex}()
+    forward_cells = Vector{CartesianIndex}()
+    backward_cells = Vector{CartesianIndex}()
+
+    # For each boundary key, find matching cells
+    for (key, bc) in bc_b.borders
+        if key == :left
+            left_cells = [ci for (ci, pos) in mesh.tag.border_cells if ci[2] == 1]
+        elseif key == :right
+            right_cells = [ci for (ci, pos) in mesh.tag.border_cells if ci[2] == length(mesh.centers[2])]
+        elseif key == :top
+            top_cells = [ci for (ci, pos) in mesh.tag.border_cells if ci[1] == length(mesh.centers[1])]
+        elseif key == :bottom
+            bottom_cells = [ci for (ci, pos) in mesh.tag.border_cells if ci[1] == 1]
+        elseif key == :forward
+            forward_cells = [ci for (ci, pos) in mesh.tag.border_cells if ci[3] == length(mesh.centers[3])]
+        elseif key == :backward
+            backward_cells = [ci for (ci, pos) in mesh.tag.border_cells if ci[3] == 1]
+        end
+    end
+
+    # Apply boundary conditions
+    for (ci, pos) in mesh.tag.border_cells
+        condition = nothing
+        if ci in left_cells
+            condition = bc_b.borders[:left]
+        elseif ci in right_cells
+            condition = bc_b.borders[:right]
+        elseif ci in top_cells
+            condition = bc_b.borders[:top]
+        elseif ci in bottom_cells
+            condition = bc_b.borders[:bottom]
+        elseif ci in forward_cells
+            condition = bc_b.borders[:forward]
+        elseif ci in backward_cells
+            condition = bc_b.borders[:backward]
+        end
+
+        # Convert cell index to linear index
+        li = cell_to_index(mesh, ci)
+
+        # Here you may apply an offset for the second phase, if desired, e.g.:
+        phase_offset = size(A, 1) ÷ 2
+
+        li = li + phase_offset
+
+        if condition isa Dirichlet
+            A[li, :] .= 0.0
+            A[li, li] = 1.0
+            b[li] = isa(condition.value, Function) ? condition.value(pos...) : condition.value
+
+        elseif condition isa Neumann
+            # Not implemented yet
+        elseif condition isa Robin
+            # Not implemented yet
+        elseif condition isa Periodic
+            # You could replicate the logic from BC_border_mono! for periodic boundaries
+            # (Find opposite_key, find_corresponding_cell, etc.)
+        end
+    end
+end

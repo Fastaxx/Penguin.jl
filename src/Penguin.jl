@@ -33,10 +33,11 @@ include("solver.jl")
 export TimeType, PhaseType, EquationType
 export Solver, solve_system!
 export build_I_bc, build_I_D, build_source, build_g_g
-export BC_border_mono!
+export BC_border_mono!, BC_border_diph!
 
 include("solver/diffusion.jl")
 export DiffusionSteadyMono, solve_DiffusionSteadyMono!
+export DiffusionSteadyDiph, solve_DiffusionSteadyDiph!
 
 include("vizualize.jl")
 export plot_solution
