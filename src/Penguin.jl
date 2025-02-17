@@ -6,6 +6,7 @@ using CartesianGeometry
 using ImplicitIntegration
 using LinearAlgebra
 using IterativeSolvers
+using CairoMakie
 # Write your package code here.
 
 include("mesh.jl")
@@ -35,4 +36,6 @@ export BC_border_mono!
 include("solver/diffusion.jl")
 export DiffusionSteadyMono, solve_DiffusionSteadyMono!
 
+include("vizualize.jl")
+export plot_solution
 end
