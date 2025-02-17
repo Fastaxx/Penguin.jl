@@ -467,3 +467,140 @@ function plot_solution(solver, mesh::Mesh{3}, body::Function, capacity::Capacity
         end
     end
 end
+
+function animate_solution(solver, mesh::Mesh{1}, body::Function)
+    # Déterminer le type de problème
+    is_monophasic = solver.phase_type == Monophasic # Problème monophasique
+
+    # Enregistrer l'animation selon le type de problème
+    if is_monophasic
+        # Récupérer les états
+        states = solver.states
+
+        # Créer une figure
+        fig = Figure()
+
+        # Créer un axe pour la figure
+        ax = Axis(fig[1, 1], title="Monophasic Unsteady Diffusion", xlabel="x", ylabel="u")
+
+        function update_ln(frame)
+            # Récupérer l'état
+            state = states[frame]
+
+            # Tracer l'état
+            lines!(ax, state[1:length(state) ÷ 2], color=:blue, alpha=0.3, label="Bulk")
+            lines!(ax, state[length(state) ÷ 2 + 1:end], color=:green, alpha=0.3, label="Interface")
+        end
+
+        # Enregistrer l'animation
+        record(fig, "heat_MonoUnsteady.mp4", 1:length(states); framerate=10) do frame
+            update_ln(frame)
+        end
+
+        # Afficher la figure
+        display(fig)
+    else
+        # Récupérer les états
+        states = solver.states
+
+        # Créer une figure
+        fig = Figure()
+
+        # Créer un axe pour la figure
+        ax1 = Axis(fig[1, 1], title="Diphasic Unsteady - Phase 1", xlabel="x", ylabel="u1")
+        ax2 = Axis(fig[2, 1], title="Diphasic Unsteady - Phase 2", xlabel="x", ylabel="u2")
+
+        # Créer une fonction pour mettre à jour la figure
+        function update_plot(frame)
+            # Récupérer l'état
+            state = states[frame]
+
+            # Tracer l'état
+            lines!(ax1, state[1:length(state) ÷ 4], color=:blue, alpha=0.3, label="Bulk")
+            lines!(ax1, state[length(state) ÷ 4 + 1:2*length(state) ÷ 4], color=:green, alpha=0.3, label="Interface")
+            lines!(ax2, state[2*length(state) ÷ 4 + 1:3*length(state) ÷ 4], color=:blue, alpha=0.3, label="Bulk")
+            lines!(ax2, state[3*length(state) ÷ 4 + 1:end], color=:green, alpha=0.3, label="Interface")
+
+        end
+
+        # Enregistrer l'animation
+        record(fig, "heat_DiphUnsteady.mp4", 1:length(states); framerate=10) do frame
+            update_plot(frame)
+        end
+
+        # Afficher la figure
+        display(fig)
+
+    end
+end
+
+
+function animate_solution(solver, mesh::Mesh{2}, body::Function)
+    # Déterminer le type de problème
+    is_monophasic = solver.phase_type == Monophasic # Problème monophasique
+
+    # Enregistrer l'animation selon le type de problème
+    if is_monophasic
+        # Récupérer les états
+        states = solver.states
+
+        # Créer une figure
+        fig = Figure()
+
+        # Créer un axe pour la figure
+        ax = Axis(fig[1, 1], title="Monophasic Unsteady", xlabel="x", ylabel="y", aspect=DataAspect())
+        
+
+        min_val = minimum([minimum(reshape(state[1:length(state) ÷ 2], (length(mesh.centers[1])+1, length(mesh.centers[2])+1))') for state in solver.states])
+        max_val = maximum([maximum(reshape(state[1:length(state) ÷ 2], (length(mesh.centers[1])+1, length(mesh.centers[2])+1))') for state in solver.states])
+
+        hm = heatmap!(ax, reshape(states[1][1:length(states[1]) ÷ 2], (length(mesh.centers[1])+1, length(mesh.centers[2])+1))', colormap=:viridis, colorrange=(min_val, max_val))
+        Colorbar(fig[1, 2], hm, label="Temperature")
+
+        update_hm(frame) = reshape(solver.states[frame][1:length(solver.states[frame]) ÷ 2], (length(mesh.centers[1])+1, length(mesh.centers[2])+1))'
+
+        record(fig, "heat_MonoUnsteady.mp4", 1:length(solver.states); framerate=10) do frame
+            hm[1] = update_hm(frame)
+        end
+
+        display(fig)
+    else
+        # Récupérer les états
+        states = solver.states
+
+        # Créer une figure
+        fig = Figure(size=(800, 400))
+
+        # Créer un axe pour la figure
+        ax1 = Axis3(fig[1, 1], title="Diphasic Unsteady - Phase 1 - Bulk", xlabel="x", ylabel="y", zlabel="Temperature")
+        s1 = surface!(ax1, reshape(states[1][1:length(states[1]) ÷ 4], (length(mesh.centers[1])+1, length(mesh.centers[2])+1))', colormap=:viridis)
+
+        ax2 = Axis3(fig[1, 2], title="Diphasic Unsteady - Phase 1 - Interface", xlabel="x", ylabel="y", zlabel="Temperature")
+        s2 = surface!(ax2, reshape(states[1][length(states[1]) ÷ 4 + 1:2*length(states[1]) ÷ 4], (length(mesh.centers[1])+1, length(mesh.centers[2])+1))', colormap=:viridis)
+
+        ax3 = Axis3(fig[2, 1], title="Diphasic Unsteady - Phase 2 - Bulk", xlabel="x", ylabel="y", zlabel="Temperature")
+        s3 = surface!(ax3, reshape(states[1][2*length(states[1]) ÷ 4 + 1:3*length(states[1]) ÷ 4], (length(mesh.centers[1])+1, length(mesh.centers[2])+1))', colormap=:viridis)
+
+        ax4 = Axis3(fig[2, 2], title="Diphasic Unsteady - Phase 2 - Interface", xlabel="x", ylabel="y", zlabel="Temperature")
+        s4 = surface!(ax4, reshape(states[1][3*length(states[1]) ÷ 4 + 1:end], (length(mesh.centers[1])+1, length(mesh.centers[2])+1))', colormap=:viridis)
+
+        zlims!(ax1, 0, 1)
+        zlims!(ax2, 0, 1)
+        zlims!(ax3, 0, 1)
+        zlims!(ax4, 0, 1)
+
+        function update_surfaces!(frame)
+            s1[:z] = reshape(solver.states[frame][1:length(solver.states[frame]) ÷ 4], (length(mesh.centers[1])+1, length(mesh.centers[2])+1))'
+            s2[:z] = reshape(solver.states[frame][length(solver.states[frame]) ÷ 4 + 1:2*length(solver.states[frame]) ÷ 4], (length(mesh.centers[1])+1, length(mesh.centers[2])+1))'
+            s3[:z] = reshape(solver.states[frame][2*length(solver.states[frame]) ÷ 4 + 1:3*length(solver.states[frame]) ÷ 4], (length(mesh.centers[1])+1, length(mesh.centers[2])+1))'
+            s4[:z] = reshape(solver.states[frame][3*length(solver.states[frame]) ÷ 4 + 1:end], (length(mesh.centers[1])+1, length(mesh.centers[2])+1))'
+            println("Frame $frame")
+        end
+
+        record(fig, "heat_DiphUnsteady.mp4", 1:length(solver.states); framerate=10) do frame
+            update_surfaces!(frame)
+        end
+
+        display(fig)
+    end
+end

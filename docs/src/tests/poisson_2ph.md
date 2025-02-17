@@ -1,4 +1,4 @@
-# Poisson 2D
+# Poisson 2D Diphasic
 
 This example demonstrates how to solve a 2D diffusion (Poisson) equation between two domains.
 
@@ -51,4 +51,4 @@ solver = DiffusionSteadyDiph(Fluide_1, Fluide_2, bc_b, ic)
 solve_DiffusionSteadyDiph!(solver; method=method=Base.:\)
 ```
 
-![](assests/poisson_2d_2phases/poisson_2d_2phases_plot.png)
+![](assests/poisson_2D_2ph/poisson_2d_2phases_plot.png)

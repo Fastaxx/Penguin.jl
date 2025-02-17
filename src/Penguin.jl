@@ -9,6 +9,9 @@ using IterativeSolvers
 using CairoMakie
 using WriteVTK
 using LsqFit
+using SpecialFunctions
+using Roots
+
 # Write your package code here.
 
 include("mesh.jl")
@@ -38,9 +41,10 @@ export BC_border_mono!, BC_border_diph!
 include("solver/diffusion.jl")
 export DiffusionSteadyMono, solve_DiffusionSteadyMono!
 export DiffusionSteadyDiph, solve_DiffusionSteadyDiph!
+export DiffusionUnsteadyMono, solve_DiffusionUnsteadyMono!
 
 include("vizualize.jl")
-export plot_solution
+export plot_solution, animate_solution
 
 include("convergence.jl")
 export check_convergence

@@ -10,13 +10,17 @@ ImplicitIntegration = "bc256489-3a69-4a66-afc4-127cc87e6182"
 IterativeSolvers = "42fd0dbc-a981-5370-80f2-aaf504508153"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 LsqFit = "2fda8390-95c7-5789-9bda-21331edee243"
+Roots = "f2b01f46-fcfa-551c-844a-d8ac1e96c665"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 WriteVTK = "64499a7a-5c06-52f2-abe2-ccb03c286192"
 
 [compat]
 CairoMakie = "0.13.1"
 LsqFit = "0.15.0"
+Roots = "2.2.5"
+SpecialFunctions = "2.5.0"
 WriteVTK = "1.21.1"
 julia = "1"
 

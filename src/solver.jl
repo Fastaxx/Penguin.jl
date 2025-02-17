@@ -88,9 +88,9 @@ function solve_system!(s::Solver; method::Function=gmres, kwargs...)
     # Choose between using a direct solver (\) or an iterative solver
     if method === Base.:\
         # Remove zero rows and columns for direct solver
-        s.A, s.b, rows_idx, cols_idx = remove_zero_rows_cols!(s.A, s.b)
+        A_reduced, b_reduced, rows_idx, cols_idx = remove_zero_rows_cols!(s.A, s.b)
         # Solve the reduced system
-        x_reduced = s.A \ s.b
+        x_reduced = A_reduced \ b_reduced
         # Reconstruct the full solution vector
         s.x = zeros(n)
         s.x[cols_idx] = x_reduced
@@ -161,35 +161,6 @@ function build_I_D(operator::AbstractOperators, D::Union{Float64,Function}, capa
         for i in 1:n
             x, y, z = get_coordinates(i, capacite.C_ω)
             Id[i, i] = D(x, y, z)
-        end
-    else
-        Id = D * Id
-    end
-    return Id
-end
-
-"""
-    build_I_D(operator::AbstractOperators, D::Union{Float64,Function}, capacite::Capacity, t::Float64)
-
-Build the diffusion matrix Id for the given operator and diffusion coefficient at time t.
-
-# Arguments
-- `operator::AbstractOperators`: The operators of the problem.
-- `D::Union{Float64,Function}`: The diffusion coefficient of the problem.
-- `capacite::Capacity`: The capacity of the problem.
-- `t::Float64`: The time at which to evaluate the diffusion coefficient.
-
-# Returns
-- `Id::SparseMatrixCSC{Float64, Int}`: The diffusion matrix Id.
-"""
-function build_I_D(operator::AbstractOperators, D::Union{Float64,Function}, capacite::Capacity, t::Float64)
-    n = prod(operator.size)
-    Id = spdiagm(0 => ones(n))
-
-    if D isa Function
-        for i in 1:n
-            x, y, z = get_coordinates(i, capacite.C_ω)
-            Id[i, i] = D(x, y, z, t)
         end
     else
         Id = D * Id
