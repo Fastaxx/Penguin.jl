@@ -32,6 +32,10 @@ export AbstractInterfaceBC, ScalarJump, FluxJump, BorderConditions, InterfaceCon
 include("phase.jl")
 export Phase
 
+include("utils.jl")
+export initialize_temperature_uniform!, initialize_temperature_square!, initialize_temperature_circle!, initialize_temperature_function!
+export initialize_rotating_velocity_field, initialize_radial_velocity_field, initialize_poiseuille_velocity_field
+
 include("solver.jl")
 export TimeType, PhaseType, EquationType
 export Solver, solve_system!
@@ -43,6 +47,10 @@ export DiffusionSteadyMono, solve_DiffusionSteadyMono!
 export DiffusionSteadyDiph, solve_DiffusionSteadyDiph!
 export DiffusionUnsteadyMono, solve_DiffusionUnsteadyMono!
 export DiffusionUnsteadyDiph, solve_DiffusionUnsteadyDiph!
+
+include("solver/advectiondiffusion.jl")
+export AdvectionDiffusionSteadyMono, solve_AdvectionDiffusionSteadyMono!
+export AdvectionDiffusionSteadyDiph, solve_AdvectionDiffusionSteadyDiph!
 
 include("vizualize.jl")
 export plot_solution, animate_solution

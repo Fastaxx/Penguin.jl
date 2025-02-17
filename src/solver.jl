@@ -427,6 +427,17 @@ function cell_to_index(mesh::Mesh{3}, cell::CartesianIndex)
     return LinearIndices((length(mesh.centers[1])+1, length(mesh.centers[2])+1, length(mesh.centers[3])+1))[cell]
 end
 
+"""
+    BC_border_diph!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Float64}, bc_b::BorderConditions, mesh::AbstractMesh)
+
+Apply the border conditions to the coefficient matrix `A` and the right-hand side vector `b`.
+
+# Arguments
+- `A::SparseMatrixCSC{Float64, Int}`: The coefficient matrix A of the equation system.
+- `b::Vector{Float64}`: The right-hand side vector b of the equation system.
+- `bc_b::BorderConditions`: The border conditions of the problem.
+- `mesh::AbstractMesh`: The mesh of the problem.
+"""
 function BC_border_diph!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Float64}, bc_b::BorderConditions, mesh::AbstractMesh)
     # Collect boundary cells by side
     left_cells = Vector{CartesianIndex}()

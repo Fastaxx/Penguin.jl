@@ -1,3 +1,0 @@
-ignore:
-  - "src/vizualize.jl"
-  - "src/vtk.jl"
