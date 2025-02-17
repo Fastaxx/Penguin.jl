@@ -239,7 +239,7 @@ function plot_solution(solver, mesh::Mesh{2}, body::Function, capacity::Capacity
 end
 
 
-function plot_solution(solver, mesh::AbstractMesh{3}, body::Function, capacity::Capacity; state_i=1)
+function plot_solution(solver, mesh::Mesh{3}, body::Function, capacity::Capacity; state_i=1)
     #Z_sdf = [body.sdf(xi, yi, zi) for zi in mesh.nodes[3], yi in mesh.nodes[2], xi in mesh.nodes[1]]
 
     is_steady = solver.time_type == Steady

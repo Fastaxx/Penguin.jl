@@ -8,6 +8,7 @@ using LinearAlgebra
 using IterativeSolvers
 using CairoMakie
 using WriteVTK
+using LsqFit
 # Write your package code here.
 
 include("mesh.jl")

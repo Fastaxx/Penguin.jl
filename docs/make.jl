@@ -13,4 +13,10 @@ makedocs(sitename="Penguin.jl", remotes=nothing, modules = [Penguin],
                 "blocks/solver.md",
                 "blocks/vizualize.md",
             ],
+            "Examples" => [
+                "tests/poisson.md",
+            ],
+            "Benchmark" => [
+                "benchmark/poisson.md",
+            ],
         ])
