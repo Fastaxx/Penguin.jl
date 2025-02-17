@@ -5,10 +5,11 @@ The `Phase` struct in Penguin.jl represents a phase for numerical modeling. It t
 ```julia
 using Penguin
 
-# 1) Define a mesh
-x = range(-1.0, stop=1.0, length=50)
-y = range(-1.0, stop=1.0, length=50)
-mesh = Mesh((x, y))
+# 1) Define the mesh
+nx, ny = 5, 5
+lx, ly = 4., 4.
+x0, y0 = 0., 0.
+mesh = Mesh((nx, ny), (lx, ly), (x0, y0))
 
 # 2) Define the body via signed distance function
 LS(x, y, _=0) = sqrt(x^2 + y^2) - 0.5

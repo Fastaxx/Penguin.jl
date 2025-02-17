@@ -11,10 +11,10 @@ Penguin.jl provides various operators for discretizing and solving PDE-like prob
 ```julia
 using Penguin
 
-nx, ny = 49, 49
-x = range(-1.0, stop=1.0, length=nx+1)
-y = range(-1.0, stop=1.0, length=ny+1)
-mesh = Mesh((x, y))
+nx, ny = 50, 50
+lx, ly = 4., 4.
+x0, y0 = 0., 0.
+mesh = Mesh((nx, ny), (lx, ly), (x0, y0))
 
 Φ(X) = sqrt(X[1]^2 + X[2]^2) - 0.5
 LS(x, y, _=0) = sqrt(x^2 + y^2) - 0.5
@@ -43,13 +43,14 @@ div = ∇₋(operators, ones(2*nx*ny), ones(2*nx*ny))
 ```julia
 using Penguin
 
-x = range(-1.0, stop=1.0, length=50)
-mesh = Mesh((x,))
+nx = 160
+lx = 4.
+x0 = 0.
+mesh = Mesh((nx,), (lx,), (x0,))
 Φ(X) = sqrt(X[1]^2) - 0.5
 LS(x, _=0) = sqrt(x^2) - 0.5
 
 capacity = Capacity(LS, mesh, method="VOFI")
-nx = length(mesh.nodes[1])
 
 # Bulk velocity and interface velocity
 uₒ = (ones(nx),)

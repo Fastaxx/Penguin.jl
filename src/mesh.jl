@@ -8,7 +8,7 @@ abstract type AbstractMesh end
     Mesh{N}(nodes::NTuple{N, AbstractVector{<:Real}})
 
 Construct a Mesh from a given tuple of node coordinates. For each dimension, this mesh 
-is defined by its cell centers, boundaries, and the resulting cell sizes. 
+is defined by its cell centers, boundaries, and border cells.
 
 # Arguments
 - `nodes`: A tuple of coordinate vectors, where each vector represents 
@@ -18,8 +18,6 @@ is defined by its cell centers, boundaries, and the resulting cell sizes.
 - `nodes::NTuple{N, Vector{Float64}}`: Computed positions of cell boundaries.
 - `centers::NTuple{N, Vector{Float64}}`: Positions of the cell centers 
   (same as provided node coordinates).
-- `sizes::NTuple{N, Vector{Float64}}`: Dimensions of each cell, with half-size 
-  adjustments for the first and last cells in each dimension.
 
 # Example
 # Mesh struct 
@@ -29,17 +27,13 @@ is defined by its cell centers, boundaries, and the resulting cell sizes.
 mutable struct Mesh{N} <: AbstractMesh
     nodes::NTuple{N, Vector{Float64}}
     centers::NTuple{N, Vector{Float64}}
-    sizes::NTuple{N, Vector{Float64}}
     tag::MeshTag
 
-    function Mesh(centers::NTuple{N, AbstractVector{<:Real}}) where N
-        centers = ntuple(i -> collect(Float64.(centers[i])), N)
-        nodes = ntuple(i -> (centers[i][1:end-1] .+ centers[i][2:end]) ./ 2.0, N)
-        # Compute the sizes of the cells : The first and last cells have a size that is half of the others
-        sizes = ntuple(i -> diff(nodes[i]), N)
-        sizes = ntuple(i -> [sizes[i][1] / 2; sizes[i][1:end]; sizes[i][end] / 2], N)
-        
-        temp_mesh = new{N}(nodes, centers, sizes, MeshTag{N}([]))
+    function Mesh(n::NTuple{N, Int}, domain_size::NTuple{N, Float64}, x0::NTuple{N, Float64}=ntuple(_ -> 0.0, N)) where N
+        h_uniform = ntuple(i -> fill(domain_size[i] / n[i], n[i]), N)
+        centers_uniform = ntuple(i -> [x0[i] + j * (domain_size[i] / n[i]) for j in 0:n[i]-1], N)
+        nodes_uniform  = ntuple(i -> [x0[i] + (j + 0.5) * (domain_size[i] / n[i]) for j in 0:(n[i])], N) 
+        temp_mesh = new{N}(nodes_uniform, centers_uniform, MeshTag{N}([]))
 
         # Get the border cells
         bc = get_border_cells(temp_mesh)

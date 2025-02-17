@@ -3,14 +3,15 @@ using Test
 using SparseArrays
 
 @testset "Solver test" begin
-    x = range(-1.0, stop=1.0, length=20)
-    y = range(-1.0, stop=1.0, length=20)
-    mesh = Mesh((x, y))
+    nx, ny = 20, 20
+    lx, ly = 2.0, 2.0
+    x0, y0 = 0.0, 0.0
+    mesh = Mesh((nx, ny), (lx, ly), (x0, y0))
     Φ(X) = sqrt(X[1]^2 + X[2]^2) - 0.5
-    LS(x,y,_=0) = -(sqrt(x^2 + y^2) - 0.25)
+    LS(x,y,_=0) = (sqrt((x-0.5)^2 + (y-0.5)^2) - 0.5)
     capacity = Capacity(LS, mesh, method="VOFI")
     operator = DiffusionOps(capacity)
-    bc = Dirichlet(0.0)
+    bc = Dirichlet(1.0)
     bc1 = Dirichlet(1.0)
     bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:left => bc1, :right => bc1, :top => bc1, :bottom => bc1))
     f(x,y,_=0) = 0.0

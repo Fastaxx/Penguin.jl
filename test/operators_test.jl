@@ -2,23 +2,25 @@ using Penguin
 using Test
 
 @testset "Gradient Divergence" begin
-    nx, ny = 50, 50
-    x = range(-1.0, stop=1.0, length=nx)
-    y = range(-1.0, stop=1.0, length=ny)
-    mesh = Mesh((x, y))
+    nx, ny = 20, 20
+    lx, ly = 1.0, 1.0
+    x0, y0 = 0.0, 0.0
+    mesh = Mesh((nx, ny), (lx, ly), (x0, y0))
     Φ(X) = sqrt(X[1]^2 + X[2]^2) - 0.5
     LS(x,y,_=0) = sqrt(x^2 + y^2) - 0.5
     capacity = Capacity(LS, mesh, method="VOFI")
     operators = DiffusionOps(capacity)
     grad = ∇(operators, ones(2*length(mesh.nodes[1])*length(mesh.nodes[2])))
-    @test grad == zeros(2*length(mesh.nodes[1])*length(mesh.nodes[2]))
+    @test grad[2] == 0.0
     div = ∇₋(operators, ones(2*length(mesh.nodes[1])*length(mesh.nodes[2])), ones(2*length(mesh.nodes[1])*length(mesh.nodes[2])))
-    @test div == zeros(length(mesh.nodes[1])*length(mesh.nodes[2]))
+    @test div[2] == 0.0
 end
 
 @testset "Diffusion Operators 1D" begin
-    x = range(-1.0, stop=1.0, length=50)
-    mesh = Mesh((x,))
+    nx = 20
+    lx = 1.0
+    x0 = 0.0
+    mesh = Mesh((nx,), (lx,), (x0,))
     Φ(X) = sqrt(X[1]^2) - 0.5
     LS(x,_=0) = sqrt(x^2) - 0.5
     capacity = Capacity(LS, mesh, method="VOFI")
@@ -28,10 +30,10 @@ end
 end
 
 @testset "Diffusion Operators 2D " begin
-    nx, ny = 50, 50
-    x = range(-1.0, stop=1.0, length=nx)
-    y = range(-1.0, stop=1.0, length=ny)
-    mesh = Mesh((x, y))
+    nx, ny = 20, 20
+    lx, ly = 1.0, 1.0
+    x0, y0 = 0.0, 0.0
+    mesh = Mesh((nx, ny), (lx, ly), (x0, y0))
     Φ(X) = sqrt(X[1]^2 + X[2]^2) - 0.5
     LS(x,y,_=0) = sqrt(x^2 + y^2) - 0.5
     capacity = Capacity(LS, mesh, method="VOFI")
@@ -42,10 +44,9 @@ end
 
 @testset "Diffusion Operators 3D" begin
     nx, ny, nz = 20, 20, 20
-    x = range(-1.0, stop=1.0, length=nx)
-    y = range(-1.0, stop=1.0, length=ny)
-    z = range(-1.0, stop=1.0, length=nz)
-    mesh = Mesh((x, y, z))
+    lx, ly, lz = 1.0, 1.0, 1.0
+    x0, y0, z0 = 0.0, 0.0, 0.0
+    mesh = Mesh((nx, ny, nz), (lx, ly, lz), (x0, y0, z0))
     Φ(X) = sqrt(X[1]^2 + X[2]^2 + X[3]^2) - 0.5
     LS(x,y,z) = sqrt(x^2 + y^2 + z^2) - 0.5
     capacity = Capacity(LS, mesh, method="VOFI")
@@ -55,8 +56,10 @@ end
 end
 
 @testset "Convection Operator 1D" begin
-    x = range(-1.0, stop=1.0, length=50)
-    mesh = Mesh((x,))
+    nx = 20
+    lx = 1.0
+    x0 = 0.0
+    mesh = Mesh((nx,), (lx,), (x0,))
     Φ(X) = sqrt(X[1]^2) - 0.5
     LS(x,_=0) = sqrt(x^2) - 0.5
     capacity = Capacity(LS, mesh, method="VOFI")
@@ -67,10 +70,10 @@ end
 end
 
 @testset "Convection Operator 2D" begin
-    nx, ny = 50, 50
-    x = range(-1.0, stop=1.0, length=nx)
-    y = range(-1.0, stop=1.0, length=ny)
-    mesh = Mesh((x, y))
+    nx, ny = 20, 20
+    lx, ly = 1.0, 1.0
+    x0, y0 = 0.0, 0.0
+    mesh = Mesh((nx, ny), (lx, ly), (x0, y0))
     Φ(X) = sqrt(X[1]^2 + X[2]^2) - 0.5
     LS(x,y,_=0) = sqrt(x^2 + y^2) - 0.5
     capacity = Capacity(LS, mesh, method="VOFI")

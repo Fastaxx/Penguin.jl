@@ -3,9 +3,10 @@ using Penguin
 # Poisson equation inside a disk
 
 # Define the mesh
-x = range(-1.0, stop=1.0, length=50)
-y = range(-1.0, stop=1.0, length=50)
-mesh = Mesh((x, y))
+nx, ny = 5, 5
+lx, ly = 4., 4.
+x0, y0 = 0., 0.
+mesh = Mesh((nx, ny), (lx, ly), (x0, y0))
 
 # Define the body with a signed distance function
 # Two ways to define the same function (vectorized or not) and convert one to the other

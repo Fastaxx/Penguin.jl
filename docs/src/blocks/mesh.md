@@ -1,65 +1,57 @@
-# Mesh Usage Guide
+# Mesh Usage
 
-This page describes how to create and work with a `Mesh` in the **Penguin.jl** package.  
-A `Mesh` represents a discretized domain in one or multiple dimensions.
+This page explains how to construct a `Mesh` in **Penguin.jl** when you specify the number of cells along each dimension, the overall domain lengths, and the origin coordinates. This form of initialization automatically computes the cell centers, nodes.
 
-## Overview
+## Defining a Mesh with Counts and Domain Dimensions
 
-A `Mesh` is constructed from one or more coordinate vectors. Each vector defines cell centers along a specific dimension. The constructor calculates:
-
-1. **nodes** - The boundary positions of each cell.  
-2. **centers** - The coordinate vectors you provided.  
-3. **sizes** - Each cell’s size, adjusted for the first and last cells.
-4. **tag** - A [`MeshTag`] that contains metadata (e.g., border cells).
-
-## Creating a 1D Mesh
+Consider a 2D mesh defined as follows:
 
 ```julia
 using Penguin
 
-x = range(0.0, stop=1.0, length=5)
-mesh1D = Mesh((x,))
+# Define the mesh parameters
+nx, ny = 5, 5         # Number of cells in x and y directions
+lx, ly = 4.0, 4.0     # Total domain lengths in x and y
+x0, y0 = 0.0, 0.0     # Origin (starting coordinates)
 
-println(mesh1D.centers) # ([0.0, 0.25, 0.5, 0.75, 1.0],)
-println(mesh1D.sizes)   # ([0.125, 0.25, 0.25, 0.25, 0.125],)
-println(nC(mesh1D))     # 5 total cells
-println(mesh1D.tag.border_cells)
+# Create the mesh
+mesh = Mesh((nx, ny), (lx, ly), (x0, y0))
 ```
 
-- **centers**: Cell center positions.  
-- **sizes**: Cell sizes, with half-sizes at the extremes.  
-- **nC(mesh)**: Total number of cells.
-- **tag.border_cells**:Each border cell is stored as `(CartesianIndex(...), (coords...))`.
+In this setup:
+- **nx, ny**: Specify the resolution (number of cells) along each axis.
+- **lx, ly**: Define the overall lengths of the domain in the x and y directions.
+- **x0, y0**: Set the starting coordinate for the mesh, which is useful for offsetting the grid.
 
-## Creating a 2D Mesh
+## How It Works
+
+Using this constructor, `Penguin.jl` automatically performs the following:
+1. **Nodes**: Computes the boundaries of each cell.
+2. **Centers**: Determines the position of each cell center.
+3. **Tagging**: Adds metadata (such as border cell indices) to help identify cells at the domain boundaries.
+
+## Viewing Mesh Properties
+
+After creating your mesh, you can explore its properties:
 
 ```julia
-using Penguin
-
-x = range(0.0, stop=1.0, length=5)
-y = range(0.0, stop=1.0, length=5)
-mesh2D = Mesh((x, y))
-
-println(mesh2D.centers) # ([0.0, 0.25, 0.5, 0.75, 1.0], [0.0, 0.25, 0.5, 0.75, 1.0])
-println(nC(mesh2D))     # 25 total cells
+# Print the computed centers and number of cells
+println("Cell centers: ", mesh.centers)
+println("Total number of cells: ", nC(mesh))
 ```
 
-## Border Cells
-
-Cells on the boundary can be identified with `get_border_cells`. A cell is at the border if its index is 1 or the last index along any dimension.
+You can also retrieve border cells, which are defined as those at the edges of the domain:
 
 ```julia
-borders2D = get_border_cells(mesh2D)
-println(length(borders2D)) # Number of border cells (16 for this 5x5 grid)
-```
-
-Each returned element is a tuple containing a `CartesianIndex` and the cell’s center coordinate:
-```julia
-(CartesianIndex((1, 1)), (0.0, 0.0))
+borders = get_border_cells(mesh)
+println("Number of border cells: ", length(borders))
 ```
 
 ## Summary
 
-1. Construct a `Mesh` by passing coordinate vectors for each dimension.  
-2. Use `nC(mesh)` to get the total number of cells.  
-3. Use `get_border_cells(mesh)` to find which cells are located on the boundary.  
+By defining a mesh with cell counts and domain dimensions as shown:
+- You easily construct and configure the grid.
+- The `Mesh` constructor automatically generates necessary geometric data.
+- You’re equipped to further use the mesh in simulations or data analysis.
+
+This approach is especially useful when you want a quick setup using a uniform grid without manually precomputing coordinate vectors.  
