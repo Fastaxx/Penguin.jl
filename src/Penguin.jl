@@ -7,6 +7,7 @@ using ImplicitIntegration
 using LinearAlgebra
 using IterativeSolvers
 using CairoMakie
+using WriteVTK
 # Write your package code here.
 
 include("mesh.jl")
@@ -41,4 +42,7 @@ export plot_solution
 
 include("convergence.jl")
 export check_convergence
+
+include("vtk.jl")
+export write_vtk
 end
