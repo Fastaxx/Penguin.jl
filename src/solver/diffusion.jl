@@ -283,13 +283,10 @@ function solve_DiffusionUnsteadyMono!(s::Solver, phase::Phase, Δt::Float64, T�
     while t < Tₑ
         t += Δt
         println("Time: ", t)
-        if scheme == "CN"
-            s.A = A_mono_unstead_diff(phase.operator, phase.capacity, phase.Diffusion_coeff, bc, Δt, "CN")
-            s.b = b_mono_unstead_diff(phase.operator, phase.source, phase.Diffusion_coeff, phase.capacity, bc, Tᵢ, Δt, t, "CN")
-        else
-            s.A = A_mono_unstead_diff(phase.operator, phase.capacity, phase.Diffusion_coeff, bc, Δt, "BE")
-            s.b = b_mono_unstead_diff(phase.operator, phase.source, phase.Diffusion_coeff, phase.capacity, bc, Tᵢ, Δt, t, "BE")
-        end
+
+        s.A = A_mono_unstead_diff(phase.operator, phase.capacity, phase.Diffusion_coeff, bc, Δt, scheme)
+        s.b = b_mono_unstead_diff(phase.operator, phase.source, phase.Diffusion_coeff, phase.capacity, bc, Tᵢ, Δt, t, scheme)
+
         BC_border_mono!(s.A, s.b, bc_b, phase.capacity.mesh)
         
         solve_system!(s; method, kwargs...)
@@ -443,13 +440,10 @@ function solve_DiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phase2::Phase, �
     while t < Tₑ
         t += Δt
         println("Time: ", t)
-        if scheme == "CN"
-            s.A = A_diph_unstead_diff(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Δt, "CN")
-            s.b = b_diph_unstead_diff(phase1.operator, phase2.operator, phase1.source, phase2.source, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Tᵢ, Δt, t, "CN")
-        else
-            s.A = A_diph_unstead_diff(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Δt, "BE")
-            s.b = b_diph_unstead_diff(phase1.operator, phase2.operator, phase1.source, phase2.source, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Tᵢ, Δt, t, "BE")
-        end
+
+        s.A = A_diph_unstead_diff(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Δt, scheme)
+        s.b = b_diph_unstead_diff(phase1.operator, phase2.operator, phase1.source, phase2.source, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Tᵢ, Δt, t, scheme)
+
         BC_border_diph!(s.A, s.b, bc_b, phase2.capacity.mesh)
         
         solve_system!(s; method, kwargs...)

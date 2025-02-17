@@ -51,6 +51,8 @@ export DiffusionUnsteadyDiph, solve_DiffusionUnsteadyDiph!
 include("solver/advectiondiffusion.jl")
 export AdvectionDiffusionSteadyMono, solve_AdvectionDiffusionSteadyMono!
 export AdvectionDiffusionSteadyDiph, solve_AdvectionDiffusionSteadyDiph!
+export AdvectionDiffusionUnsteadyMono, solve_AdvectionDiffusionUnsteadyMono!
+export AdvectionDiffusionUnsteadyDiph, solve_AdvectionDiffusionUnsteadyDiph!
 
 include("vizualize.jl")
 export plot_solution, animate_solution
