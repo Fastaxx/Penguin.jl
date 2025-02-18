@@ -252,9 +252,9 @@ function plot_solution(solver, mesh::Mesh{3}, body::Function, capacity::Capacity
             ax = LScene(fig[1, 1], show_axis=false)
 
             nx, ny, nz = length(mesh.centers[1]), length(mesh.centers[2]), length(mesh.centers[3])
-            x = LinRange(mesh.x0[1], mesh.x0[1]+mesh.h[1][1]*nx, nx+1)
-            y = LinRange(mesh.x0[2], mesh.x0[2]+mesh.h[2][1]*ny, ny+1)
-            z = LinRange(mesh.x0[3], mesh.x0[3]+mesh.h[3][1]*nz, nz+1)
+            x = mesh.centers[1]
+            y = mesh.centers[2]
+            z = mesh.centers[3]
 
             sgrid = SliderGrid(
                 fig[2, 1],
