@@ -19,7 +19,7 @@ body_c = (x,t, _=0)->-(x - xf - c*sqrt(t))
 
 # Define the Space-Time mesh
 Δt = 0.01
-Tend = 0.1
+Tend = 1.0
 STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt], tag=mesh.tag)
 
 # Define the capacity
@@ -66,7 +66,7 @@ solve_MovingDiffusionUnsteadyDiph!(solver, Fluide1, Fluide2, body, body_c, Δt, 
 #plot_solution(solver, mesh, body, capacity; state_i=10)
 
 # Animation
-#animate_solution(solver, mesh, body)
+animate_solution(solver, mesh, body)
 
 state_i = 10
 u1ₒ = solver.states[state_i][1:nx+1]

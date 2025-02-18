@@ -511,8 +511,6 @@ function animate_solution(solver, mesh::Mesh{1}, body::Function)
         ax1 = Axis(fig[1, 1], title="Diphasic Unsteady - Phase 1", xlabel="x", ylabel="u1")
         ax2 = Axis(fig[2, 1], title="Diphasic Unsteady - Phase 2", xlabel="x", ylabel="u2")
 
-        ylims!(ax1, (minimum([minimum(state[1:length(state) ÷ 2]) for state in states]), maximum([maximum(state[1:length(state) ÷ 2]) for state in states])))
-        ylims!(ax2, (minimum([minimum(state[length(state) ÷ 2 + 1:end]) for state in states]), maximum([maximum(state[length(state) ÷ 2 + 1:end]) for state in states])))
         # Créer une fonction pour mettre à jour la figure
         function update_plot(frame)
             # Récupérer l'état
