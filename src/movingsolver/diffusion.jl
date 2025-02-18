@@ -23,7 +23,7 @@ function MovingDiffusionUnsteadyMono(phase::Phase, bc_b::BorderConditions, bc_i:
     
     if scheme == "CN"
         s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, "CN")
-        s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source,  bc_i, Tᵢ, Δt, 0.0, "CN")
+        s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc_i, Tᵢ, Δt, 0.0, "CN")
     else # BE
         s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, "BE")
         s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc_i, Tᵢ, Δt, 0.0, "BE")
@@ -256,4 +256,284 @@ function solve_MovingDiffusionUnsteadyMono!(s::Solver, phase::Phase, body::Funct
         Tᵢ = s.x
     end
 
+end
+
+
+# Moving - Diffusion - Unsteady - Diphasic
+function MovingDiffusionUnsteadyDiph(phase1::Phase, phase2::Phase, bc_b::BorderConditions, ic::InterfaceConditions, Δt::Float64, Tᵢ::Vector{Float64}, mesh::AbstractMesh, scheme::String)
+    println("Solver Creation:")
+    println("- Moving problem")
+    println("- Diphasic problem")
+    println("- Unsteady problem")
+    println("- Diffusion problem")
+    
+    s = Solver(Unsteady, Diphasic, Diffusion, nothing, nothing, nothing, ConvergenceHistory(), [])
+    
+    if scheme == "CN"
+        s.A = A_diph_unstead_diff_moving(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, "CN")
+        s.b = b_diph_unstead_diff_moving(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, phase1.source, phase2.source, ic, Tᵢ, Δt, 0.0, "CN")
+    else 
+        s.A = A_diph_unstead_diff_moving(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, "BE")
+        s.b = b_diph_unstead_diff_moving(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, phase1.source, phase2.source, ic, Tᵢ, Δt, 0.0, "BE")
+    end
+    BC_border_diph!(s.A, s.b, bc_b, mesh)
+    return s
+end
+
+function A_diph_unstead_diff_moving(operator1::DiffusionOps, operator2::DiffusionOps, capacite1::Capacity, capacite2::Capacity, D1, D2, ic::InterfaceConditions, scheme::String)
+    # Determine dimensionality from operator1
+    dims1 = operator1.size
+    len_dims1 = length(dims1)
+
+    # For both phases, define n1 and n2 as total dof
+    n1 = prod(dims1)
+    n2 = prod(operator2.size)
+
+    # If 1D => n = nx; if 2D => n = nx*ny
+    # (We use the same dimension logic for each operator.)
+    if len_dims1 == 2
+        # 1D problem
+        nx1, _ = dims1
+        nx2, _ = operator2.size
+        n = nx1  # used for sub-block sizing
+    elseif len_dims1 == 3
+        # 2D problem
+        nx1, ny1, _ = dims1
+        nx2, ny2, _ = operator2.size
+        n = nx1 * ny1
+    else
+        error("Only 1D or 2D supported, got dimension: $len_dims1")
+    end
+
+    # Retrieve jump & flux from the interface conditions
+    jump, flux = ic.scalar, ic.flux
+
+    Iₐ1, Iₐ2 = jump.α₁ * I(n), jump.α₂ * I(n)
+    Iᵦ1, Iᵦ2 = flux.β₁ * I(n), flux.β₂ * I(n)
+
+    # Build diffusion operators
+    Id1 = capacite1.Γ
+    Id2 = capacite2.Γ
+
+    # Capacity indexing (2 for 1D, 3 for 2D)
+    cap_index1 = len_dims1
+    cap_index2 = length(operator2.size)
+
+    # Extract Vr−1 and Vr
+    Vn1_1 = capacite1.A[cap_index1][1:end÷2, 1:end÷2]
+    Vn1   = capacite1.A[cap_index1][end÷2+1:end, end÷2+1:end]
+    Vn2_1 = capacite2.A[cap_index2][1:end÷2, 1:end÷2]
+    Vn2   = capacite2.A[cap_index2][end÷2+1:end, end÷2+1:end]
+
+    # Time integration weighting
+    if scheme == "CN"
+        psip, psim = psip_cn, psim_cn
+    else
+        psip, psim = psip_be, psim_be
+    end
+
+    Ψn1 = Diagonal(psip.(Vn1, Vn1_1))
+    Ψn2 = Diagonal(psip.(Vn2, Vn2_1))
+
+    # Operator sub-blocks for each phase
+    W!1 = operator1.Wꜝ[1:n, 1:n]
+    G1  = operator1.G[1:n, 1:n]
+    H1  = operator1.H[1:n, 1:n]
+
+    W!2 = operator2.Wꜝ[1:n, 1:n]
+    G2  = operator2.G[1:n, 1:n]
+    H2  = operator2.H[1:n, 1:n]
+
+    Iᵦ1 = Iᵦ1[1:n, 1:n]
+    Iᵦ2 = Iᵦ2[1:n, 1:n]
+    Iₐ1 = Iₐ1[1:n, 1:n]
+    Iₐ2 = Iₐ2[1:n, 1:n]
+    Id1  = Id1[1:n, 1:n]
+    Id2  = Id2[1:n, 1:n]
+
+    # Construct blocks
+    block1 = Vn1_1 + Id1 * G1' * W!1 * G1 * Ψn1
+    block2 = -(Vn1_1 - Vn1) + Id1 * G1' * W!1 * H1 * Ψn1
+    block3 = Vn2_1 + Id2 * G2' * W!2 * G2 * Ψn2
+    block4 = -(Vn2_1 - Vn2) + Id2 * G2' * W!2 * H2 * Ψn2
+
+    block5 = Iᵦ1 * H1' * W!1 * G1 * Ψn1
+    block6 = Iᵦ1 * H1' * W!1 * H1 * Ψn1
+    block7 = Iᵦ2 * H2' * W!2 * G2 * Ψn2
+    block8 = Iᵦ2 * H2' * W!2 * H2 * Ψn2
+
+    # Build the 4n×4n matrix
+    A = spzeros(Float64, 4n, 4n)
+
+    # Assign sub-blocks
+    A[1:n, 1:n]         = block1
+    A[1:n, n+1:2n]      = block2
+    A[1:n, 2n+1:3n]     = spzeros(n, n)
+    A[1:n, 3n+1:4n]     = spzeros(n, n)
+
+    A[n+1:2n, 1:n]      = spzeros(n, n)
+    A[n+1:2n, n+1:2n]   = Iₐ1
+    A[n+1:2n, 2n+1:3n]  = spzeros(n, n)
+    A[n+1:2n, 3n+1:4n]  = -Iₐ2
+
+    A[2n+1:3n, 1:n]     = spzeros(n, n)
+    A[2n+1:3n, n+1:2n]  = spzeros(n, n)
+    A[2n+1:3n, 2n+1:3n] = block3
+    A[2n+1:3n, 3n+1:4n] = block4
+
+    A[3n+1:4n, 1:n]     = block5
+    A[3n+1:4n, n+1:2n]  = block6
+    A[3n+1:4n, 2n+1:3n] = block7
+    A[3n+1:4n, 3n+1:4n] = block8
+
+    return A
+end
+
+function b_diph_unstead_diff_moving(operator1::DiffusionOps, operator2::DiffusionOps, capacity1::Capacity, capacity2::Capacity, D1, D2, f1::Function, f2::Function, ic::InterfaceConditions, Tᵢ::Vector{Float64}, Δt::Float64, t::Float64, scheme::String)
+    # 1) Determine total degrees of freedom for each operator
+    dims1 = operator1.size
+    dims2 = operator2.size
+    len_dims1 = length(dims1)
+    len_dims2 = length(dims2)
+
+    n1 = prod(dims1)  # total cells in phase 1
+    n2 = prod(dims2)  # total cells in phase 2
+
+    # 2) Identify which capacity index to read (2 for 1D, 3 for 2D)
+    cap_index1 = len_dims1
+    cap_index2 = len_dims2
+
+    # 3) Build the source terms
+    f1ₒn  = build_source(operator1, f1, t,      capacity1)
+    f1ₒn1 = build_source(operator1, f1, t+Δt,  capacity1)
+    f2ₒn  = build_source(operator2, f2, t,      capacity2)
+    f2ₒn1 = build_source(operator2, f2, t+Δt,  capacity2)
+
+    # 4) Build interface data
+    jump, flux = ic.scalar, ic.flux
+    Iᵧ1, Iᵧ2   = capacity1.Γ, capacity2.Γ
+    gᵧ  = build_g_g(operator1, jump, capacity1)
+    hᵧ  = build_g_g(operator2, flux, capacity2)
+    Id1, Id2 = build_I_D(operator1, D1, capacity1), build_I_D(operator2, D2, capacity2)
+
+    # 5) Extract Vr (current) & Vr−1 (previous) from each capacity
+    Vn1_1 = capacity1.A[cap_index1][1:end÷2, 1:end÷2]
+    Vn1   = capacity1.A[cap_index1][end÷2+1:end, end÷2+1:end]
+    Vn2_1 = capacity2.A[cap_index2][1:end÷2, 1:end÷2]
+    Vn2   = capacity2.A[cap_index2][end÷2+1:end, end÷2+1:end]
+
+    # 6) Time-integration weighting
+    if scheme == "CN"
+        psip, psim = psip_cn, psim_cn
+    else
+        psip, psim = psip_be, psim_be
+    end
+    Ψn1 = Diagonal(psim.(Vn1, Vn1_1))
+    Ψn2 = Diagonal(psim.(Vn2, Vn2_1))
+
+    # 7) Determine whether 1D or 2D from dims1, and form local n for sub-blocks
+    if len_dims1 == 2
+        # 1D
+        nx1, _ = dims1
+        nx2, _ = dims2
+        n1 = nx1
+        n2 = nx2
+    else
+        # 2D
+        nx1, ny1, _ = dims1
+        nx2, ny2, _ = dims2
+        n1   = nx1 * ny1   # local block size for each operator
+        n2   = nx2 * ny2
+    end
+
+    # 8) Build the bulk terms for each phase
+    Tₒ1 = Tᵢ[1:n1]
+    Tᵧ1 = Tᵢ[n1+1:2n1]
+
+    Tₒ2 = Tᵢ[2n1 + 1 : 2n1 + n2]
+    Tᵧ2 = Tᵢ[2n1 + n2 + 1 : end]
+
+    f1ₒn  = f1ₒn[1:n1]
+    f1ₒn1 = f1ₒn1[1:n1]
+    f2ₒn  = f2ₒn[1:n2]
+    f2ₒn1 = f2ₒn1[1:n2]
+
+    gᵧ = gᵧ[1:n1]
+    hᵧ = hᵧ[1:n2]
+    Iᵧ1 = Iᵧ1[1:n1, 1:n1]
+    Iᵧ2 = Iᵧ2[1:n2, 1:n2]
+    Id1 = Id1[1:n1, 1:n1]
+    Id2 = Id2[1:n2, 1:n2]
+
+    W!1 = operator1.Wꜝ[1:n1, 1:n1]
+    G1  = operator1.G[1:n1, 1:n1]
+    H1  = operator1.H[1:n1, 1:n1]
+    V1  = operator1.V[1:n1, 1:n1]
+
+    W!2 = operator2.Wꜝ[1:n2, 1:n2]
+    G2  = operator2.G[1:n2, 1:n2]
+    H2  = operator2.H[1:n2, 1:n2]
+    V2  = operator2.V[1:n2, 1:n2]
+
+    # 9) Build the right-hand side
+    if scheme == "CN"
+        b1 = (Vn1 - Id1 * G1' * W!1 * G1 * Ψn1) * Tₒ1 - 0.5 * Id1 * G1' * W!1 * H1 * Tᵧ1 + 0.5 * V1 * (f1ₒn + f1ₒn1)
+        b3 = (Vn2 - Id2 * G2' * W!2 * G2 * Ψn2) * Tₒ2 - 0.5 * Id2 * G2' * W!2 * H2 * Tᵧ2 + 0.5 * V2 * (f2ₒn + f2ₒn1)
+    else
+        b1 = Vn1 * Tₒ1 + V1 * f1ₒn1
+        b3 = Vn2 * Tₒ2 + V2 * f2ₒn1
+    end
+
+    # 10) Build boundary terms
+    b2 = gᵧ
+    b4 = Iᵧ2 * hᵧ
+
+    # Final right-hand side
+    return vcat(b1, b2, b3, b4)
+end
+
+
+function solve_MovingDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phase2::Phase, body::Function, body_c::Function, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, ic::InterfaceConditions, mesh::AbstractMesh, scheme::String; method = IterativeSolvers.gmres, kwargs...)
+    if s.A === nothing
+        error("Solver is not initialized. Call a solver constructor first.")
+    end
+
+    println("Solving the problem:")
+    println("- Moving problem")
+    println("- Diphasic problem")
+    println("- Unsteady problem")
+    println("- Diffusion problem")
+
+    # Solve system for the initial condition
+    t=0.0
+    println("Time : $(t)")
+    solve_system!(s; method, kwargs...)
+
+    push!(s.states, s.x)
+    println("Solver Extremum : ", maximum(abs.(s.x)))
+    Tᵢ = s.x
+
+    # Time loop
+    while t < Tₑ
+        t += Δt
+        println("Time : $(t)")
+        STmesh = Penguin.SpaceTimeMesh(mesh, [t, t+Δt], tag=mesh.tag)
+        capacity1 = Capacity(body, STmesh)
+        capacity2 = Capacity(body_c, STmesh)
+        operator1 = DiffusionOps(capacity1)
+        operator2 = DiffusionOps(capacity2)
+
+        s.A = A_diph_unstead_diff_moving(operator1, operator2, capacity1, capacity2, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, scheme)
+        s.b = b_diph_unstead_diff_moving(operator1, operator2, capacity1, capacity2, phase1.Diffusion_coeff, phase2.Diffusion_coeff, phase1.source, phase2.source, ic, Tᵢ, Δt, t, scheme)
+
+        BC_border_diph!(s.A, s.b, bc_b, mesh)
+
+        # Solve system
+        solve_system!(s; method, kwargs...)
+
+        push!(s.states, s.x)
+        println("Solver Extremum : ", maximum(abs.(s.x)))
+        Tᵢ = s.x
+
+    end
 end

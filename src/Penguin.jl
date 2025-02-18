@@ -61,6 +61,7 @@ export DarcyFlowUnsteady, solve_DarcyFlowUnsteady!
 
 include("movingsolver/diffusion.jl")
 export MovingDiffusionUnsteadyMono, solve_MovingDiffusionUnsteadyMono!
+export MovingDiffusionUnsteadyDiph, solve_MovingDiffusionUnsteadyDiph!
 
 include("vizualize.jl")
 export plot_solution, animate_solution
