@@ -26,3 +26,7 @@ Manifest.toml
 # Ignore .mp4 files, txt files
 *.txt
 *.mp4
+
+# Ignore .vti, .vtk files
+*.vti
+*.vtk
