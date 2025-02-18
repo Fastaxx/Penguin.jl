@@ -60,9 +60,12 @@ include("solver/darcy.jl")
 export DarcyFlow, solve_DarcyFlow!, solve_darcy_velocity
 export DarcyFlowUnsteady, solve_DarcyFlowUnsteady!
 
-include("movingsolver/diffusion.jl")
+include("prescribedmotionsolver/diffusion.jl")
 export MovingDiffusionUnsteadyMono, solve_MovingDiffusionUnsteadyMono!
 export MovingDiffusionUnsteadyDiph, solve_MovingDiffusionUnsteadyDiph!
+
+include("liquidmotionsolver/diffusion.jl")
+export MovingLiquidDiffusionUnsteadyMono, solve_MovingLiquidDiffusionUnsteadyMono!
 
 include("vizualize.jl")
 export plot_solution, animate_solution
