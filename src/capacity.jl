@@ -132,7 +132,7 @@ Compute the interface centroids for a 1D mesh and body.
 # Returns
 - `C_γ::Vector`: The interface centroids.
 """
-function computeInterfaceCentroids(mesh::Mesh{1}, body)
+function computeInterfaceCentroids(mesh::Union{Mesh{1}, SpaceTimeMesh{1}}, body)
     x_coords = mesh.nodes[1]
     nx = length(x_coords) - 1
     Φ = (r) -> body(r[1])
@@ -168,7 +168,7 @@ Compute the interface centroids for a 2D mesh and body.
 # Returns
 - `C_γ::Vector`: The interface centroids.
 """
-function computeInterfaceCentroids(mesh::Mesh{2}, body)
+function computeInterfaceCentroids(mesh::Union{Mesh{2}, SpaceTimeMesh{2}}, body)
     x_coords, y_coords = mesh.nodes
     nx, ny = length(x_coords) - 1, length(y_coords) - 1
     Φ = (r) -> body(r[1], r[2], 0.0)
@@ -209,7 +209,7 @@ Compute the interface centroids for a 3D mesh and body.
 # Returns
 - `C_γ::Vector`: The interface centroids.
 """
-function computeInterfaceCentroids(mesh::Mesh{3}, body)
+function computeInterfaceCentroids(mesh::Union{Mesh{3}, SpaceTimeMesh{3}}, body)
     x_coords, y_coords, z_coords = mesh.nodes
     nx, ny, nz = length(x_coords)-1, length(y_coords)-1, length(z_coords)-1
     Φ = (r) -> body(r[1], r[2], r[3])

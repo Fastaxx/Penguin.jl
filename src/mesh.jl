@@ -5,24 +5,17 @@ end
 abstract type AbstractMesh end
 
 """
-    Mesh{N}(nodes::NTuple{N, AbstractVector{<:Real}})
+    Mesh{N}(n::NTuple{N, Int}, domain_size::NTuple{N, Float64}, x0::NTuple{N, Float64}=ntuple(_ -> 0.0, N))
 
-Construct a Mesh from a given tuple of node coordinates. For each dimension, this mesh 
-is defined by its cell centers, boundaries, and border cells.
+Create a mesh object with `N` dimensions, `n` cells in each dimension, and a domain size of `domain_size`.
 
 # Arguments
-- `nodes`: A tuple of coordinate vectors, where each vector represents 
-  the positions of cell centers along that dimension.
+- `n::NTuple{N, Int}`: A tuple of integers specifying the number of cells in each dimension.
+- `domain_size::NTuple{N, Float64}`: A tuple of floats specifying the size of the domain in each dimension.
+- `x0::NTuple{N, Float64}`: A tuple of floats specifying the origin of the domain in each dimension. Default is the origin.
 
-# Fields
-- `nodes::NTuple{N, Vector{Float64}}`: Computed positions of cell boundaries.
-- `centers::NTuple{N, Vector{Float64}}`: Positions of the cell centers 
-  (same as provided node coordinates).
-
-# Example
-# Mesh struct 
-# Type of mesh : x--!--x--!--x with x: cell center and !: cell boundary
-# Start by a cell center then a cell boundary and so on  ... and finish by a cell center
+# Returns
+- A `Mesh{N}` object with `N` dimensions, `n` cells in each dimension, and a domain size of `domain_size`.
 """
 mutable struct Mesh{N} <: AbstractMesh
     nodes::NTuple{N, Vector{Float64}}
@@ -93,5 +86,22 @@ x = range(0.0, stop=1.0, length=5)
 mesh1D = Mesh((x,))
 nC(mesh1D) == 5
 """
-# Function to get the total number of cells in a mesh
 nC(mesh::Mesh{N}) where N = prod(length.(mesh.centers))
+
+mutable struct SpaceTimeMesh{M} <: AbstractMesh
+    nodes::NTuple{M, Vector{Float64}}
+    centers::NTuple{M, Vector{Float64}}
+    tag::MeshTag
+
+    function SpaceTimeMesh(spaceMesh::Mesh{N}, time::Vector{Float64}; tag::MeshTag=MeshTag{N}([])) where {N}
+        local M = N + 1
+
+        Δt = diff(time)
+        centers_time = [(time[i+1] + time[i]) / 2 for i in 1:length(time)-1]
+        nodes = ntuple(i -> i<=N ? spaceMesh.nodes[i] : time, M)
+        centers = ntuple(i -> i<=N ? spaceMesh.centers[i] : centers_time, M)
+        return new{M}(nodes, centers, tag)
+    end
+end
+
+nC(mesh::SpaceTimeMesh{M}) where M = prod(length.(mesh.centers))

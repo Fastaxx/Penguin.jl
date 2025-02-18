@@ -482,7 +482,8 @@ function animate_solution(solver, mesh::Mesh{1}, body::Function)
 
         # Créer un axe pour la figure
         ax = Axis(fig[1, 1], title="Monophasic Unsteady Diffusion", xlabel="x", ylabel="u")
-
+    
+        ylims!(ax, (minimum([minimum(state[1:length(state) ÷ 2]) for state in states]), maximum([maximum(state[1:length(state) ÷ 2]) for state in states])))
         function update_ln(frame)
             # Récupérer l'état
             state = states[frame]

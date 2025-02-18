@@ -415,15 +415,15 @@ function find_corresponding_cell(cell::CartesianIndex{N}, key::Symbol, opposite_
     return new_cell
 end
 
-function cell_to_index(mesh::Mesh{1}, cell::CartesianIndex)
+function cell_to_index(mesh::Union{Mesh{1}, SpaceTimeMesh{1}}, cell::CartesianIndex)
     return LinearIndices((length(mesh.centers[1])+1,))[cell]
 end
 
-function cell_to_index(mesh::Mesh{2}, cell::CartesianIndex)
+function cell_to_index(mesh::Union{Mesh{2}, SpaceTimeMesh{2}}, cell::CartesianIndex)
     return LinearIndices((length(mesh.centers[1])+1, length(mesh.centers[2])+1))[cell]
 end
 
-function cell_to_index(mesh::Mesh{3}, cell::CartesianIndex)
+function cell_to_index(mesh::Union{Mesh{3}, SpaceTimeMesh{3}}, cell::CartesianIndex)
     return LinearIndices((length(mesh.centers[1])+1, length(mesh.centers[2])+1, length(mesh.centers[3])+1))[cell]
 end
 

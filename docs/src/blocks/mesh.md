@@ -55,3 +55,28 @@ By defining a mesh with cell counts and domain dimensions as shown:
 - You’re equipped to further use the mesh in simulations or data analysis.
 
 This approach is especially useful when you want a quick setup using a uniform grid without manually precomputing coordinate vectors.  
+
+## Defining a Space–Time Mesh
+
+Besides a purely spatial mesh, *Penguin.jl* also provides a `SpaceTimeMesh` that incorporates time as an additional dimension. This is particularly useful when your domain changes in time, such as when boundaries move according to a prescribed interface function. For instance:
+
+```julia
+# Define the spatial mesh
+nx = 40
+lx = 1.0
+x0 = 0.0
+domain = ((x0, lx),)
+mesh = Penguin.Mesh((nx,), (lx,), (x0,))
+
+# Define a moving boundary (body) as a function of x and t
+xf = 0.01 * lx
+c = 1.0
+body = (x, t, _=0) -> (x - xf - c * sqrt(t))
+
+# Define the Space-Time mesh
+Δt   = 0.01
+Tend = 0.1
+STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt])
+```
+
+Here, the `body` function captures how the interface changes over time, and `SpaceTimeMesh` is rebuilt at each time interval `Δt` to track this motion. This approach makes it straightforward to handle time‐evolving geometries within your simulations.

@@ -16,6 +16,7 @@ using Roots
 
 include("mesh.jl")
 export Mesh, get_border_cells, nC
+export SpaceTimeMesh
 
 include("capacity.jl")
 export Capacity
@@ -57,6 +58,9 @@ export AdvectionDiffusionUnsteadyDiph, solve_AdvectionDiffusionUnsteadyDiph!
 include("solver/darcy.jl")
 export DarcyFlow, solve_DarcyFlow!, solve_darcy_velocity
 export DarcyFlowUnsteady, solve_DarcyFlowUnsteady!
+
+include("movingsolver/diffusion.jl")
+export MovingDiffusionUnsteadyMono, solve_MovingDiffusionUnsteadyMono!
 
 include("vizualize.jl")
 export plot_solution, animate_solution
