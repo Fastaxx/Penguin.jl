@@ -48,3 +48,15 @@ end
     @test nC(mesh4D) == 625
     @test length(borders4D) == 544
 end
+
+@testset "1D+1 SpaceTime mesh" begin
+    nx = 5
+    lx = 1.0
+    x0 = 0.0
+    mesh1D = Mesh((nx,), (lx,), (x0,))
+    STmesh1D = SpaceTimeMesh(mesh1D, [0.0, 0.1], tag=mesh1D.tag)
+    @test STmesh1D.centers == ([0.0, 0.2, 0.4, 0.6000000000000001, 0.8], [0.05])
+    @test STmesh1D.nodes == ([0.1, 0.30000000000000004, 0.5, 0.7000000000000001, 0.9, 1.1], [0.0, 0.1])
+    @test STmesh1D.tag == mesh1D.tag
+    @test nC(STmesh1D) == 5
+end
