@@ -20,12 +20,12 @@ body = (x,t, _=0)->(x - xf - c*sqrt(t))
 # Define the Space-Time mesh
 Δt = 0.01
 Tend = 0.1
-STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt])
+STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt], tag=mesh.tag)
 
 # Define the capacity
 capacity = Capacity(body, STmesh)
 
-# Define the diffusion operator$
+# Define the diffusion operator
 operator = DiffusionOps(capacity)
 
 # Define the boundary conditions
@@ -47,13 +47,13 @@ u0ᵧ = zeros((nx+1))
 u0 = vcat(u0ₒ, u0ᵧ)
 
 # Define the solver
-solver = MovingDiffusionUnsteadyMono(Fluide, bc_b, bc, Δt, u0, "BE")
+solver = MovingDiffusionUnsteadyMono(Fluide, bc_b, bc, Δt, u0, mesh, "BE")
 
 # Solve the problem
 solve_MovingDiffusionUnsteadyMono!(solver, Fluide, body, Δt, Tend, bc_b, bc, mesh, "BE"; method=Base.:\)
 
 # Plot the solution
-#plot_solution(solver, mesh, body, capacity; state_i=1)
+plot_solution(solver, mesh, body, capacity; state_i=10)
 
 # Animation
 animate_solution(solver, mesh, body)

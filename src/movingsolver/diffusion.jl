@@ -12,7 +12,7 @@ Create a solver for the unsteady monophasic diffusion problem inside a moving bo
 - `Tᵢ::Vector{Float64}`: The initial temperature field.
 - `scheme::String`: The time integration scheme. Either "CN" or "BE".
 """
-function MovingDiffusionUnsteadyMono(phase::Phase, bc_b::BorderConditions, bc_i::AbstractBoundary, Δt::Float64, Tᵢ::Vector{Float64}, scheme::String)
+function MovingDiffusionUnsteadyMono(phase::Phase, bc_b::BorderConditions, bc_i::AbstractBoundary, Δt::Float64, Tᵢ::Vector{Float64}, mesh::AbstractMesh, scheme::String)
     println("Solver Creation:")
     println("- Moving problem")
     println("- Monophasic problem")
@@ -28,7 +28,7 @@ function MovingDiffusionUnsteadyMono(phase::Phase, bc_b::BorderConditions, bc_i:
         s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, "BE")
         s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc_i, Tᵢ, Δt, 0.0, "BE")
     end
-    BC_border_mono!(s.A, s.b, bc_b, phase.capacity.mesh)
+    BC_border_mono!(s.A, s.b, bc_b, mesh)
     return s
 end
 
@@ -246,7 +246,7 @@ function solve_MovingDiffusionUnsteadyMono!(s::Solver, phase::Phase, body::Funct
         s.A = A_mono_unstead_diff_moving(operator, capacity, phase.Diffusion_coeff, bc, scheme)
         s.b = b_mono_unstead_diff_moving(operator, capacity, phase.Diffusion_coeff, phase.source, bc, Tᵢ, Δt, t, scheme)
 
-        BC_border_mono!(s.A, s.b, bc_b, capacity.mesh)  
+        BC_border_mono!(s.A, s.b, bc_b, mesh)  
 
         # Solve system
         solve_system!(s; method, kwargs...)
