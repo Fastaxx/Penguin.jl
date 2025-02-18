@@ -40,3 +40,8 @@ end
     # Write your tests here.
     include("utils_test.jl")
 end
+
+@testset "Darcy Test" begin
+    # Write your tests here.
+    include("solver/darcy_test.jl")
+end
