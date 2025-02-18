@@ -270,7 +270,7 @@ function solve_DiffusionUnsteadyMono!(s::Solver, phase::Phase, Δt::Float64, T�
         error("Solver is not initialized. Call a solver constructor first.")
     end
 
-    # Solve the system for the initial time
+    # Solve the system for the initial time with the initial scheme
     t = 0.0
     solve_system!(s; method, kwargs...)
 
@@ -279,12 +279,14 @@ function solve_DiffusionUnsteadyMono!(s::Solver, phase::Phase, Δt::Float64, T�
     println("Solver Extremum: ", maximum(abs.(s.x)))
     Tᵢ = s.x
 
+    # Build once matrix for the new scheme
+    s.A = A_mono_unstead_diff(phase.operator, phase.capacity, phase.Diffusion_coeff, bc, Δt, scheme)
+
     # Solve the system for the next times
     while t < Tₑ
         t += Δt
         println("Time: ", t)
 
-        s.A = A_mono_unstead_diff(phase.operator, phase.capacity, phase.Diffusion_coeff, bc, Δt, scheme)
         s.b = b_mono_unstead_diff(phase.operator, phase.source, phase.Diffusion_coeff, phase.capacity, bc, Tᵢ, Δt, t, scheme)
 
         BC_border_mono!(s.A, s.b, bc_b, phase.capacity.mesh)
@@ -429,19 +431,21 @@ function solve_DiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phase2::Phase, �
 
     t = 0.0
     println("Time: ", t)
-    # Solve for the initial condition
+    # Solve for the initial condition with the initial scheme
     solve_system!(s; method, kwargs...)
 
     push!(s.states, s.x)
     println("Solver Extremum: ", maximum(abs.(s.x)))
     Tᵢ = s.x
 
+    # Build once matrix for the new scheme
+    s.A = A_diph_unstead_diff(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Δt, scheme)
+
     # Solve for the next times
     while t < Tₑ
         t += Δt
         println("Time: ", t)
 
-        s.A = A_diph_unstead_diff(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Δt, scheme)
         s.b = b_diph_unstead_diff(phase1.operator, phase2.operator, phase1.source, phase2.source, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Tᵢ, Δt, t, scheme)
 
         BC_border_diph!(s.A, s.b, bc_b, phase2.capacity.mesh)
