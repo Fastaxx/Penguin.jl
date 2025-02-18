@@ -35,3 +35,8 @@ end
     # Write your tests here.
     include("convergence_test.jl")
 end
+
+@testset "Utils Test" begin
+    # Write your tests here.
+    include("utils_test.jl")
+end

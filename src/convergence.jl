@@ -17,16 +17,14 @@ end
 # Relative Lp norm helper
 function relative_lp_norm(errors, indices, pval, capacity, u_ana)
     if pval == Inf
-        return maximum(abs.(errors[indices])) / maximum(abs.(u_ana[indices]))
+        return maximum(abs.(errors[indices]/u_ana[indices]))
     else
         part_sum = 0.0
-        part_analytical = 0.0
         for i in indices
             Vi = capacity.V[i,i]
-            part_sum += (abs(errors[i])^pval) * Vi
-            part_analytical += (abs(u_ana[i])^pval) * Vi
+            part_sum += (abs(errors[i]/u_ana[i])^pval) * Vi
         end
-        return (part_sum / sum(capacity.V))^(1/pval) / (part_analytical / sum(capacity.V))^(1/pval)
+        return (part_sum / sum(capacity.V))^(1/pval)
     end
 end
 
@@ -62,7 +60,7 @@ function check_convergence(u_analytical::Function, solver, capacity::Capacity{1}
     println("Cut cells L$p norm    = $cut_err")
     println("Empty cells L$p norm  = $empty_err")
 
-    return (u_ana, u_num, err, global_err, full_err, cut_err, empty_err)
+    return (u_ana, u_num, global_err, full_err, cut_err, empty_err)
 end
 
 
