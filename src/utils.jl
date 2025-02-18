@@ -154,3 +154,30 @@ function initialize_stokes_velocity_field(nx, ny, nz, lx, ly, lz, x0, y0, z0, a,
     end
     return uₒx, uₒy, uₒz
 end
+
+# Volume redefinition
+function volume_redefinition!(capacity::Capacity{1}, operator::AbstractOperators)
+    pₒ = [capacity.C_ω[i][1] for i in 1:length(capacity.C_ω)]
+    pᵧ = [capacity.C_γ[i][1] for i in 1:length(capacity.C_ω)]
+    p = vcat(pₒ, pᵧ)
+    grad = ∇(operator, p)
+    W_new = [grad[i] * capacity.W[1][i,i] for i in eachindex(grad)]
+    W_new = spdiagm(0 => W_new)
+
+    pₒ = [(capacity.C_ω[i][1]^2)/2 for i in 1:length(capacity.C_ω)]
+    pᵧ = [(capacity.C_γ[i][1]^2)/2 for i in 1:length(capacity.C_ω)]
+
+    p = vcat(pₒ, pᵧ)
+    grad = ∇(operator, p)
+
+    qω = vcat(grad)
+    qγ = vcat(grad)
+
+    div = ∇₋(operator, qω, qγ)
+    V_new = spdiagm(0 => div)
+
+    capacity.W = (W_new,)
+    capacity.V = V_new
+
+    println("Don't forget to rebuild the operator")
+end

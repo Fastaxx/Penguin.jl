@@ -22,9 +22,10 @@ capacity = Capacity(body, mesh)
 operator = DiffusionOps(capacity)
 
 # Redefine W and V : Rebuild the operator
-#volume_redefinition!(capacity, operator)
 operator = DiffusionOps(capacity)
 
+volume_redefinition!(capacity, operator)
+operator = DiffusionOps(capacity)
 # Define the boundary conditions
 bc = Dirichlet(0.0)
 bc1 = Dirichlet(0.0)
@@ -50,9 +51,10 @@ plot_solution(solver, mesh, body, capacity)
 a, b = center - radius, center + radius
 u_analytical = (x) -> - (x-center)^3/6 - (center*(x-center)^2)/2 + radius^2/6 * (x-center) + center*radius^2/2
 
-u_ana, u_num, err, global_err, full_err, cut_err, empty_err = check_convergence(u_analytical, solver, capacity, 2)
+u_ana, u_num, global_err, full_err, cut_err, empty_err = check_convergence(u_analytical, solver, capacity, 2)
 
 # Plot the error
+err = u_ana - u_num
 err[capacity.cell_types .== 0] .= NaN
 using CairoMakie
 fig = Figure()
