@@ -13,11 +13,29 @@ Below are some examples of how to use the `visualize` module:
 using Penguin
 
 # Define a solver, mesh, body function, and capacity
-solver = ... # Your solver object
 mesh = ... # Your mesh object
 body = ... # Your body function
 capacity = ... # Your capacity object
+solver = ... # Your solver object
 
 # Plot the solution
 plot_solution(solver, mesh, body, capacity)
+```
+
+### Example 2: Animation Solutions
+
+This function triggers an animation to visually represent the evolution of the computed solution over a given mesh and body
+parameters.
+
+```julia
+using Penguin
+
+# Define a solver, mesh, body function, and capacity
+mesh = ... # Your mesh object
+body = ... # Your body function
+capacity = ... # Your capacity object
+solver = ... # Your solver object
+
+# Plot the solution
+animate_solution(solver, mesh, body)
 ```

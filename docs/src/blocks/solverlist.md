@@ -16,7 +16,7 @@ Penguin.jl provides a suite of solvers for steady and unsteady diffusion, advect
 | **Darcy Flow (Unsteady)**                 | ∂(φp)/∂t = ∇·(K∇p) + f, for porosity φ                                                                                                                                     | `DarcyFlowUnsteady`, `solve_DarcyFlowUnsteady!`       |
 | **Moving Diffusion (Unsteady, Mono)**     | ∂u/∂t = ∇·(D∇u) in a domain moving in time, e.g., boundary moves with a prescribed velocity                                                                                | `MovingDiffusionUnsteadyMono`, `solve_MovingDiffusionUnsteadyMono!` |
 | **Moving Diffusion (Unsteady, Diph)**     | Same as above with two phases, each having its own domain/capacity that evolves in time                                                                                    | `MovingDiffusionUnsteadyDiph`, `solve_MovingDiffusionUnsteadyDiph!` |
-
+| **Moving Liquid Diffusion (Unsteady, Mono)** | ∂u/∂t = ∂/∂x(D∂u/∂x)+f in a moving domain where the moving interface is computed via a Stefan condition (non-prescribed motion)  | `MovingLiquidDiffusionUnsteadyMono`, `solve_MovingLiquidDiffusionUnsteadyMono!` |
 ---
 
 ## Example Usage
