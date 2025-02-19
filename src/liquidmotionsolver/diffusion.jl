@@ -75,7 +75,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
         nx, ny, nt = dims
         n = nx*ny
     else
-        error("build_rhs_mono_unstead_moving_diff_generic not supported for dimension $len_dims")
+        error("Only 1D and 2D problems are supported.")
     end
 
     err = Inf
@@ -206,7 +206,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
             # New interface position
             res = Hₙ₊₁ - Hₙ - Interface_term
             @show res
-            α = 0.5
+            α = 1.0
             new_xf = current_xf + α * res
             err = abs(new_xf - current_xf)
             println("Iteration $iter | xf = $new_xf | error = $err | res = $res")
