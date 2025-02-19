@@ -3,22 +3,23 @@ using IterativeSolvers
 using LinearAlgebra
 using SparseArrays
 using SpecialFunctions, LsqFit
+using CairoMakie
 
 ### 1D Test Case : One-phase Stefan Problem
 # Define the spatial mesh
-nx = 40
+nx = 80
 lx = 1.
 x0 = 0.
 domain = ((x0, lx),)
 mesh = Penguin.Mesh((nx,), (lx,), (x0,))
 
 # Define the body
-xf = 0.5*lx   # Interface position
+xf = 0.04*lx   # Interface position
 body = (x,t, _=0)->(x - xf)
 
 # Define the Space-Time mesh
-Δt = 0.001
-Tend = 0.1
+Δt = 0.01
+Tend = 0.5
 STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt], tag=mesh.tag)
 
 # Define the capacity
@@ -49,4 +50,36 @@ u0 = vcat(u0ₒ, u0ᵧ)
 solver = MovingLiquidDiffusionUnsteadyMono(Fluide, bc_b, bc, Δt, u0, mesh, "BE")
 
 # Solve the problem
-solve_MovingLiquidDiffusionUnsteadyMono!(solver, Fluide, xf, Δt, Tend, bc_b, bc, mesh, "BE"; method=Base.:\)
+solver, residuals, xf_log = solve_MovingLiquidDiffusionUnsteadyMono!(solver, Fluide, xf, Δt, Tend, bc_b, bc, mesh, "BE"; method=Base.:\)
+
+# Animation
+animate_solution(solver, mesh, body)
+
+# Plot residuals   
+#residuals[i] might be empty, remove them
+residuals = filter(x -> !isempty(x), residuals)
+
+figure = Figure()
+ax = Axis(figure[1,1], xlabel = "Time", ylabel = "Residuals", title = "Residuals")
+for i in 1:length(residuals)
+    lines!(ax, log10.(residuals[i]), label = "Time = $(i*Δt)")
+end
+axislegend(ax)
+display(figure)
+
+# Plot the position
+figure = Figure()
+ax = Axis(figure[1,1], xlabel = "Time", ylabel = "Interface position", title = "Interface position")
+lines!(ax, 0.0:Δt:Tend, xf_log, label = "Interface position")
+display(figure)
+
+# save xf_log
+open("xf_log_$nx.txt", "w") do io
+    for i in 1:length(xf_log)
+        println(io, xf_log[i])
+    end
+end
+
+# Plot the solution
+plot_solution(solver, mesh, body, capacity; state_i=10)
+

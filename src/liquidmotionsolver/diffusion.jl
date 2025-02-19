@@ -56,7 +56,8 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
     tol      = 1e-10
 
     # Log residuals and interface positions for each time step:
-    residuals = []
+    nt = Int(Tₑ/Δt)
+    residuals = [Float64[] for _ in 1:2nt]
     xf_log = Float64[]
 
     # Determine how many dimensions
@@ -104,7 +105,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
         V = phase.operator.V[1:n, 1:n]
         Tₒ, Tᵧ = Tᵢ[1:n], Tᵢ[n+1:end]
         Interface_term = H' * W! * G * Tₒ + H' * W! * H * Tᵧ
-        Interface_term = -1/(ρ*L) * sum(Interface_term)
+        Interface_term = 1/(ρ*L) * sum(Interface_term)
         @show Interface_term
 
         # New interface position
@@ -115,7 +116,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
         err = abs(new_xf - current_xf)
         println("Iteration $iter | xf = $new_xf | error = $err | res = $res")
         # Store residuals
-        push!(residuals, err)
+        push!(residuals[1], err)
 
         # 3) Update geometry if not converged
         if err <= tol
@@ -155,6 +156,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
     println("Max value : $(maximum(abs.(s.x)))")
 
     # Time loop
+    k=2
     while t < Tₑ
         t += Δt
         println("Time : $(t)")
@@ -198,7 +200,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
             V = phase.operator.V[1:n, 1:n]
             Tₒ, Tᵧ = Tᵢ[1:n], Tᵢ[n+1:end]
             Interface_term = H' * W! * G * Tₒ + H' * W! * H * Tᵧ
-            Interface_term = -1/(ρ*L) * sum(Interface_term)
+            Interface_term = 1/(ρ*L) * sum(Interface_term)
             @show Interface_term
 
             # New interface position
@@ -209,7 +211,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
             err = abs(new_xf - current_xf)
             println("Iteration $iter | xf = $new_xf | error = $err | res = $res")
             # Store residuals
-            push!(residuals, err)
+            push!(residuals[k], err)
 
             # 3) Update geometry if not converged
             if err <= tol
@@ -247,6 +249,8 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
         push!(s.states, s.x)
         println("Time : $(t[1])")
         println("Max value : $(maximum(abs.(s.x)))")
-
+        k += 1
     end
+
+    return s, residuals, xf_log
 end 

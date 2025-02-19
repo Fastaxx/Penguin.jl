@@ -483,14 +483,16 @@ function animate_solution(solver, mesh::Mesh{1}, body::Function)
         # Créer un axe pour la figure
         ax = Axis(fig[1, 1], title="Monophasic Unsteady Diffusion", xlabel="x", ylabel="u")
     
+        x = mesh.nodes[1]
         ylims!(ax, (minimum([minimum(state[1:length(state) ÷ 2]) for state in states]), maximum([maximum(state[1:length(state) ÷ 2]) for state in states])))
+        xlims!(ax, (minimum(x), maximum(x)))
         function update_ln(frame)
             # Récupérer l'état
             state = states[frame]
 
             # Tracer l'état
-            lines!(ax, state[1:length(state) ÷ 2], color=:blue, alpha=0.3, label="Bulk")
-            lines!(ax, state[length(state) ÷ 2 + 1:end], color=:green, alpha=0.3, label="Interface")
+            lines!(ax, x, state[1:length(state) ÷ 2], color=:blue, alpha=0.3, label="Bulk")
+            lines!(ax, x, state[length(state) ÷ 2 + 1:end], color=:green, alpha=0.3, label="Interface")
         end
 
         # Enregistrer l'animation
