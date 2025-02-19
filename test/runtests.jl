@@ -30,6 +30,7 @@ end
     # Write your tests here.
     include("solver_test.jl")
     include("solver/darcy_test.jl")
+    include("solver/diffusion_test.jl")
 end
 
 @testset "Convergence Test" begin
