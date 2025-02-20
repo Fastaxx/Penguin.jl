@@ -189,7 +189,7 @@ function b_mono_unstead_diff_moving(operator::DiffusionOps, capacity::Capacity, 
         nx, ny, nt = dims
         n = nx*ny
     else
-        error("build_rhs_mono_unstead_moving_diff_generic not supported for dimension $len_dims")
+        error("b_mono_unstead_diff_moving not supported for dimension $len_dims")
     end
 
     # Extract operator sub-blocks

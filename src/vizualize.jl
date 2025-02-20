@@ -468,6 +468,16 @@ function plot_solution(solver, mesh::Mesh{3}, body::Function, capacity::Capacity
     end
 end
 
+"""
+    animate_solution(solver, mesh, body)
+
+Routine to animate the solution once the solver has been run.
+
+# Arguments
+- `solver::Solver`: The solver of the problem.
+- `mesh::Mesh`: The mesh of the problem.
+- `body::Function`: The body function of the problem.
+"""
 function animate_solution(solver, mesh::Mesh{1}, body::Function)
     # Déterminer le type de problème
     is_monophasic = solver.phase_type == Monophasic # Problème monophasique

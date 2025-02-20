@@ -18,12 +18,16 @@ c = 1.0        # Interface velocity
 body = (x,t, _=0)->(x - xf - c*sqrt(t))
 
 # Define the Space-Time mesh
-Δt = 0.01
+Δt = 0.001
 Tend = 0.1
 STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt], tag=mesh.tag)
 
 # Define the capacity
 capacity = Capacity(body, STmesh)
+
+cfl = 0.2
+#Δt = cfl_restriction(capacity, mesh, cfl, Δt)
+println("Δt = $Δt")
 
 # Define the diffusion operator
 operator = DiffusionOps(capacity)
