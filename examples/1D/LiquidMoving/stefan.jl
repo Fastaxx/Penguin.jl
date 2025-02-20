@@ -7,7 +7,7 @@ using CairoMakie
 
 ### 1D Test Case : One-phase Stefan Problem
 # Define the spatial mesh
-nx = 1280
+nx = 80
 lx = 1.
 x0 = 0.
 domain = ((x0, lx),)
@@ -19,7 +19,7 @@ body = (x,t, _=0)->(x - xf)
 
 # Define the Space-Time mesh
 Δt = 0.005
-Tend = 0.2
+Tend = 0.1
 STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt], tag=mesh.tag)
 
 # Define the capacity
@@ -33,6 +33,8 @@ bc = Dirichlet(0.0)
 bc1 = Dirichlet(0.0)
 
 bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:top => Dirichlet(0.0), :bottom => Dirichlet(1.0)))
+ρ, L = 1.0, 1.0
+stef_cond = InterfaceConditions(nothing, FluxJump(1.0, 1.0, ρ*L))
 
 # Define the source term
 f = (x,y,z,t)-> 0.0 #sin(x)*cos(10*y)
@@ -46,11 +48,16 @@ u0ₒ = zeros((nx+1))
 u0ᵧ = zeros((nx+1))
 u0 = vcat(u0ₒ, u0ᵧ)
 
+# Newton parameters
+max_iter = 100
+tol = 1e-6
+Newton_params = (max_iter, tol)
+
 # Define the solver
 solver = MovingLiquidDiffusionUnsteadyMono(Fluide, bc_b, bc, Δt, u0, mesh, "BE")
 
 # Solve the problem
-solver, residuals, xf_log = solve_MovingLiquidDiffusionUnsteadyMono!(solver, Fluide, xf, Δt, Tend, bc_b, bc, mesh, "BE"; method=Base.:\)
+solver, residuals, xf_log = solve_MovingLiquidDiffusionUnsteadyMono!(solver, Fluide, xf, Δt, Tend, bc_b, bc, stef_cond, mesh, "BE"; Newton_params=Newton_params, method=Base.:\)
 
 # Animation
 animate_solution(solver, mesh, body)

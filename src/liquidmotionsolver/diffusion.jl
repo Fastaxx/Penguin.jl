@@ -34,7 +34,7 @@ function MovingLiquidDiffusionUnsteadyMono(phase::Phase, bc_b::BorderConditions,
     return s
 end
 
-function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, bc::AbstractBoundary, mesh::AbstractMesh, scheme::String; method = IterativeSolvers.gmres, kwargs...)
+function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, bc::AbstractBoundary, ic::InterfaceConditions, mesh::AbstractMesh, scheme::String; Newton_params=(1000, 1e-10), method=IterativeSolvers.gmres, kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
@@ -51,9 +51,9 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
     println("Time : $(t)")
 
     # Params
-    ρ, L = 1.0, 10.0
-    max_iter = 1000
-    tol      = 1e-10
+    ρL = ic.flux.value
+    max_iter = Newton_params[1]
+    tol      = Newton_params[2]
 
     # Log residuals and interface positions for each time step:
     nt = Int(Tₑ/Δt)
@@ -106,7 +106,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
         Id  = Id[1:n, 1:n]
         Tₒ, Tᵧ = Tᵢ[1:n], Tᵢ[n+1:end]
         Interface_term = Id * H' * W! * G * Tₒ + Id * H' * W! * H * Tᵧ
-        Interface_term = 1/(ρ*L) * sum(Interface_term)
+        Interface_term = 1/(ρL) * sum(Interface_term)
 
         # New interface position
         res = Hₙ₊₁ - Hₙ - Interface_term
@@ -200,7 +200,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
             Id  = Id[1:n, 1:n]
             Tₒ, Tᵧ = Tᵢ[1:n], Tᵢ[n+1:end]
             Interface_term = Id * H' * W! * G * Tₒ + Id * H' * W! * H * Tᵧ
-            Interface_term = 1/(ρ*L) * sum(Interface_term)
+            Interface_term = 1/(ρL) * sum(Interface_term)
 
             # New interface position
             res = Hₙ₊₁ - Hₙ - Interface_term

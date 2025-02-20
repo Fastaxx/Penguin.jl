@@ -98,6 +98,6 @@ Structure to define interface conditions. The keys are :scalar, :flux.
 Important if the problem is diphasic to set the conditions for the interface between the two phases.
 """
 struct InterfaceConditions
-    scalar::AbstractInterfaceBC
-    flux::AbstractInterfaceBC
+    scalar::Union{Nothing, AbstractInterfaceBC}
+    flux::Union{Nothing,AbstractInterfaceBC}
 end
