@@ -7,19 +7,19 @@ using CairoMakie
 
 ### 1D Test Case : One-phase Stefan Problem
 # Define the spatial mesh
-nx = 80
+nx = 1280
 lx = 1.
 x0 = 0.
 domain = ((x0, lx),)
 mesh = Penguin.Mesh((nx,), (lx,), (x0,))
 
 # Define the body
-xf = 0.04*lx   # Interface position
+xf = 0.03*lx   # Interface position
 body = (x,t, _=0)->(x - xf)
 
 # Define the Space-Time mesh
-Δt = 0.01
-Tend = 0.5
+Δt = 0.005
+Tend = 0.2
 STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt], tag=mesh.tag)
 
 # Define the capacity
@@ -60,7 +60,7 @@ animate_solution(solver, mesh, body)
 residuals = filter(x -> !isempty(x), residuals)
 
 figure = Figure()
-ax = Axis(figure[1,1], xlabel = "Time", ylabel = "Residuals", title = "Residuals")
+ax = Axis(figure[1,1], xlabel = "Newton Iterations", ylabel = "Residuals", title = "Residuals")
 for i in 1:length(residuals)
     lines!(ax, log10.(residuals[i]), label = "Time = $(i*Δt)")
 end

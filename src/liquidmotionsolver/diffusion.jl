@@ -51,7 +51,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
     println("Time : $(t)")
 
     # Params
-    ρ, L = 1.0, 1.0
+    ρ, L = 1.0, 10.0
     max_iter = 1000
     tol      = 1e-10
 
@@ -90,7 +90,6 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
         # 1) Solve the linear system
         solve_system!(s; method=method, kwargs...)
         Tᵢ = s.x
-        @show Tᵢ
 
         # 2) Update volumes / compute new interface
         Vn_1 = phase.capacity.A[cap_index][1:end÷2, 1:end÷2]
@@ -103,14 +102,14 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
         G = phase.operator.G[1:n, 1:n]
         H = phase.operator.H[1:n, 1:n]
         V = phase.operator.V[1:n, 1:n]
+        Id   = build_I_D(phase.operator, phase.Diffusion_coeff, phase.capacity)
+        Id  = Id[1:n, 1:n]
         Tₒ, Tᵧ = Tᵢ[1:n], Tᵢ[n+1:end]
-        Interface_term = H' * W! * G * Tₒ + H' * W! * H * Tᵧ
+        Interface_term = Id * H' * W! * G * Tₒ + Id * H' * W! * H * Tᵧ
         Interface_term = 1/(ρ*L) * sum(Interface_term)
-        @show Interface_term
 
         # New interface position
         res = Hₙ₊₁ - Hₙ - Interface_term
-        @show res
         α = 0.5
         new_xf = current_xf + α * res
         err = abs(new_xf - current_xf)
@@ -185,7 +184,6 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
             # 1) Solve the linear system
             solve_system!(s; method=method, kwargs...)
             Tᵢ = s.x
-            @show Tᵢ
 
             # 2) Update volumes / compute new interface
             Vn_1 = phase.capacity.A[cap_index][1:end÷2, 1:end÷2]
@@ -198,14 +196,14 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
             G = phase.operator.G[1:n, 1:n]
             H = phase.operator.H[1:n, 1:n]
             V = phase.operator.V[1:n, 1:n]
+            Id   = build_I_D(phase.operator, phase.Diffusion_coeff, phase.capacity)
+            Id  = Id[1:n, 1:n]
             Tₒ, Tᵧ = Tᵢ[1:n], Tᵢ[n+1:end]
-            Interface_term = H' * W! * G * Tₒ + H' * W! * H * Tᵧ
+            Interface_term = Id * H' * W! * G * Tₒ + Id * H' * W! * H * Tᵧ
             Interface_term = 1/(ρ*L) * sum(Interface_term)
-            @show Interface_term
 
             # New interface position
             res = Hₙ₊₁ - Hₙ - Interface_term
-            @show res
             α = 1.0
             new_xf = current_xf + α * res
             err = abs(new_xf - current_xf)
