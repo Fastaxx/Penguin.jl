@@ -18,7 +18,7 @@ xf = 0.03*lx   # Interface position
 body = (x,t, _=0)->(x - xf)
 
 # Define the Space-Time mesh
-Δt = 0.005
+Δt = 0.001
 Tend = 0.1
 STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt], tag=mesh.tag)
 
