@@ -1,4 +1,4 @@
-# 1D Diffusion with a Moving Interface
+# 1D Diffusion - Prescribed Motion
 
 Below is an example illustrating how to solve a 1D diffusion problem on a moving domain using a space–time mesh. The domain’s motion is prescribed by a two‑argument signed distance function, `body(x, t)`. In this case, the boundary moves over time, and a new `SpaceTimeMesh` is rebuilt at each time step to reflect this motion.
 
