@@ -7,7 +7,7 @@ using CairoMakie
 
 ### 1D Test Case : One-phase Stefan Problem
 # Define the spatial mesh
-nx = 80
+nx = 40
 lx = 1.
 x0 = 0.
 domain = ((x0, lx),)
@@ -49,7 +49,7 @@ u0ᵧ = zeros((nx+1))
 u0 = vcat(u0ₒ, u0ᵧ)
 
 # Newton parameters
-max_iter = 100
+max_iter = 1000
 tol = 1e-6
 Newton_params = (max_iter, tol)
 
@@ -71,7 +71,7 @@ ax = Axis(figure[1,1], xlabel = "Newton Iterations", ylabel = "Residuals", title
 for i in 1:length(residuals)
     lines!(ax, log10.(residuals[i]), label = "Time = $(i*Δt)")
 end
-axislegend(ax)
+#axislegend(ax)
 display(figure)
 
 # Plot the position
@@ -90,6 +90,10 @@ end
 # Plot the solution
 plot_solution(solver, mesh, body, capacity; state_i=10)
 
+# create a directory to save solver.states[i]
+if !isdir("solver_states_$nx")
+    mkdir("solver_states_$nx")
+end
 # save solver.states[i]
 for i in 1:length(solver.states)
     open("solver_states_$nx/solver_states_$i.txt", "w") do io

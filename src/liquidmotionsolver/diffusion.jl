@@ -110,7 +110,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
 
         # New interface position
         res = Hₙ₊₁ - Hₙ - Interface_term
-        α = 0.5
+        α = 1.0
         new_xf = current_xf + α * res
         err = abs(new_xf - current_xf)
         println("Iteration $iter | xf = $new_xf | error = $err | res = $res")
@@ -162,7 +162,9 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
 
         # 1) Reconstruct
         STmesh = SpaceTimeMesh(mesh, [Δt, 2Δt], tag=mesh.tag)
-        body = (xx,tt, _=0)->(xx - new_xf)
+        #v_guess = (new_xf - xf)/Δt
+        #body = (xx, tt, _=0) -> xx - ( new_xf - v_guess * (tt - t) )
+        body = (xx,tt, _=0)->(xx - new_xf) 
         capacity = Capacity(body, STmesh)
         operator = DiffusionOps(capacity)
         phase = Phase(capacity, operator, phase.source, phase.Diffusion_coeff)

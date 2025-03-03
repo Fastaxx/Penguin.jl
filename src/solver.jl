@@ -505,26 +505,9 @@ function BC_border_diph!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Float64}, b
     end
 end
 
-function cfl_restriction(capacity::Capacity{2}, mesh::Penguin.Mesh, cfl::Float64, Δt_ref::Float64)
+function cfl_restriction(mesh::Penguin.Mesh, cfl::Float64, w::Float64)
     # Compute the spatial mesh spacing
     dx = (mesh.nodes[1][end] - mesh.nodes[1][1]) / length(mesh.centers[1])
-    
-    # Extract the capacity block for the 1D mesh (index 2 in A)
-    A2 = capacity.A[2]
-    # Split into previous (Vn_1) and current (Vn) volumes
-    Vn_1 = A2[1:end÷2, 1:end÷2]
-    Vn   = A2[end÷2+1:end, end÷2+1:end]
-    
-    # Compute the difference on the diagonal (non-zero only)
-    diff_diag = -diag(Vn_1 - Vn)
-    w_candidates = [x for x in diff_diag if x != 0.0]
-    if isempty(w_candidates)
-        error("No non-zero capacity differences found. Check the body function and mesh.")
-    end
-    
-    # Compute the minimal propagation speed scaled by the reference Δt
-    w = minimum(w_candidates) / Δt_ref
-    # Compute the new time step according to the CFL condition
     δt = cfl * dx / w
     return δt
 end
