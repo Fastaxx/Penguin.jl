@@ -14,7 +14,7 @@ domain = ((x0, lx),)
 mesh = Penguin.Mesh((nx,), (lx,), (x0,))
 
 # Define the body
-xf = 0.03*lx   # Interface position
+xf = 0.05*lx   # Interface position
 body = (x,t, _=0)->(x - xf)
 
 # Define the Space-Time mesh
@@ -90,3 +90,11 @@ end
 # Plot the solution
 plot_solution(solver, mesh, body, capacity; state_i=10)
 
+# save solver.states[i]
+for i in 1:length(solver.states)
+    open("solver_states_$nx/solver_states_$i.txt", "w") do io
+        for j in 1:length(solver.states[i])
+            println(io, solver.states[i][j])
+        end
+    end
+end
