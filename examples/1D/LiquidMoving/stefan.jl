@@ -19,7 +19,7 @@ body = (x,t, _=0)->(x - xf)
 
 # Define the Space-Time mesh
 Δt = 0.001
-Tend = 0.1
+Tend = 0.01
 STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt], tag=mesh.tag)
 
 # Define the capacity
@@ -52,7 +52,8 @@ u0 = vcat(u0ₒ, u0ᵧ)
 max_iter = 1000
 tol = 1e-6
 reltol = 1e-10
-Newton_params = (max_iter, tol, reltol)
+α = 0.5
+Newton_params = (max_iter, tol, reltol, α)
 
 # Define the solver
 solver = MovingLiquidDiffusionUnsteadyMono(Fluide, bc_b, bc, Δt, u0, mesh, "BE")

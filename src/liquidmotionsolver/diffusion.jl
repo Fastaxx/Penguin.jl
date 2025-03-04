@@ -55,6 +55,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
     max_iter = Newton_params[1]
     tol      = Newton_params[2]
     reltol   = Newton_params[3]
+    α        = Newton_params[4]
 
     # Log residuals and interface positions for each time step:
     nt = Int(Tₑ/Δt)
@@ -111,7 +112,6 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
 
         # New interface position
         res = Hₙ₊₁ - Hₙ - Interface_term
-        α = 1.0
         new_xf = current_xf + α * res
         err = abs(new_xf - current_xf)
         println("Iteration $iter | xf = $new_xf | error = $err | res = $res")
@@ -207,7 +207,6 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
 
             # New interface position
             res = Hₙ₊₁ - Hₙ - Interface_term
-            α = 1.0
             new_xf = current_xf + α * res
             err = abs(new_xf - current_xf)
             println("Iteration $iter | xf = $new_xf | error = $err | res = $res")
