@@ -54,6 +54,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, Œ
     œÅL = ic.flux.value
     max_iter = Newton_params[1]
     tol      = Newton_params[2]
+    reltol   = Newton_params[3]
 
     # Log residuals and interface positions for each time step:
     nt = Int(T‚Çë/Œît)
@@ -84,7 +85,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, Œ
     new_xf = current_xf
     xf = current_xf
     #¬†First time step : Newton to compute the interface position xf1
-    while (iter < max_iter) && (err > tol)
+    while (iter < max_iter) && (err > tol) && (err > reltol * abs(current_xf))
         iter += 1
 
         # 1) Solve the linear system
@@ -118,7 +119,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, Œ
         push!(residuals[1], err)
 
         # 3) Update geometry if not converged
-        if err <= tol
+        if (err <= tol) || (err <= reltol * abs(current_xf))
             push!(xf_log, new_xf)
             break
         end
@@ -143,7 +144,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, Œ
         current_xf = new_xf
     end
 
-    if err <= tol
+    if (err <= tol) || (err <= reltol * abs(current_xf))
         println("Converged after $iter iterations with xf = $new_xf, error = $err")
     else
         println("Reached max_iter = $max_iter with xf = $new_xf, error = $err")
@@ -180,7 +181,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, Œ
         new_xf = current_xf
         xf = current_xf
         #¬†Newton to compute the interface position xf1
-        while (iter < max_iter) && (err > tol)
+        while (iter < max_iter) && (err > tol) && (err > reltol * abs(current_xf))
             iter += 1
 
             # 1) Solve the linear system
@@ -214,7 +215,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, Œ
             push!(residuals[k], err)
 
             # 3) Update geometry if not converged
-            if err <= tol
+            if (err <= tol) || (err <= reltol * abs(current_xf))
                 push!(xf_log, new_xf)
                 break
             end
@@ -240,7 +241,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, Œ
 
         end
 
-        if err <= tol
+        if (err <= tol) || (err <= reltol * abs(current_xf))
             println("Converged after $iter iterations with xf = $new_xf, error = $err")
         else
             println("Reached max_iter = $max_iter with xf = $new_xf, error = $err")

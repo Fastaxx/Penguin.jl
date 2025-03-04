@@ -51,7 +51,8 @@ u0 = vcat(u0ₒ, u0ᵧ)
 # Newton parameters
 max_iter = 1000
 tol = 1e-6
-Newton_params = (max_iter, tol)
+reltol = 1e-10
+Newton_params = (max_iter, tol, reltol)
 
 # Define the solver
 solver = MovingLiquidDiffusionUnsteadyMono(Fluide, bc_b, bc, Δt, u0, mesh, "BE")
