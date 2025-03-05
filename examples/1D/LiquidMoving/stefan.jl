@@ -19,7 +19,7 @@ body = (x,t, _=0)->(x - xf)
 
 # Define the Space-Time mesh
 Δt = 0.001
-Tend = 0.01
+Tend = 0.1
 STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt], tag=mesh.tag)
 
 # Define the capacity
@@ -52,7 +52,7 @@ u0 = vcat(u0ₒ, u0ᵧ)
 max_iter = 1000
 tol = 1e-6
 reltol = 1e-10
-α = 0.5
+α = 1.0
 Newton_params = (max_iter, tol, reltol, α)
 
 # Define the solver
@@ -79,7 +79,7 @@ display(figure)
 # Plot the position
 figure = Figure()
 ax = Axis(figure[1,1], xlabel = "Time", ylabel = "Interface position", title = "Interface position")
-lines!(ax, 0.0:Δt:Tend, xf_log, label = "Interface position")
+lines!(ax, xf_log, label = "Interface position")
 display(figure)
 
 # save xf_log
