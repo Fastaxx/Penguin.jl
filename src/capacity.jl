@@ -48,10 +48,10 @@ Compute the capacity of a body in a given mesh using a specified method.
 # Returns
 - `Capacity{N}`: The capacity of the body.
 """
-function Capacity(body::Function, mesh::AbstractMesh; method::String = "VOFI")
+function Capacity(body::Function, mesh::AbstractMesh; method::String = "VOFI", compute_centroids::Bool = true)
 
     if method == "VOFI"
-        A, B, V, W, C_ω, C_γ, Γ, cell_types = VOFI(body, mesh)
+        A, B, V, W, C_ω, C_γ, Γ, cell_types = VOFI(body, mesh; compute_centroids=compute_centroids)
         N = length(A)
         return Capacity{N}(A, B, V, W, C_ω, C_γ, Γ, cell_types, mesh, body)
     elseif method == "ImplicitIntegration"
@@ -81,7 +81,7 @@ Compute the Capacity quantities based on VOFI for a given body and mesh.
 - `Γ::SparseMatrixCSC`: The Γ matrix : Interface Norm.
 
 """
-function VOFI(body::Function, mesh::AbstractMesh)
+function VOFI(body::Function, mesh::AbstractMesh; compute_centroids::Bool = true)
     N = length(mesh.nodes)
     nc = nC(mesh)
 
@@ -100,21 +100,33 @@ function VOFI(body::Function, mesh::AbstractMesh)
         B = (spdiagm(0 => Bs[1]),)
         W = (spdiagm(0 => Ws[1]),)
         Γ = spdiagm(0 => interface_length)
-        C_γ = computeInterfaceCentroids(mesh, body)
+        if compute_centroids
+            C_γ = computeInterfaceCentroids(mesh, body)
+        else
+            C_γ = Vector{SVector{1,Float64}}(undef, 0)
+        end
     elseif N == 2
         V = spdiagm(0 => Vs)
         A = (spdiagm(0 => As[1]), spdiagm(0 => As[2]))
         B = (spdiagm(0 => Bs[1]), spdiagm(0 => Bs[2]))
         W = (spdiagm(0 => Ws[1]), spdiagm(0 => Ws[2]))
         Γ = spdiagm(0 => interface_length)
-        C_γ = computeInterfaceCentroids(mesh, body)
+        if compute_centroids
+            C_γ = computeInterfaceCentroids(mesh, body)
+        else
+            C_γ = Vector{SVector{2,Float64}}(undef, 0)
+        end
     elseif N == 3
         V = spdiagm(0 => Vs)
         A = (spdiagm(0 => As[1]), spdiagm(0 => As[2]), spdiagm(0 => As[3]))
         B = (spdiagm(0 => Bs[1]), spdiagm(0 => Bs[2]), spdiagm(0 => Bs[3]))
         W = (spdiagm(0 => Ws[1]), spdiagm(0 => Ws[2]), spdiagm(0 => Ws[3]))
         Γ = spdiagm(0 => interface_length)
-        C_γ = computeInterfaceCentroids(mesh, body)
+        if compute_centroids
+            C_γ = computeInterfaceCentroids(mesh, body)
+        else
+            C_γ = Vector{SVector{3,Float64}}(undef, 0)
+        end
     end
 
     return A, B, V, W, C_ω, C_γ, Γ, cell_types

@@ -11,6 +11,7 @@ using WriteVTK
 using LsqFit
 using SpecialFunctions
 using Roots
+using Interpolations
 
 # Write your package code here.
 
