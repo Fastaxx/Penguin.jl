@@ -33,3 +33,5 @@ Manifest.toml
 
 # Ignore all files with name "sandbox"
 sandbox
+
+quarto/

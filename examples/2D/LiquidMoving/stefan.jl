@@ -15,7 +15,7 @@ domain = ((x0, lx), (y0, ly))
 mesh = Penguin.Mesh((nx, ny), (lx, ly), (x0, y0))
 
 # Define the body : Planar interface
-xf = 0.05*lx   # Interface position
+xf = 0.1*lx   # Interface position
 body = (x,y,t)-> (x - xf)
 
 # Define the Space-Time mesh
@@ -26,19 +26,18 @@ STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt], tag=mesh.tag)
 # Define the capacity
 capacity = Capacity(body, STmesh)
 
+# Initial Height
 Vn_1 = capacity.A[3][1:end÷2, 1:end÷2]
 Vn   = capacity.A[3][end÷2+1:end, end÷2+1:end]
-
 Vn = diag(Vn)
 Vn_1 = diag(Vn_1)
-
 Vn = reshape(Vn, (nx+1, ny+1))
 Vn_1 = reshape(Vn_1, (nx+1, ny+1))
 # Compute the height of each column by summing over the y-direction (columns) : dims=1 for rows and dims=2 for columns
-Hₙ = collect(vec(sum(Vn, dims=1)))
-Hₙ₊₁ = collect(vec(sum(Vn_1, dims=1)))
-println("Heights for each column at n: ", Hₙ)
-println("Heights for each column at n+1: ", Hₙ₊₁)
+Hₙ0 = collect(vec(sum(Vn, dims=1)))
+Hₙ₊₁0 = collect(vec(sum(Vn_1, dims=1)))
+println("Heights for each column at n: ", Hₙ0)
+println("Heights for each column at n+1: ", Hₙ₊₁0)
 
 # Define the diffusion operator
 operator = DiffusionOps(capacity)
@@ -47,7 +46,7 @@ operator = DiffusionOps(capacity)
 bc = Dirichlet(0.0)
 bc1 = Dirichlet(1.0)
 
-bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:left => bc1, :right => bc1, :top => bc1, :bottom => bc1))
+bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}( :bottom => bc1))
 ρ, L = 1.0, 1.0
 stef_cond = InterfaceConditions(nothing, FluxJump(1.0, 1.0, ρ*L))
 
@@ -63,7 +62,7 @@ u0ᵧ = zeros((nx+1)*(ny+1))
 u0 = vcat(u0ₒ, u0ᵧ)
 
 # Newton parameters
-max_iter = 10
+max_iter = 10000
 tol = 1e-6
 reltol = 1e-10
 α = 1.0
@@ -204,7 +203,53 @@ function b_mono_unstead_diff_moving2(operator::DiffusionOps, capacity::Capacity,
     return [b1; b2]
 end
 
-function solve_MovingLiquidDiffusionUnsteadyMono2!(s::Solver, phase::Phase, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, bc::AbstractBoundary, ic::InterfaceConditions, mesh, scheme::String; Newton_params=(1000, 1e-10, 1e-10, 1.0), method=IterativeSolvers.gmres, kwargs...)
+# Create a linear interpolant function from centroids to values.
+function create_linear_interpolant(centroids::AbstractVector{T}, values::AbstractVector{T}) where T<:Real
+    N = length(centroids)
+    @assert N == length(values) "Centroids and values must have the same length."
+    # Assumes centroids are sorted in increasing order.
+    return function (x::Real)
+        if x <= centroids[1]
+            # Extrapolate to the left
+            x0, x1 = centroids[1], centroids[2]
+            y0, y1 = values[1], values[2]
+            return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+        elseif x >= centroids[end]
+            # Extrapolate to the right
+            x0, x1 = centroids[end-1], centroids[end]
+            y0, y1 = values[end-1], values[end]
+            return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+        else
+            # Find the interval containing x using searchsortedlast
+            i = searchsortedlast(centroids, x)
+            # Ensure we have a valid index i (should be between 1 and N-1)
+            x0, x1 = centroids[i], centroids[i+1]
+            y0, y1 = values[i], values[i+1]
+            return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+        end
+    end
+end
+
+# Create a constant (upwind) interpolant function from centroids to values.
+function create_constant_interpolant(centroids::AbstractVector{T}, values::AbstractVector{T}) where T<:Real
+    N = length(centroids)
+    @assert N == length(values) "Centroids and values must have the same length."
+    return function (x::Real)
+        if x < centroids[1]
+            # Extrapolate (use the first constant value)
+            return values[1]
+        elseif x >= centroids[end]
+            # Extrapolate to the right (use the last constant value)
+            return values[end]
+        else
+            # Find the interval: return the left (upwind) value in the interval
+            i = searchsortedlast(centroids, x)
+            return values[i]
+        end
+    end
+end
+
+function solve_MovingLiquidDiffusionUnsteadyMono2!(s::Solver, phase::Phase, xf, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, bc::AbstractBoundary, ic::InterfaceConditions, mesh, scheme::String; Newton_params=(1000, 1e-10, 1e-10, 1.0), method=IterativeSolvers.gmres, kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
@@ -252,9 +297,9 @@ function solve_MovingLiquidDiffusionUnsteadyMono2!(s::Solver, phase::Phase, Δt:
 
     err = Inf
     iter = 0
-    current_xf = Hₙ
-    new_xf = current_xf
-    xf = current_xf
+    current_Hₙ = Hₙ
+    new_Hₙ = current_Hₙ
+    xf = xf
     # First time step : Newton to compute the interface position xf1
     while (iter < max_iter) && (err > tol) 
         iter += 1
@@ -263,22 +308,18 @@ function solve_MovingLiquidDiffusionUnsteadyMono2!(s::Solver, phase::Phase, Δt:
         solve_system!(s; method=method, kwargs...)
         Tᵢ = s.x
 
-        # Extract volume matrices (assumed stored diagonally in capacity.A[cap_index])
+        # 2) Recompute Height
         Vn_1 = phase.capacity.A[cap_index][1:end÷2, 1:end÷2]
         Vn   = phase.capacity.A[cap_index][end÷2+1:end, end÷2+1:end]
-
         Vn_1 = diag(Vn_1)
         Vn = diag(Vn)
-
         # Reshape them into 2D grids: (nx+1) rows, (ny+1) columns.
         Vn = reshape(Vn, (nx, ny))
         Vn_1 = reshape(Vn_1, (nx, ny))
+        Hₙ = collect(vec(sum(Vn, dims=1)))
+        Hₙ₊₁ = collect(vec(sum(Vn_1, dims=1)))
 
-        # Compute the height of each column (summing over y)
-        Hₙ   = vec(sum(Vn, dims=1))     # Hₙ is a vector of length (nx+1)
-        Hₙ₊₁ = vec(sum(Vn_1, dims=1))   # Hₙ₊₁ is a vector of length (nx+1)
-
-        # Compute the interface term
+        # 3) Compute the interface term
         W! = phase.operator.Wꜝ[1:n, 1:n]  # n = nx*ny (full 2D system)
         G  = phase.operator.G[1:n, 1:n]
         H  = phase.operator.H[1:n, 1:n]
@@ -291,20 +332,20 @@ function solve_MovingLiquidDiffusionUnsteadyMono2!(s::Solver, phase::Phase, Δt:
         Interface_term = 1/(ρL) * vec(sum(Interface_term, dims=1))
         println("Interface term: ", Interface_term)
 
-        # New interface position
+        # 4) New height function
         res = Hₙ₊₁ - Hₙ - Interface_term
         println("res: ", res)
-        new_xf = current_xf .+ α .* res            # Elementwise update for each column
-        println("new_xf: ", new_xf)
-        err = maximum(abs.(new_xf .- current_xf))
-        println("Iteration $iter | xf (max) = $(maximum(new_xf)) | err = $err")
+        new_Hₙ = current_Hₙ .+ α .* res            # Elementwise update for each column
+        println("new_xf: ", new_Hₙ)
+        err = abs.(new_Hₙ[5] .- current_Hₙ[5])
+        println("Iteration $iter | xf (max) = $(maximum(new_Hₙ)) | err = $err")
 
         # Store residuals (if desired, you could store the full vector or simply the norm)
         push!(residuals[1], err)
 
         # 3) Update geometry if not converged
         if (err <= tol) #|| (err <= reltol * maximum(abs.(current_xf)))
-            #push!(xf_log, new_xf)
+            #push!(xf_log, new_Hₙ)
             break
         end
 
@@ -313,11 +354,25 @@ function solve_MovingLiquidDiffusionUnsteadyMono2!(s::Solver, phase::Phase, Δt:
         tn  = t
 
         # Create interpolations for Hₙ and Hₙ₊₁
-        itp_Hₙ = linear_interpolation(mesh.nodes[2], Hₙ, extrapolation_bc=Interpolations.Line())
-        itp_Hₙ₊₁ = linear_interpolation(mesh.nodes[2], new_xf, extrapolation_bc=Interpolations.Line())
+        # convert mesh.nodes[2] to abstractrange  
+        
+        #centroids = range(mesh.nodes[2][1], mesh.nodes[2][end], length=length(mesh.nodes[2]))
+        #itp_Hₙ = cubic_spline_interpolation(centroids, Hₙ, extrapolation_bc=Interpolations.Periodic())
+        #itp_Hₙ₊₁ = cubic_spline_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Periodic())
+
+        #centroids = mesh.nodes[2]
+        #itp_Hₙ = create_linear_interpolant(centroids, xf)
+        #itp_Hₙ₊₁ = create_linear_interpolant(centroids, new_Hₙ)
+
+        # Compute the new interface position
+        hn = Hₙ0[3]
+        hn1 = new_Hₙ[3]
+        #xf = x0 .+ hn .*(mesh.nodes[1][2]-mesh.nodes[1][1])
+        xf1 = x0 .+ hn1.*(mesh.nodes[1][2]-mesh.nodes[1][1])
 
         # 4) Rebuild domain : # Add t interpolation : y - (hn*(tn1 - t)/(\Delta t) + hn1*(t - tn)/(\Delta t))
-        body = (xx,yy,tt) -> (xx - (itp_Hₙ(yy)*(tn1 - tt)/Δt + itp_Hₙ₊₁(yy)*(tt - tn)/Δt))
+        #body = (xx,yy,tt) -> (xx - (itp_Hₙ(yy)*(tn1 - tt)/Δt + itp_Hₙ₊₁(yy)*(tt - tn)/Δt))
+        body = (xx,yy,tt) -> (xx - (xf*(tn1 - tt)/Δt + xf1*(tt - tn)/Δt))
         STmesh = SpaceTimeMesh(mesh, [tn, tn1], tag=mesh.tag)
         capacity = Capacity(body, STmesh; compute_centroids=false)
         operator = DiffusionOps(capacity)
@@ -329,13 +384,13 @@ function solve_MovingLiquidDiffusionUnsteadyMono2!(s::Solver, phase::Phase, Δt:
         BC_border_mono!(s.A, s.b, bc_b, mesh)
 
         # 5) Update variables
-        current_xf = new_xf
+        current_Hₙ = new_Hₙ
     end
     println("End of the newton")
-    if (err <= tol) #|| (err <= reltol * abs(current_xf))
-        println("Converged after $iter iterations with xf = $new_xf, error = $err")
+    if (err <= tol) #|| (err <= reltol * abs(current_Hₙ))
+        println("Converged after $iter iterations with xf = $new_Hₙ, error = $err")
     else
-        println("Reached max_iter = $max_iter with xf = $new_xf, error = $err")
+        println("Reached max_iter = $max_iter with xf = $new_Hₙ, error = $err")
     end
     
     Tᵢ = s.x
@@ -343,126 +398,9 @@ function solve_MovingLiquidDiffusionUnsteadyMono2!(s::Solver, phase::Phase, Δt:
     println("Time : $(t[1])")
     println("Max value : $(maximum(abs.(s.x)))")
     
-    # Time loop
-    k=2
-    while t < Tₑ
-        t += Δt
-        println("Time : $(t)")
-
-        # Before reconstruction, interpolate the heights
-        #itp_Hₙ = linear_interpolation(mesh.nodes[1], Hₙ, extrapolation_bc=Line())
-        #itp_Hₙ₊₁ = linear_interpolation(mesh.nodes[1], Hₙ₊₁, extrapolation_bc=Line())
-
-        # 1) Reconstruct
-        STmesh = SpaceTimeMesh(mesh, [Δt, 2Δt], tag=mesh.tag)
-        tₙ = t - Δt
-        tₙ₊₁ = t
-        #body = (xx,yy,tt) -> (yy - (itp_Hₙ(xx)*(tₙ₊₁ - tt)/Δt + itp_Hₙ₊₁(xx)*(tt - tₙ)/Δt))
-        body = (xx,yy,tt) -> (xx - maximum(new_xf))
-        capacity = Capacity(body, STmesh; compute_centroids=false)
-        operator = DiffusionOps(capacity)
-        phase = Phase(capacity, operator, phase.source, phase.Diffusion_coeff)
-
-        s.A = A_mono_unstead_diff_moving2(phase.operator, phase.capacity, phase.Diffusion_coeff, bc, scheme)
-        s.b = b_mono_unstead_diff_moving2(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc, Tᵢ, Δt, 0.0, scheme)
-
-        BC_border_mono!(s.A, s.b, bc_b, mesh)
-
-        err = Inf
-        iter = 0
-        current_xf = new_xf
-        new_xf = current_xf
-        xf = current_xf
-        # Newton to compute the interface position xf1
-        while (iter < max_iter) && (err > tol)
-            iter += 1
-
-            # 1) Solve the linear system
-            solve_system!(s; method=method, kwargs...)
-            Tᵢ = s.x
-
-            # Extract volume matrices (assumed stored diagonally in capacity.A[cap_index])
-            Vn_1 = phase.capacity.A[cap_index][1:end÷2, 1:end÷2]
-            Vn   = phase.capacity.A[cap_index][end÷2+1:end, end÷2+1:end]
-
-            Vn_1 = diag(Vn_1)
-            Vn = diag(Vn)
-
-            # Reshape them into 2D grids: (nx+1) rows, (ny+1) columns.
-            Vn = reshape(Vn, (nx, ny))
-            Vn_1 = reshape(Vn_1, (nx, ny))
-
-            # Compute the height of each column (summing over y)
-            Hₙ   = vec(sum(Vn, dims=1))     # Hₙ is a vector of length (nx+1)
-            Hₙ₊₁ = vec(sum(Vn_1, dims=1))   # Hₙ₊₁ is a vector of length (nx+1)
-
-            # Compute the interface term
-            W! = phase.operator.Wꜝ[1:n, 1:n]  # n = nx*ny (full 2D system)
-            G  = phase.operator.G[1:n, 1:n]
-            H  = phase.operator.H[1:n, 1:n]
-            V  = phase.operator.V[1:n, 1:n]
-            Id = build_I_D(phase.operator, phase.Diffusion_coeff, phase.capacity)[1:n, 1:n]
-            Tₒ, Tᵧ = Tᵢ[1:n], Tᵢ[n+1:end]
-            # Here sum columnwise over blocks corresponding to each x; for example you can reshape the flux contribution:
-            flux_full = Id * H' * W! * G * Tₒ + Id * H' * W! * H * Tᵧ
-            flux_full = reshape(flux_full, (nx, ny))
-            Interface_term = 1/(ρL) * vec(sum(flux_full, dims=1))
-            println("Interface term: ", Interface_term)
-            # New interface position
-            res = Hₙ₊₁ - Hₙ - Interface_term
-            new_xf = current_xf .+ α .* res            # Elementwise update for each column
-            println("new_xf: ", new_xf)
-            err = maximum(abs.(new_xf .- current_xf))
-            println("Iteration $iter | xf (max) = $(maximum(new_xf)) | err = $err")
-
-            # Store residuals (if desired, you could store the full vector or simply the norm)
-            push!(residuals[1], err)
-
-            # 3) Update geometry if not converged
-            if (err <= tol) || (err <= reltol * maximum(abs.(current_xf)))
-                #push!(xf_log, new_xf)
-                break
-            end
-
-            # Store tn+1 and tn
-            tn1 = t + Δt
-            tn  = t
-
-            # Create interpolations for Hₙ and Hₙ₊₁
-            itp_Hₙ = linear_interpolation(mesh.nodes[1], Hₙ, extrapolation_bc=Line())
-            itp_Hₙ₊₁ = linear_interpolation(mesh.nodes[1], Hₙ₊₁, extrapolation_bc=Line())
-            cubic_spline_interpolation
-            # 4) Rebuild domain : # Add t interpolation : y - (hn*(tn1 - t)/(\Delta t) + hn1*(t - tn)/(\Delta t))
-            body = (xx,yy,tt) -> (yy - (itp_Hₙ(xx)*(tₙ₊₁ - tt)/Δt + itp_Hₙ₊₁(xx)*(tt - tₙ)/Δt))
-            STmesh = SpaceTimeMesh(mesh, [tn, tn1], tag=mesh.tag)
-            capacity = Capacity(body, STmesh; compute_centroids=false)
-            operator = DiffusionOps(capacity)
-            phase = Phase(capacity, operator, phase.source, phase.Diffusion_coeff)
-
-            s.A = A_mono_unstead_diff_moving2(phase.operator, phase.capacity, phase.Diffusion_coeff, bc, scheme)
-            s.b = b_mono_unstead_diff_moving2(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc, Tᵢ, Δt, t, scheme)
-        
-            BC_border_mono!(s.A, s.b, bc_b, mesh)
-
-            # 5) Update variables
-            current_xf = new_xf
-
-        end
-
-        if (err <= tol) || (err <= reltol * abs(current_xf))
-            println("Converged after $iter iterations with xf = $new_xf, error = $err")
-        else
-            println("Reached max_iter = $max_iter with xf = $new_xf, error = $err")
-        end
-
-        push!(s.states, s.x)
-        println("Time : $(t[1])")
-        println("Max value : $(maximum(abs.(s.x)))")
-        k += 1
-    end
 
     return s, residuals, xf_log
 end 
 
 # Solve the problem
-solver, residuals, xf_log = solve_MovingLiquidDiffusionUnsteadyMono2!(solver, Fluide, Δt, Tend, bc_b, bc, stef_cond, mesh, "BE"; Newton_params=Newton_params, method=Base.:\)
+solver, residuals, xf_log = solve_MovingLiquidDiffusionUnsteadyMono2!(solver, Fluide, xf, Δt, Tend, bc_b, bc, stef_cond, mesh, "BE"; Newton_params=Newton_params, method=Base.:\)
