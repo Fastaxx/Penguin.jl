@@ -13,14 +13,14 @@ lx, ly = 1., 1.
 x0, y0 = 0., 0.
 domain = ((x0, lx), (y0, ly))
 mesh = Penguin.Mesh((nx, ny), (lx, ly), (x0, y0))
-
+Δx, Δy = lx/nx, ly/ny
 # Define the body : Planar interface
 xf = 0.05lx   # Interface position
 body = (x,y,t)-> (x - xf)
 
 # Define the Space-Time mesh
 Δt = 0.001
-Tend = 0.5
+Tend = 0.05
 STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt], tag=mesh.tag)
 
 # Define the capacity
@@ -40,7 +40,7 @@ println("Heights for each column at n: ", Hₙ0)
 println("Heights for each column at n+1: ", Hₙ₊₁0)
 
 # Print the interface position
-interface_position = x0 .+ Hₙ0./(mesh.nodes[1][2]-mesh.nodes[1][1])
+interface_position = x0 .+ Hₙ0./Δy
 println("Interface position at n: ", interface_position)
 
 # Define the diffusion operator
@@ -68,7 +68,7 @@ u0 = vcat(u0ₒ, u0ᵧ)
 # Newton parameters
 max_iter = 10000
 tol = 1e-6
-reltol = 1e-10
+reltol = 1e-6
 α = 1.0
 Newton_params = (max_iter, tol, reltol, α)
 
@@ -374,7 +374,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono2!(s::Solver, phase::Phase, xf, 
         hn = Hₙ0[3]
         hn1 = new_Hₙ[3]
         #xf = x0 .+ hn .*(mesh.nodes[1][2]-mesh.nodes[1][1])
-        new_xf = x0 .+ hn1./(mesh.nodes[1][2]-mesh.nodes[1][1])
+        new_xf = x0 .+ hn1./Δy
 
         # 4) Rebuild domain : # Add t interpolation : y - (hn*(tn1 - t)/(\Delta t) + hn1*(t - tn)/(\Delta t))
         #body = (xx,yy,tt) -> (xx - (itp_Hₙ(yy)*(tn1 - tt)/Δt + itp_Hₙ₊₁(yy)*(tt - tn)/Δt))
@@ -498,7 +498,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono2!(s::Solver, phase::Phase, xf, 
             hn = Hₙ0[3]
             hn1 = new_Hₙ[3]
             #xf = x0 .+ hn .*(mesh.nodes[1][2]-mesh.nodes[1][1])
-            new_xf = x0 .+ hn1./(mesh.nodes[1][2]-mesh.nodes[1][1])
+            new_xf = x0 .+ hn1./Δy
 
             # 4) Rebuild domain : # Add t interpolation : y - (hn*(tn1 - t)/(\Delta t) + hn1*(t - tn)/(\Delta t))
             #body = (xx,yy,tt) -> (xx - (itp_Hₙ(yy)*(tn1 - tt)/Δt + itp_Hₙ₊₁(yy)*(tt - tn)/Δt))
@@ -555,6 +555,13 @@ fig = Figure()
 ax = Axis(fig[1,1], xlabel = "Time", ylabel = "Interface position", title = "Interface position (Column 5)")
 lines!(ax, time_axis, column_vals, color=:blue)
 display(fig)
+
+# Save the position of the interface of one column
+open("interface_position_$(ny)_$(nx).txt", "w") do io
+    for i in 1:length(column_vals)
+        println(io, column_vals[i])
+    end
+end
 
 # Plot the residuals for one column
 residuals = filter(x -> !isempty(x), residuals)
