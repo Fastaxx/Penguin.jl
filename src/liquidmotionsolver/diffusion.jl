@@ -113,7 +113,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
         # New interface position
         res = Hₙ₊₁ - Hₙ - Interface_term
         new_xf = current_xf + α * res
-        err = abs(new_xf - current_xf)
+        err = abs(res)
         println("Iteration $iter | xf = $new_xf | error = $err | res = $res")
         # Store residuals
         push!(residuals[1], err)
