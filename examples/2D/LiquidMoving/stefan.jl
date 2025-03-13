@@ -21,7 +21,7 @@ body = (x,y,t,_=0)->(x - sₙ(y))
 
 # Define the Space-Time mesh
 Δt = 0.01
-Tend = 0.23
+Tend = 0.34
 STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt], tag=mesh.tag)
 
 # Define the capacity
@@ -45,7 +45,7 @@ operator = DiffusionOps(capacity)
 
 # Define the boundary conditions
 bc = Dirichlet(1.0)
-bc1 = Dirichlet(-0.5)
+bc1 = Dirichlet(0.0)
 
 bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}( :bottom => bc1))
 ρ, L = 1.0, 1.0
