@@ -563,18 +563,28 @@ function animate_solution(solver, mesh::Mesh{2}, body::Function)
         # Créer un axe pour la figure
         ax = Axis(fig[1, 1], title="Monophasic Unsteady", xlabel="x", ylabel="y", aspect=DataAspect())
         
-
+        x,y = mesh.nodes[1], mesh.nodes[2]
         min_val = minimum([minimum(reshape(state[1:length(state) ÷ 2], (length(mesh.centers[1])+1, length(mesh.centers[2])+1))') for state in solver.states])
         max_val = maximum([maximum(reshape(state[1:length(state) ÷ 2], (length(mesh.centers[1])+1, length(mesh.centers[2])+1))') for state in solver.states])
 
-        hm = heatmap!(ax, reshape(states[1][1:length(states[1]) ÷ 2], (length(mesh.centers[1])+1, length(mesh.centers[2])+1))', colormap=:viridis, colorrange=(min_val, max_val))
+        hm = heatmap!(ax, x, y, reshape(states[1][1:length(states[1]) ÷ 2], (length(mesh.centers[1])+1, length(mesh.centers[2])+1))', colormap=:viridis, colorrange=(min_val, max_val))
         Colorbar(fig[1, 2], hm, label="Temperature")
 
-        update_hm(frame) = reshape(solver.states[frame][1:length(solver.states[frame]) ÷ 2], (length(mesh.centers[1])+1, length(mesh.centers[2])+1))'
-
+        # In your update function for the heatmap, ensure that you convert the transposed array 
+        # (an Adjoint) into a standard Matrix by using collect().
+        update_hm(frame) = collect(
+            reshape(
+                solver.states[frame][1:length(solver.states[frame]) ÷ 2],
+                (length(mesh.centers[1])+1, length(mesh.centers[2])+1)
+            )'
+        )
+        
+        # Then in your record block, update the heatmap as follows:
         record(fig, "heat_MonoUnsteady.mp4", 1:length(solver.states); framerate=10) do frame
-            hm[1] = update_hm(frame)
+            #hm[1] = update_hm(frame)
+            heatmap!(ax, x, y, update_hm(frame), colormap=:viridis, colorrange=(min_val, max_val))
         end
+
 
         display(fig)
     else

@@ -5,7 +5,7 @@ using CairoMakie
 
 ### 2D Test Case : Diphasic Unsteady Diffusion Equation with a Disk
 # Define the mesh
-nx, ny = 80, 80
+nx, ny = 160, 160
 lx, ly = 8., 8.
 x0, y0 = 0., 0.
 domain = ((x0, lx), (y0, ly))
@@ -46,26 +46,27 @@ u0ᵧ2 = ones((nx+1)*(ny+1))
 u0 = vcat(u0ₒ1, u0ᵧ1, u0ₒ2, u0ᵧ2)
 
 # Define the solver
-Δt = 0.01
-Tend = 1.0
+Δt = 0.1
+Tend = 5.0
 solver = DiffusionUnsteadyDiph(Fluide_1, Fluide_2, bc_b, ic, Δt, u0, "BE")
 
 # Solve the problem
-solve_DiffusionUnsteadyDiph!(solver, Fluide_1, Fluide_2, Δt, Tend, bc_b, ic, "CN"; method=Base.:\)
+solve_DiffusionUnsteadyDiph!(solver, Fluide_1, Fluide_2, Δt, Tend, bc_b, ic, "BE"; method=Base.:\)
 
 # Write the solution to a VTK file
 #write_vtk("solution", mesh, solver)
 
 # Plot the solution
-plot_solution(solver, mesh, circle, capacity, state_i=101)
+#plot_solution(solver, mesh, circle, capacity, state_i=101)
 
 # Plot the Profile
 #plot_profile(solver, mesh; x=lx/2.01)
 
 # Animation
-#animate_solution(solver, mesh, circle)
+animate_solution(solver, mesh, circle)
 
 
+"""
 
 function compute_sherwood_all(solver, capacity, capacity_c, Δt, He, L, D)
     nx = size(capacity.V, 1) - 1
@@ -132,7 +133,6 @@ scatter!(ax, Sh_val, color=:blue, label="Sherwood number")
 axislegend(ax, position=:rt)
 display(fig)
 
-"""
 # Analytical solution
 using QuadGK
 using SpecialFunctions

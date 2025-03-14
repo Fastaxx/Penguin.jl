@@ -10,7 +10,7 @@ nx, ny = 160, 160
 lx, ly = 4., 4.
 x0, y0 = 0., 0.
 domain = ((x0, lx), (y0, ly))
-mesh = Mesh((nx, ny), (lx, ly), (x0, y0))
+mesh = Penguin.Mesh((nx, ny), (lx, ly), (x0, y0))
 
 # Define the body
 radius, center = ly/4, (lx/2, ly/2) .+ (0.01, 0.01)
@@ -74,8 +74,11 @@ display(fig)
 err = reshape(err, (nx+1, ny+1))
 fig = Figure()
 ax = Axis(fig[1, 1], xlabel = "x", ylabel="y", title="Log error")
-hm = heatmap!(ax, log10.(abs.(err)), colormap=:viridis)
-Colorbar(fig[1, 2], hm, label="log10(|u(x) - u_num(x)|)")
+x,y = mesh.nodes[1], mesh.nodes[2]
+xlims!(ax, 2, 3.25)
+ylims!(ax, 2, 3.25)
+hm = heatmap!(ax, x,y,log10.(abs.(err)), colormap=:viridis)
+Colorbar(fig[1, 2], hm, label="log10(Err_rel)")
 display(fig)
 
 readline()

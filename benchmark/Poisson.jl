@@ -89,7 +89,7 @@ function run_mesh_convergence(
     ax = Axis(
         fig[1, 1],
         xlabel = "h",
-        ylabel = "Error",
+        ylabel = "L$norm error",
         title  = "Convergence plot",
         xscale = log10,
         yscale = log10
@@ -124,4 +124,12 @@ nx_list = [20, 40, 80, 160, 320, 640]
 ny_list = [20, 40, 80, 160, 320, 640]
 radius, center = 1.0, (2.0, 2.0)
 u_analytical(x,y) = 1.0 - (x-center[1])^2 - (y-center[2])^2
-run_mesh_convergence(nx_list, ny_list, radius, center, u_analytical, norm=2, relative=false)
+h_vals, err_vals, err_full_vals, err_cut_vals, err_empty_vals, p_global, p_full, p_cut = run_mesh_convergence(nx_list, ny_list, radius, center, u_analytical, norm=2, relative=false)
+
+# Write the output to a file
+open("convergence.txt", "w") do io
+    println(io, "h, err, err_full, err_cut, err_empty")
+    for (h, err, err_full, err_cut, err_empty) in zip(h_vals, err_vals, err_full_vals, err_cut_vals, err_empty_vals)
+        println(io, "$h, $err, $err_full, $err_cut, $err_empty")
+    end
+end
