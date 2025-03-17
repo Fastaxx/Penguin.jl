@@ -16,12 +16,12 @@ domain = ((x0, lx), (y0, ly))
 mesh = Penguin.Mesh((nx, ny), (lx, ly), (x0, y0))
 
 # Define the body
-sₙ(y) =  0.07*ly
+sₙ(y) =  0.1*ly + 0.05*ly*sin(2π*y/ly)
 body = (x,y,t,_=0)->(x - sₙ(y))
 
 # Define the Space-Time mesh
 Δt = 0.01
-Tend = 0.4
+Tend = 0.46
 STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt], tag=mesh.tag)
 
 # Define the capacity
@@ -64,8 +64,8 @@ u0 = vcat(u0ₒ, u0ᵧ)
 
 # Newton parameters
 max_iter = 10000
-tol = 1e-6
-reltol = 1e-6
+tol = 1e-5
+reltol = 1e-5
 α = 1.0
 Newton_params = (max_iter, tol, reltol, α)
 
@@ -288,6 +288,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono2!(s::Solver, phase::Phase, Inte
     nt = Int(Tₑ/Δt)
     residuals = [[] for _ in 1:2nt]
     xf_log = []
+    reconstruct = []
 
     # Determine how many dimensions
     dims = phase.operator.size
@@ -381,7 +382,9 @@ function solve_MovingLiquidDiffusionUnsteadyMono2!(s::Solver, phase::Phase, Inte
         # 7) Construct a interpolation function for the new interface position : sn and sn+1
         centroids = range(mesh.nodes[2][1], mesh.nodes[2][end], length=length(mesh.nodes[2]))
         #centroids = collect(centroids)
-        sₙ₊₁ =  extrapolate(scale(interpolate(new_xf, BSpline(Quadratic())), centroids), Interpolations.Flat()) #cubic_spline_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Flat())
+        #sₙ₊₁ = extrapolate(scale(interpolate(new_xf, BSpline(Quadratic())), centroids), Interpolations.Periodic()) #
+        #sₙ₊₁ = cubic_spline_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Periodic())
+        sₙ₊₁ = linear_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Periodic())
    
         # 8) Rebuild the domain : # Add t interpolation : x - (xf*(tn1 - t)/(\Delta t) + xff*(t - tn)/(\Delta t))
         body = (xx,yy,tt,_=0)->(xx - (sₙ(yy)*(tₙ₊₁ - tt)/Δt + sₙ₊₁(yy)*(tt - tₙ)/Δt))
@@ -421,8 +424,12 @@ function solve_MovingLiquidDiffusionUnsteadyMono2!(s::Solver, phase::Phase, Inte
         # 1) Construct an interpolation function for the interface position
         centroids = range(mesh.nodes[2][1], mesh.nodes[2][end], length=length(mesh.nodes[2]))
         #centroids = collect(centroids)
-        sₙ = extrapolate(scale(interpolate(current_xf, BSpline(Quadratic())), centroids), Interpolations.Flat()) #cubic_spline_interpolation(centroids, current_xf, extrapolation_bc=Interpolations.Flat())
-        sₙ₊₁ = extrapolate(scale(interpolate(new_xf, BSpline(Quadratic())), centroids), Interpolations.Flat()) #cubic_spline_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Flat())
+        #sₙ = extrapolate(scale(interpolate(current_xf, BSpline(Quadratic())), centroids), Interpolations.Periodic()) #
+        #sₙ = cubic_spline_interpolation(centroids, current_xf, extrapolation_bc=Interpolations.Periodic())
+        sₙ = linear_interpolation(centroids, current_xf, extrapolation_bc=Interpolations.Periodic())
+        #sₙ₊₁ = extrapolate(scale(interpolate(new_xf, BSpline(Quadratic())), centroids), Interpolations.Periodic()) #
+        #sₙ₊₁ = cubic_spline_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Periodic())
+        sₙ₊₁ = linear_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Periodic())
 
         # 1) Reconstruct
         STmesh = SpaceTimeMesh(mesh, [Δt, 2Δt], tag=mesh.tag)
@@ -435,6 +442,8 @@ function solve_MovingLiquidDiffusionUnsteadyMono2!(s::Solver, phase::Phase, Inte
         s.b = b_mono_unstead_diff_moving2(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc, Tᵢ, Δt, 0.0, scheme)
 
         BC_border_mono!(s.A, s.b, bc_b, mesh)
+
+        push!(reconstruct, sₙ₊₁)
 
         # Initialize newton variables
         err = Inf
@@ -510,7 +519,9 @@ function solve_MovingLiquidDiffusionUnsteadyMono2!(s::Solver, phase::Phase, Inte
             # 7) Construct a interpolation function for the new interface position :
             centroids = range(mesh.nodes[2][1], mesh.nodes[2][end], length=length(mesh.nodes[2]))
             #centroids = collect(centroids)
-            sₙ₊₁ = extrapolate(scale(interpolate(new_xf, BSpline(Quadratic())), centroids), Interpolations.Flat()) #cubic_spline_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Flat())
+            #sₙ₊₁ = extrapolate(scale(interpolate(new_xf, BSpline(Quadratic())), centroids), Interpolations.Periodic()) 
+            #sₙ₊₁ = cubic_spline_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Periodic())
+            sₙ₊₁ = linear_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Periodic())
 
             # 8) Rebuild the domain : # Add t interpolation : x - (xf*(tn1 - t)/(\Delta t) + xff*(t - tn)/(\Delta t))
             body = (xx,yy,tt,_=0)->(xx - (sₙ(yy)*(tₙ₊₁ - tt)/Δt + sₙ₊₁(yy)*(tt - tₙ)/Δt))
@@ -542,12 +553,12 @@ function solve_MovingLiquidDiffusionUnsteadyMono2!(s::Solver, phase::Phase, Inte
         println("Max value : $(maximum(abs.(s.x)))")
         k+=1
     end
-return s, residuals, xf_log
+return s, residuals, xf_log, reconstruct
 
 end 
 
 # Solve the problem
-solver, residuals, xf_log = solve_MovingLiquidDiffusionUnsteadyMono2!(solver, Fluide, Interface_position, Hₙ⁰, Δt, Tend, bc_b, bc, stef_cond, mesh, "BE"; Newton_params=Newton_params, method=Base.:\)
+solver, residuals, xf_log, reconstruct = solve_MovingLiquidDiffusionUnsteadyMono2!(solver, Fluide, Interface_position, Hₙ⁰, Δt, Tend, bc_b, bc, stef_cond, mesh, "BE"; Newton_params=Newton_params, method=Base.:\)
 
 # Plot the position of the interface
 
@@ -613,3 +624,24 @@ levels = [0.01, 0.05, 0.1, 0.2, 0.5]
 contour!(ax, T_field, levels=levels, linewidth=2)
 
 display(fig)
+
+# Evaluate the amplitude of reconstructed interface
+# reconstruct is a vector of functions that interpolate the interface position at each time step.
+# For example, to evaluate the amplitude of the interface at the first time step:
+
+centroids = range(mesh.nodes[2][1], mesh.nodes[2][end], length=length(mesh.nodes[2]))
+amplitude = Float64[]
+for i in 1:length(reconstruct)
+    s = reconstruct[i]
+    # Evaluate the function at the centroids
+    values = s.(centroids)
+    # Compute the amplitude
+    push!(amplitude, (maximum(values) - minimum(values)) / 2)
+end
+
+# Plot the amplitude of the interface over time
+fig = Figure()
+ax = Axis(fig[1,1], xlabel="Time", ylabel="Amplitude", title="Interface Amplitude")
+lines!(ax, Δt * collect(1:length(amplitude)), amplitude, color=:blue)
+display(fig)
+
