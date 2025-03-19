@@ -8,16 +8,19 @@ using Interpolations
 
 ### 2D Test Case : One-phase Stefan Problem : Growing Planar Interface
 # Define the spatial mesh
-nx, ny = 40, 40
+nx, ny = 80, 80
 lx, ly = 1., 1.
 x0, y0 = 0., 0.
 Δx, Δy = lx/(nx), ly/(ny)
 domain = ((x0, lx), (y0, ly))
 mesh = Penguin.Mesh((nx, ny), (lx, ly), (x0, y0))
 
-# Define the body
-sₙ(y) =  0.1*ly + 0.05*ly*sin(2π*y/ly)
-body = (x,y,t,_=0)->(x - sₙ(y))
+# Define the body with a Gaussian bump
+amplitude = 0.1 * ly
+center = 0.5 * ly
+sigma = 0.1 * ly
+sₙ(y) = 0.1 * ly + amplitude * exp(-((y - center)^2) / (2*sigma^2))
+body = (x, y, t, _=0) -> (x - sₙ(y))
 
 # Define the Space-Time mesh
 Δt = 0.01
@@ -261,7 +264,7 @@ function create_full_constant_interpolant(values::AbstractVector{T}) where T<:Re
     end
 end
 
-function solve_MovingLiquidDiffusionUnsteadyMono2!(s::Solver, phase::Phase, Interface_position, Hₙ⁰, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, bc::AbstractBoundary, ic::InterfaceConditions, mesh, scheme::String; Newton_params=(1000, 1e-10, 1e-10, 1.0), method=IterativeSolvers.gmres, kwargs...)
+function solve_MovingLiquidDiffusionUnsteadyMono2!(s::Solver, phase::Phase, Interface_position, Hₙ⁰, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, bc::AbstractBoundary, ic::InterfaceConditions, mesh, scheme::String; interpo="linear", Newton_params=(1000, 1e-10, 1e-10, 1.0), method=IterativeSolvers.gmres, kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
@@ -381,11 +384,16 @@ function solve_MovingLiquidDiffusionUnsteadyMono2!(s::Solver, phase::Phase, Inte
 
         # 7) Construct a interpolation function for the new interface position : sn and sn+1
         centroids = range(mesh.nodes[2][1], mesh.nodes[2][end], length=length(mesh.nodes[2]))
-        #centroids = collect(centroids)
-        #sₙ₊₁ = extrapolate(scale(interpolate(new_xf, BSpline(Quadratic())), centroids), Interpolations.Periodic()) #
-        #sₙ₊₁ = cubic_spline_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Periodic())
-        sₙ₊₁ = linear_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Periodic())
-   
+        if interpo == "linear"
+            sₙ₊₁ = linear_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Periodic())
+        elseif interpo == "quad"
+            sₙ₊₁ = extrapolate(scale(interpolate(new_xf, BSpline(Quadratic())), centroids), Interpolations.Periodic())
+        elseif interpo == "cubic"
+            sₙ₊₁ = cubic_spline_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Periodic())
+        else
+            println("Interpolation method not supported")
+        end
+
         # 8) Rebuild the domain : # Add t interpolation : x - (xf*(tn1 - t)/(\Delta t) + xff*(t - tn)/(\Delta t))
         body = (xx,yy,tt,_=0)->(xx - (sₙ(yy)*(tₙ₊₁ - tt)/Δt + sₙ₊₁(yy)*(tt - tₙ)/Δt))
         STmesh = SpaceTimeMesh(mesh, [tₙ, tₙ₊₁], tag=mesh.tag)
@@ -424,12 +432,18 @@ function solve_MovingLiquidDiffusionUnsteadyMono2!(s::Solver, phase::Phase, Inte
         # 1) Construct an interpolation function for the interface position
         centroids = range(mesh.nodes[2][1], mesh.nodes[2][end], length=length(mesh.nodes[2]))
         #centroids = collect(centroids)
-        #sₙ = extrapolate(scale(interpolate(current_xf, BSpline(Quadratic())), centroids), Interpolations.Periodic()) #
-        #sₙ = cubic_spline_interpolation(centroids, current_xf, extrapolation_bc=Interpolations.Periodic())
-        sₙ = linear_interpolation(centroids, current_xf, extrapolation_bc=Interpolations.Periodic())
-        #sₙ₊₁ = extrapolate(scale(interpolate(new_xf, BSpline(Quadratic())), centroids), Interpolations.Periodic()) #
-        #sₙ₊₁ = cubic_spline_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Periodic())
-        sₙ₊₁ = linear_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Periodic())
+        if interpo == "linear"
+            sₙ = linear_interpolation(centroids, current_xf, extrapolation_bc=Interpolations.Periodic())
+            sₙ₊₁ = linear_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Periodic())
+        elseif interpo == "quad"
+            sₙ = extrapolate(scale(interpolate(current_xf, BSpline(Quadratic())), centroids), Interpolations.Periodic())
+            sₙ₊₁ = extrapolate(scale(interpolate(new_xf, BSpline(Quadratic())), centroids), Interpolations.Periodic())
+        elseif interpo == "cubic"
+            sₙ = cubic_spline_interpolation(centroids, current_xf, extrapolation_bc=Interpolations.Periodic())
+            sₙ₊₁ = cubic_spline_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Periodic())
+        else
+            println("Interpolation method not supported")
+        end
 
         # 1) Reconstruct
         STmesh = SpaceTimeMesh(mesh, [Δt, 2Δt], tag=mesh.tag)
@@ -518,10 +532,15 @@ function solve_MovingLiquidDiffusionUnsteadyMono2!(s::Solver, phase::Phase, Inte
 
             # 7) Construct a interpolation function for the new interface position :
             centroids = range(mesh.nodes[2][1], mesh.nodes[2][end], length=length(mesh.nodes[2]))
-            #centroids = collect(centroids)
-            #sₙ₊₁ = extrapolate(scale(interpolate(new_xf, BSpline(Quadratic())), centroids), Interpolations.Periodic()) 
-            #sₙ₊₁ = cubic_spline_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Periodic())
-            sₙ₊₁ = linear_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Periodic())
+            if interpo == "linear"
+                sₙ₊₁ = linear_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Periodic())
+            elseif interpo == "quad"
+                sₙ₊₁ = extrapolate(scale(interpolate(new_xf, BSpline(Quadratic())), centroids), Interpolations.Periodic())
+            elseif interpo == "cubic"
+                sₙ₊₁ = cubic_spline_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Periodic())
+            else
+                println("Interpolation method not supported")
+            end
 
             # 8) Rebuild the domain : # Add t interpolation : x - (xf*(tn1 - t)/(\Delta t) + xff*(t - tn)/(\Delta t))
             body = (xx,yy,tt,_=0)->(xx - (sₙ(yy)*(tₙ₊₁ - tt)/Δt + sₙ₊₁(yy)*(tt - tₙ)/Δt))
@@ -645,3 +664,10 @@ ax = Axis(fig[1,1], xlabel="Time", ylabel="Amplitude", title="Interface Amplitud
 lines!(ax, Δt * collect(1:length(amplitude)), amplitude, color=:blue)
 display(fig)
 
+# write the amplitude to a file
+interpo = "linear"  # define default interpolation method
+open("amplitude_$(interpo)_$(ny).txt", "w") do io
+    for i in 1:length(amplitude)
+        println(io, i, "\t", amplitude[i])
+    end
+end
