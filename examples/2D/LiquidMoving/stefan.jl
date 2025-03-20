@@ -8,7 +8,7 @@ using Interpolations
 
 ### 2D Test Case : One-phase Stefan Problem : Growing Planar Interface
 # Define the spatial mesh
-nx, ny = 160, 160
+nx, ny = 80, 80
 lx, ly = 1., 1.
 x0, y0 = 0., 0.
 Δx, Δy = lx/(nx), ly/(ny)
@@ -16,12 +16,12 @@ domain = ((x0, lx), (y0, ly))
 mesh = Penguin.Mesh((nx, ny), (lx, ly), (x0, y0))
 
 # Define the body
-sₙ(y) =  0.95*lx + 0.025*sin(4π*y+π/2)
+sₙ(y) =  0.75*lx + 0.025*sin(4π*y+π/2)
 body = (x,y,t,_=0)->(x - sₙ(y))
 
 # Define the Space-Time mesh
 Δt = 0.01
-Tend = 0.39
+Tend = 0.18
 STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt], tag=mesh.tag)
 
 # Define the capacity
@@ -45,6 +45,8 @@ operator = DiffusionOps(capacity)
 
 # Define the boundary conditions
 bc = Dirichlet(1.0)
+ϵᵥ = 1.0
+bc = GibbsThomson(1.0, 0.0, ϵᵥ, operator)
 bc1 = Dirichlet(0.0)
 
 bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}( :bottom => bc1))
@@ -64,8 +66,8 @@ u0 = vcat(u0ₒ, u0ᵧ)
 
 # Newton parameters
 max_iter = 10000
-tol = 1e-6
-reltol = 1e-6
+tol = 1e-7
+reltol = 1e-7
 α = 1.0
 Newton_params = (max_iter, tol, reltol, α)
 
@@ -261,7 +263,7 @@ function create_full_constant_interpolant(values::AbstractVector{T}) where T<:Re
     end
 end
 
-function solve_MovingLiquidDiffusionUnsteadyMono2!(s::Solver, phase::Phase, Interface_position, Hₙ⁰, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, bc::AbstractBoundary, ic::InterfaceConditions, mesh, scheme::String; interpo="linear", Newton_params=(1000, 1e-10, 1e-10, 1.0), method=IterativeSolvers.gmres, kwargs...)
+function solve_MovingLiquidDiffusionUnsteadyMono2!(s::Solver, phase::Phase, Interface_position, Hₙ⁰, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, bc::AbstractBoundary, ic::InterfaceConditions, mesh, scheme::String; interpo="quad", Newton_params=(1000, 1e-10, 1e-10, 1.0), method=IterativeSolvers.gmres, kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
@@ -349,6 +351,17 @@ function solve_MovingLiquidDiffusionUnsteadyMono2!(s::Solver, phase::Phase, Inte
         Id = Id[1:n, 1:n]
         Tₒ, Tᵧ = Tᵢ[1:n], Tᵢ[n+1:end]
         Interface_term = Id * H' * W! * G * Tₒ + Id * H' * W! * H * Tᵧ
+        
+        # Check if bc is a Gibbs-Thomson condition
+        if bc isa GibbsThomson
+            velocity = 1/(ρL) * abs.(Interface_term) / Δt # Still need to find the interface velocity. Right now i've got the lower veloc
+            @show velocity
+            np = prod(phase.operator.size)
+            # Complete the velocity vector with zeros
+            velocity = vcat(velocity, zeros(np-length(velocity)))
+            bc.vᵞ = velocity
+        end
+
         Interface_term = reshape(Interface_term, (nx, ny))
         Interface_term = 1/(ρL) * vec(sum(Interface_term, dims=1))
         println("Interface term: ", Interface_term)
@@ -497,6 +510,17 @@ function solve_MovingLiquidDiffusionUnsteadyMono2!(s::Solver, phase::Phase, Inte
             Id = Id[1:n, 1:n]
             Tₒ, Tᵧ = Tᵢ[1:n], Tᵢ[n+1:end]
             Interface_term = Id * H' * W! * G * Tₒ + Id * H' * W! * H * Tᵧ
+                    
+            # Check if bc is a Gibbs-Thomson condition
+            if bc isa GibbsThomson
+                velocity = 1/(ρL) * abs.(Interface_term)/ Δt # Still need to find the interface velocity
+                @show velocity
+                np = prod(phase.operator.size)
+                # Complete the velocity vector with zeros
+                velocity = vcat(velocity, zeros(np-length(velocity)))
+                bc.vᵞ = velocity
+            end
+
             Interface_term = reshape(Interface_term, (nx, ny))
             Interface_term = 1/(ρL) * vec(sum(Interface_term, dims=1))
             println("Interface term: ", Interface_term)
@@ -670,7 +694,7 @@ display(fig)
 
 # write the amplitude to a file
 interpo = "linear"  # define default interpolation method
-open("amplitude_$(interpo)_$(ny).txt", "w") do io
+open("amplitude_$(ϵᵥ)_$(ny).txt", "w") do io
     for i in 1:length(amplitude)
         println(io, i, "\t", amplitude[i])
     end

@@ -16,15 +16,16 @@ domain = ((x0, lx), (y0, ly))
 mesh = Penguin.Mesh((nx, ny), (lx, ly), (x0, y0))
 
 # Define the body with a Gaussian bump
-amplitude = 0.1 * ly
+ampl = 0.05 * ly
 center = 0.5 * ly
 sigma = 0.1 * ly
-sₙ(y) = 0.1 * ly + amplitude * exp(-((y - center)^2) / (2*sigma^2))
+#sₙ(y) = 0.1 * ly + ampl * exp(-((y - center)^2) / (2*sigma^2))
+sₙ(y) = 0.2 * ly + ampl * ly * sin(4π*y/ly-π/2)
 body = (x, y, t, _=0) -> (x - sₙ(y))
 
 # Define the Space-Time mesh
 Δt = 0.01
-Tend = 0.46
+Tend = 0.2
 STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt], tag=mesh.tag)
 
 # Define the capacity
@@ -48,6 +49,8 @@ operator = DiffusionOps(capacity)
 
 # Define the boundary conditions
 bc = Dirichlet(0.0)
+ϵᵥ = 0.0
+bc = GibbsThomson(0.0, 0.0, ϵᵥ, operator)
 bc1 = Dirichlet(1.0)
 
 bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:bottom => bc1))
@@ -352,6 +355,17 @@ function solve_MovingLiquidDiffusionUnsteadyMono2!(s::Solver, phase::Phase, Inte
         Id = Id[1:n, 1:n]
         Tₒ, Tᵧ = Tᵢ[1:n], Tᵢ[n+1:end]
         Interface_term = Id * H' * W! * G * Tₒ + Id * H' * W! * H * Tᵧ
+        
+        # Check if bc is a Gibbs-Thomson condition
+        if bc isa GibbsThomson
+            velocity = 1/(ρL) * abs.(Interface_term) / Δt # Still need to find the interface velocity. Right now i've got the lower veloc
+            @show velocity
+            np = prod(phase.operator.size)
+            # Complete the velocity vector with zeros
+            velocity = vcat(velocity, zeros(np-length(velocity)))
+            bc.vᵞ = velocity
+        end
+
         Interface_term = reshape(Interface_term, (nx, ny))
         Interface_term = 1/(ρL) * vec(sum(Interface_term, dims=1))
         println("Interface term: ", Interface_term)
@@ -500,6 +514,17 @@ function solve_MovingLiquidDiffusionUnsteadyMono2!(s::Solver, phase::Phase, Inte
             Id = Id[1:n, 1:n]
             Tₒ, Tᵧ = Tᵢ[1:n], Tᵢ[n+1:end]
             Interface_term = Id * H' * W! * G * Tₒ + Id * H' * W! * H * Tᵧ
+                    
+            # Check if bc is a Gibbs-Thomson condition
+            if bc isa GibbsThomson
+                velocity = 1/(ρL) * abs.(Interface_term)/ Δt # Still need to find the interface velocity
+                @show velocity
+                np = prod(phase.operator.size)
+                # Complete the velocity vector with zeros
+                velocity = vcat(velocity, zeros(np-length(velocity)))
+                bc.vᵞ = velocity
+            end
+
             Interface_term = reshape(Interface_term, (nx, ny))
             Interface_term = 1/(ρL) * vec(sum(Interface_term, dims=1))
             println("Interface term: ", Interface_term)
@@ -666,7 +691,7 @@ display(fig)
 
 # write the amplitude to a file
 interpo = "linear"  # define default interpolation method
-open("amplitude_$(interpo)_$(ny).txt", "w") do io
+open("amplitude_$(ampl)_$(ny).txt", "w") do io
     for i in 1:length(amplitude)
         println(io, i, "\t", amplitude[i])
     end
