@@ -127,6 +127,8 @@ function build_I_bc(operator::AbstractOperators,bc::AbstractBoundary)
 
     if bc isa Dirichlet
         Iₐ = I(n)
+    elseif bc isa GibbsThomson
+        Iₐ = I(n)
     elseif bc isa Neumann
         Iᵦ = I(n)
     elseif bc isa Robin
@@ -288,6 +290,12 @@ function build_g_g(operator::AbstractOperators, bc::Union{AbstractBoundary, Abst
     else
         gᵧ = bc.value * gᵧ
     end
+    return gᵧ
+end
+
+function build_g_g(operator::AbstractOperators, bc::GibbsThomson, capacite::Capacity)
+    n = prod(operator.size)
+    gᵧ = bc.Tm*ones(n) .- bc.ϵᵥ .* bc.vᵞ
     return gᵧ
 end
 

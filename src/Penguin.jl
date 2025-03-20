@@ -30,6 +30,7 @@ export DiffusionOps, ConvectionOps
 include("boundary.jl")
 export AbstractBoundary, Dirichlet, Neumann, Robin, Periodic
 export AbstractInterfaceBC, ScalarJump, FluxJump, BorderConditions, InterfaceConditions
+export GibbsThomson
 
 include("phase.jl")
 export Phase
@@ -68,6 +69,7 @@ export MovingDiffusionUnsteadyDiph, solve_MovingDiffusionUnsteadyDiph!
 
 include("liquidmotionsolver/diffusion.jl")
 export MovingLiquidDiffusionUnsteadyMono, solve_MovingLiquidDiffusionUnsteadyMono!
+export MovingLiquidDiffusionUnsteadyDiph, solve_MovingLiquidDiffusionUnsteadyDiph!
 
 include("vizualize.jl")
 export plot_solution, animate_solution

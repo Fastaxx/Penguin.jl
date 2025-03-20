@@ -101,3 +101,24 @@ struct InterfaceConditions
     scalar::Union{Nothing, AbstractInterfaceBC}
     flux::Union{Nothing,AbstractInterfaceBC}
 end
+
+"""
+    GibbsThomson(Tm, ϵₖ, ϵᵥ)
+
+A Gibbs-Thomson boundary condition for the interface
+- Tm: Melting temperature
+- ϵₖ: Capillarity coefficient
+- ϵᵥ: Kinetic coefficient
+"""
+mutable struct GibbsThomson <: AbstractBoundary
+    Tm::Float64
+    ϵₖ::Float64
+    ϵᵥ::Float64
+    vᵞ::Vector{Float64}
+    value::Float64
+
+    function GibbsThomson(Tm::Float64, ϵₖ::Float64, ϵᵥ::Float64, operator::AbstractOperators)
+        # Initialize the vector by zeros 
+        new(Tm, ϵₖ, ϵᵥ, zeros(prod(operator.size)), Tm)
+    end
+end
