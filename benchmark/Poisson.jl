@@ -66,23 +66,45 @@ function run_mesh_convergence(
     # Fit each on log scale: log(err) = p*log(h) + c
     log_h = log.(h_vals)
 
-    function do_fit(log_err)
-        fit_result = curve_fit(fit_model, log_h, log_err, [-1.0, 0.0])
+    function do_fit(log_err, use_last_n=3)
+        # Use only the last n points (default 3)
+        n = min(use_last_n, length(log_h))
+        idx = length(log_h) - n + 1 : length(log_h)
+        
+        # Fit using only those points
+        fit_result = curve_fit(fit_model, log_h[idx], log_err[idx], [-1.0, 0.0])
         return fit_result.param[1], fit_result.param[2]  # (p_est, c_est)
     end
 
-    p_global, _ = do_fit(log.(err_vals))
-    p_full,   _ = do_fit(log.(err_full_vals))
-    p_cut,    _ = do_fit(log.(err_cut_vals))
+    # Get convergence rates for all points
+    p_global_all, _ = do_fit(log.(err_vals), length(h_vals))
+    p_full_all,   _ = do_fit(log.(err_full_vals), length(h_vals))
+    p_cut_all,    _ = do_fit(log.(err_cut_vals), length(h_vals))
 
-    # Round
-    p_global = round(p_global, digits=2)
-    p_full   = round(p_full, digits=2)
-    p_cut    = round(p_cut, digits=2)
+    # Get convergence rates for just the last 3 points
+    p_global, _ = do_fit(log.(err_vals), 3)
+    p_full,   _ = do_fit(log.(err_full_vals), 3)
+    p_cut,    _ = do_fit(log.(err_cut_vals), 3)
 
-    println("Estimated order of convergence (global) = ", p_global)
-    println("Estimated order of convergence (full)   = ", p_full)
-    println("Estimated order of convergence (cut)    = ", p_cut)
+    # Round
+    p_global = round(p_global, digits=1)
+    p_full   = round(p_full, digits=1)
+    p_cut    = round(p_cut, digits=1)
+
+    p_global_all = round(p_global_all, digits=1)
+    p_full_all   = round(p_full_all, digits=1)
+    p_cut_all    = round(p_cut_all, digits=1)
+
+    println("Estimated order of convergence (all points):")
+    println("  - Global = ", p_global_all)
+    println("  - Full   = ", p_full_all)
+    println("  - Cut    = ", p_cut_all)
+
+    println("\nEstimated order of convergence (last 3 points):")
+    println("  - Global = ", p_global)
+    println("  - Full   = ", p_full)
+    println("  - Cut    = ", p_cut)
+
 
     # Plot in log-log scale
     fig = Figure()
@@ -92,7 +114,13 @@ function run_mesh_convergence(
         ylabel = "L$norm error",
         title  = "Convergence plot",
         xscale = log10,
-        yscale = log10
+        yscale = log10,
+        xminorticksvisible = true, 
+        xminorgridvisible = true,
+        xminorticks = IntervalsBetween(5),
+        yminorticksvisible = true,
+        yminorgridvisible = true,
+        yminorticks = IntervalsBetween(5),
     )
 
     scatter!(ax, h_vals, err_vals,       label="All cells ($p_global)", markersize=12)
