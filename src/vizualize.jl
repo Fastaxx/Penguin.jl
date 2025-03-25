@@ -523,16 +523,21 @@ function animate_solution(solver, mesh::Mesh{1}, body::Function)
         ax1 = Axis(fig[1, 1], title="Diphasic Unsteady - Phase 1", xlabel="x", ylabel="u1")
         ax2 = Axis(fig[2, 1], title="Diphasic Unsteady - Phase 2", xlabel="x", ylabel="u2")
 
+        x = mesh.nodes[1]
+        ylims!(ax1, (0.0, 1.0))
+        ylims!(ax2, (0.0, 1.0))
+        xlims!(ax1, (minimum(x), maximum(x)))
+        xlims!(ax2, (minimum(x), maximum(x)))
         # Créer une fonction pour mettre à jour la figure
         function update_plot(frame)
             # Récupérer l'état
             state = states[frame]
 
             # Tracer l'état
-            lines!(ax1, state[1:length(state) ÷ 4], color=:blue, alpha=0.3, label="Bulk")
-            lines!(ax1, state[length(state) ÷ 4 + 1:2*length(state) ÷ 4], color=:green, alpha=0.3, label="Interface")
-            lines!(ax2, state[2*length(state) ÷ 4 + 1:3*length(state) ÷ 4], color=:blue, alpha=0.3, label="Bulk")
-            lines!(ax2, state[3*length(state) ÷ 4 + 1:end], color=:green, alpha=0.3, label="Interface")
+            lines!(ax1, x, state[1:length(state) ÷ 4], color=:blue, alpha=0.3, label="Bulk")
+            lines!(ax1, x, state[length(state) ÷ 4 + 1:2*length(state) ÷ 4], color=:green, alpha=0.3, label="Interface")
+            lines!(ax2, x, state[2*length(state) ÷ 4 + 1:3*length(state) ÷ 4], color=:blue, alpha=0.3, label="Bulk")
+            lines!(ax2, x, state[3*length(state) ÷ 4 + 1:end], color=:green, alpha=0.3, label="Interface")
 
         end
 
