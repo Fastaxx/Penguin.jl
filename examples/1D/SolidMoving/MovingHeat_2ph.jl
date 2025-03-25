@@ -6,20 +6,20 @@ using SparseArrays
 ### 1D Test Case : Diphasic Unsteady Diffusion Equation inside a moving body
 # Define the spatial mesh
 nx = 160
-lx = 10.0
+lx = 8.0
 x0 = 0.0
 domain = ((x0, lx),)
 mesh = Penguin.Mesh((nx,), (lx,), (x0,))
 
 # Define the body
-xf = 0.01*lx   # Interface position
-c = 1.0        # Interface velocity
-body = (x,t, _=0)->(x - xf - c*sqrt(t))
-body_c = (x,t, _=0)->-(x - xf - c*sqrt(t))
+xf = 4.0   # Interface position
+c = 0.0        # Interface velocity
+body = (x,t, _=0)->(x - xf)
+body_c = (x,t, _=0)->-(x - xf)
 
 # Define the Space-Time mesh
 Δt = 0.01
-Tend = 1.0
+Tend = 0.5
 STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt], tag=mesh.tag)
 
 # Define the capacity
