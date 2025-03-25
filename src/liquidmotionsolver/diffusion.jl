@@ -264,23 +264,25 @@ end
 function A_diph_unstead_diff_moving_stef(operator1::DiffusionOps, operator2::DiffusionOps, capacite1::Capacity, capacite2::Capacity, D1, D2, ic::InterfaceConditions, scheme::String)
     # Determine dimensionality from operator1
     dims1 = operator1.size
+    dims2 = operator2.size
     len_dims1 = length(dims1)
+    len_dims2 = length(dims2)
 
     # For both phases, define n1 and n2 as total dof
     n1 = prod(dims1)
-    n2 = prod(operator2.size)
+    n2 = prod(dims2)
 
     # If 1D => n = nx; if 2D => n = nx*ny
     # (We use the same dimension logic for each operator.)
     if len_dims1 == 2
         # 1D problem
         nx1, _ = dims1
-        nx2, _ = operator2.size
+        nx2, _ = dims2
         n = nx1  # used for sub-block sizing
     elseif len_dims1 == 3
         # 2D problem
         nx1, ny1, _ = dims1
-        nx2, ny2, _ = operator2.size
+        nx2, ny2, _ = dims2
         n = nx1 * ny1
     else
         error("Only 1D or 2D supported, got dimension: $len_dims1")
@@ -293,12 +295,12 @@ function A_diph_unstead_diff_moving_stef(operator1::DiffusionOps, operator2::Dif
     Iᵦ1, Iᵦ2 = flux.β₁ * I(n), flux.β₂ * I(n)
 
     # Build diffusion operators
-    Id1 = capacite1.Γ
-    Id2 = capacite2.Γ
+    Id1 = build_I_D(operator1, D1, capacite1)
+    Id2 = build_I_D(operator2, D2, capacite2)
 
     # Capacity indexing (2 for 1D, 3 for 2D)
     cap_index1 = len_dims1
-    cap_index2 = length(operator2.size)
+    cap_index2 = len_dims2
 
     # Extract Vr−1 and Vr
     Vn1_1 = capacite1.A[cap_index1][1:end÷2, 1:end÷2]
@@ -355,7 +357,7 @@ function A_diph_unstead_diff_moving_stef(operator1::DiffusionOps, operator2::Dif
     A[n+1:2n, 1:n]      = spzeros(n, n)
     A[n+1:2n, n+1:2n]   = Iₐ1
     A[n+1:2n, 2n+1:3n]  = spzeros(n, n)
-    A[n+1:2n, 3n+1:4n]  = -Iₐ2
+    A[n+1:2n, 3n+1:4n]  = spzeros(n, n) #-Iₐ2
 
     A[2n+1:3n, 1:n]     = spzeros(n, n)
     A[2n+1:3n, n+1:2n]  = spzeros(n, n)

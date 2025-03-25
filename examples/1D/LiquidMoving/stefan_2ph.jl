@@ -2,23 +2,24 @@ using Penguin
 using IterativeSolvers
 using LinearAlgebra
 using SparseArrays
+using CairoMakie
 
 ### 1D Test Case : Diphasic Unsteady Diffusion Equation inside a moving body
 # Define the spatial mesh
-nx = 160
-lx = 10.0
+nx = 2560
+lx = 1.0
 x0 = 0.0
 domain = ((x0, lx),)
 mesh = Penguin.Mesh((nx,), (lx,), (x0,))
 
 # Define the body
-xf = 0.1*lx   # Interface position
+xf = 0.05*lx   # Interface position
 body = (x,t, _=0)->(x - xf)
 body_c = (x,t, _=0)->-(x - xf)
 
 # Define the Space-Time mesh
 Δt = 0.001
-Tend = 1.0
+Tend = 0.1
 STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt], tag=mesh.tag)
 
 # Define the capacity
@@ -30,11 +31,9 @@ operator = DiffusionOps(capacity)
 operator_c = DiffusionOps(capacity_c)
 
 # Define the boundary conditions
-bc1 = Dirichlet(0.0)
-bc0 = Dirichlet(1.0)
-bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:bottom => bc0, :top => bc1))
+bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:top => Dirichlet(0.0), :bottom => Dirichlet(1.0)))
 ρ, L = 1.0, 1.0
-ic = InterfaceConditions(ScalarJump(1.0, 1.0, 0.0), FluxJump(1.0, 1.0, ρ*L))
+ic = InterfaceConditions(ScalarJump(1.0, 1.0, 0.5), FluxJump(1.0, 1.0, ρ*L))
 
 # Define the source term
 f1 = (x,y,z,t)->0.0
@@ -48,17 +47,17 @@ Fluide1 = Phase(capacity, operator, f1, K1)
 Fluide2 = Phase(capacity_c, operator_c, f2, K2)
 
 # Initial condition
-u0ₒ1 = zeros(nx+1)
-u0ᵧ1 = zeros(nx+1)
-u0ₒ2 = ones(nx+1)
-u0ᵧ2 = ones(nx+1)
+u0ₒ1 = ones(nx+1)
+u0ᵧ1 = ones(nx+1)
+u0ₒ2 = zeros(nx+1)
+u0ᵧ2 = zeros(nx+1)
 
 u0 = vcat(u0ₒ1, u0ᵧ1, u0ₒ2, u0ᵧ2)
 
 # Newton parameters
-max_iter = 100
-tol = 1e-5
-reltol = 1e-5
+max_iter = 1000
+tol = 1e-6
+reltol = 1e-6
 α = 1.0
 Newton_params = (max_iter, tol, reltol, α)
 
@@ -69,7 +68,7 @@ solver = MovingLiquidDiffusionUnsteadyDiph(Fluide1, Fluide2, bc_b, ic, Δt, u0, 
 solver, residuals, xf_log = solve_MovingLiquidDiffusionUnsteadyDiph!(solver, Fluide1, Fluide2, xf, Δt, Tend, bc_b, ic, mesh, "BE"; Newton_params=Newton_params, method=Base.:\)
 
 # Animation
-animate_solution(solver, mesh, body)
+#animate_solution(solver, mesh, body)
 
 # Plot residuals   
 #residuals[i] might be empty, remove them
@@ -128,3 +127,10 @@ end
 
 axislegend(ax, position=:rb)
 display(fig)
+
+# Save the last state
+open("temp_$nx.txt", "w") do io
+    for j in 1:length(solver.states[state_i])
+        println(io, solver.states[state_i][j])
+    end
+end

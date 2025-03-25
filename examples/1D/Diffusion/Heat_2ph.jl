@@ -31,7 +31,7 @@ operator_c = DiffusionOps(capacity_c)
 # Define the boundary conditions
 bc1 = Dirichlet(0.0)
 bc0 = Dirichlet(1.0)
-bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:top => bc0, :bottom => bc1))
+bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:top => bc1, :bottom => bc0))
 
 ic = InterfaceConditions(ScalarJump(1.0, 0.5, 0.0), FluxJump(1.0, 1.0, 0.0))
 He = 0.5
@@ -47,10 +47,10 @@ Fluide_1 = Phase(capacity, operator, f1, D1)
 Fluide_2 = Phase(capacity_c, operator_c, f2, D2)
 
 # Initial condition
-u0ₒ1 = zeros(nx+1)
-u0ᵧ1 = zeros(nx+1)
-u0ₒ2 = ones(nx+1)
-u0ᵧ2 = ones(nx+1)
+u0ₒ1 = ones(nx+1)
+u0ᵧ1 = ones(nx+1)
+u0ₒ2 = zeros(nx+1)
+u0ᵧ2 = zeros(nx+1)
 
 u0 = vcat(u0ₒ1, u0ᵧ1, u0ₒ2, u0ᵧ2)
 

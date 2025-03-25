@@ -438,7 +438,7 @@ end
 """
     BC_border_diph!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Float64}, bc_b::BorderConditions, mesh::AbstractMesh)
 
-Apply the border conditions to the coefficient matrix `A` and the right-hand side vector `b`.
+Apply the border conditions to the coefficient matrix `A` and the right-hand side vector `b` for diphasic problems.
 
 # Arguments
 - `A::SparseMatrixCSC{Float64, Int}`: The coefficient matrix A of the equation system.
@@ -472,43 +472,61 @@ function BC_border_diph!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Float64}, b
         end
     end
 
-    # Apply boundary conditions
-    for (ci, pos) in mesh.tag.border_cells
-        condition = nothing
-        if ci in left_cells
-            condition = bc_b.borders[:left]
-        elseif ci in right_cells
-            condition = bc_b.borders[:right]
-        elseif ci in top_cells
-            condition = bc_b.borders[:top]
-        elseif ci in bottom_cells
-            condition = bc_b.borders[:bottom]
-        elseif ci in forward_cells
-            condition = bc_b.borders[:forward]
-        elseif ci in backward_cells
-            condition = bc_b.borders[:backward]
-        end
+    # Calculate the size of a single phase block
+    # In diphasic problems, the structure is typically:
+    # [u1ₒ, u1ᵧ, u2ₒ, u2ᵧ] where each block has the same size
+    phase_size = size(A, 1) ÷ 4
+    
+    # Apply boundary conditions to both phases
+    for phase_idx in 0:1  # 0 = first phase, 1 = second phase
+        for (ci, pos) in mesh.tag.border_cells
+            condition = nothing
+            if ci in left_cells
+                condition = bc_b.borders[:left]
+            elseif ci in right_cells
+                condition = bc_b.borders[:right]
+            elseif ci in top_cells
+                condition = bc_b.borders[:top]
+            elseif ci in bottom_cells
+                condition = bc_b.borders[:bottom]
+            elseif ci in forward_cells
+                condition = bc_b.borders[:forward]
+            elseif ci in backward_cells
+                condition = bc_b.borders[:backward]
+            end
 
-        # Convert cell index to linear index
-        li = cell_to_index(mesh, ci)
+            # Skip if no condition found
+            isnothing(condition) && continue
 
-        # Here you may apply an offset for the second phase, if desired, e.g.:
-        phase_offset = size(A, 1) ÷ 2
+            # Convert cell index to linear index
+            li = cell_to_index(mesh, ci)
+            
+            # Apply phase offset for the bulk field (ω)
+            li_ω = li + phase_idx * 2 * phase_size
+            
+            # Apply phase offset for the interface field (γ)
+            li_γ = li + phase_size + phase_idx * 2 * phase_size
 
-        li = li + phase_offset
+            if condition isa Dirichlet
+                # Apply to bulk field (ω)
+                A[li_ω, :] .= 0.0
+                A[li_ω, li_ω] = 1.0
+                b[li_ω] = isa(condition.value, Function) ? condition.value(pos...) : condition.value
+                
+                # Apply to interface field (γ)
+                A[li_γ, :] .= 0.0
+                A[li_γ, li_γ] = 1.0
+                b[li_γ] = isa(condition.value, Function) ? condition.value(pos...) : condition.value
 
-        if condition isa Dirichlet
-            A[li, :] .= 0.0
-            A[li, li] = 1.0
-            b[li] = isa(condition.value, Function) ? condition.value(pos...) : condition.value
-
-        elseif condition isa Neumann
-            # Not implemented yet
-        elseif condition isa Robin
-            # Not implemented yet
-        elseif condition isa Periodic
-            # You could replicate the logic from BC_border_mono! for periodic boundaries
-            # (Find opposite_key, find_corresponding_cell, etc.)
+            elseif condition isa Neumann
+                # Not implemented yet
+                # Would need to modify rows corresponding to both bulk and interface
+            elseif condition isa Robin
+                # Not implemented yet
+            elseif condition isa Periodic
+                # Would need to implement similarly to the monophasic case
+                # but applying to both phases
+            end
         end
     end
 end
