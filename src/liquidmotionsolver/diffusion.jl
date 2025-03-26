@@ -257,10 +257,7 @@ end
 
 
 
-
-
-
-
+# Moving - Diffusion - Unsteady - Diphasic
 function A_diph_unstead_diff_moving_stef(operator1::DiffusionOps, operator2::DiffusionOps, capacite1::Capacity, capacite2::Capacity, D1, D2, ic::InterfaceConditions, scheme::String)
     # Determine dimensionality from operator1
     dims1 = operator1.size
@@ -475,8 +472,6 @@ function b_diph_unstead_diff_moving_stef(operator1::DiffusionOps, operator2::Dif
     return vcat(b1, b2, b3, b4)
 end
 
-
-# Moving - Diffusion - Unsteady - Diphasic
 function MovingLiquidDiffusionUnsteadyDiph(phase1::Phase, phase2::Phase, bc_b::BorderConditions, ic::InterfaceConditions, Δt::Float64, Tᵢ::Vector{Float64}, mesh::AbstractMesh, scheme::String)
     println("Solver Creation:")
     println("- Moving problem")

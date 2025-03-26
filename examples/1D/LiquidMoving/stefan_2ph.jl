@@ -6,7 +6,7 @@ using CairoMakie
 
 ### 1D Test Case : Diphasic Unsteady Diffusion Equation inside a moving body
 # Define the spatial mesh
-nx = 2560
+nx = 40
 lx = 1.0
 x0 = 0.0
 domain = ((x0, lx),)
