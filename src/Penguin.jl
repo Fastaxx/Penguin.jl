@@ -75,7 +75,7 @@ include("vizualize.jl")
 export plot_solution, animate_solution
 
 include("convergence.jl")
-export check_convergence
+export check_convergence, check_convergence_diph
 
 include("vtk.jl")
 export write_vtk

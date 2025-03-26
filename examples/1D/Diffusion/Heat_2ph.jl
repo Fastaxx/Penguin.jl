@@ -3,7 +3,7 @@ using IterativeSolvers
 
 ### 1D Test Case : Diphasic Unsteady Diffusion Equation 
 # Define the mesh
-nx = 320
+nx = 640
 lx = 8.0
 x0 = 0.0
 domain=((x0,lx),)
@@ -31,7 +31,7 @@ operator_c = DiffusionOps(capacity_c)
 # Define the boundary conditions
 bc1 = Dirichlet(0.0)
 bc0 = Dirichlet(1.0)
-bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:top => bc1, :bottom => bc0))
+bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:top => bc0, :bottom => bc1))
 
 ic = InterfaceConditions(ScalarJump(1.0, 0.5, 0.0), FluxJump(1.0, 1.0, 0.0))
 He = 0.5
@@ -47,15 +47,15 @@ Fluide_1 = Phase(capacity, operator, f1, D1)
 Fluide_2 = Phase(capacity_c, operator_c, f2, D2)
 
 # Initial condition
-u0ₒ1 = ones(nx+1)
-u0ᵧ1 = ones(nx+1)
-u0ₒ2 = zeros(nx+1)
-u0ᵧ2 = zeros(nx+1)
+u0ₒ1 = zeros(nx+1)
+u0ᵧ1 = zeros(nx+1)
+u0ₒ2 = ones(nx+1)
+u0ᵧ2 = ones(nx+1)
 
 u0 = vcat(u0ₒ1, u0ᵧ1, u0ₒ2, u0ᵧ2)
 
 # Define the solver
-Δt = 0.5*(lx/nx)^2
+Δt = 0.5 * (lx/nx)^2
 Tend = 0.5
 solver = DiffusionUnsteadyDiph(Fluide_1, Fluide_2, bc_b, ic, Δt, u0, "CN")
 
@@ -143,6 +143,45 @@ scatter!(ax, x, u2_num, color=:orange, label="Bulk Field - Phase 2 - Numerical")
 axislegend(ax, position=:rb)
 display(fig)
 
+# Now you can use this function to compute the convergence errors:
+(ana_sols, num_sols, global_errs, full_errs, cut_errs, empty_errs) = check_convergence_diph(T1, T2, solver, capacity, capacity_c, 2, false)
+
+# You can also add a visualization of the errors:
+function visualize_diphasic_errors(x, ana_sols, num_sols, capacity1, capacity2)
+    u1_ana, u2_ana = ana_sols
+    u1_num, u2_num = num_sols
+    
+    # Compute pointwise errors
+    err1 = abs.(u1_ana .- u1_num)
+    err2 = abs.(u2_ana .- u2_num)
+    
+    # Set errors to NaN for empty cells
+    err1[capacity1.cell_types .== 0] .= NaN
+    err2[capacity2.cell_types .== 0] .= NaN
+    
+    # Create figure
+    fig = Figure()
+    ax = Axis(fig[1, 1], 
+              xlabel="x", 
+              ylabel="Absolute Error", 
+              title="Diphasic Solution Errors",
+              yscale=log10)
+    
+    scatter!(ax, x, err1, color=:blue, label="Phase 1 Error")
+    scatter!(ax, x, err2, color=:red, label="Phase 2 Error")
+    
+    axislegend(ax, position=:rt)
+    display(fig)
+    
+    return fig
+end
+
+# Visualize errors
+error_fig = visualize_diphasic_errors(x, ana_sols, num_sols, capacity, capacity_c)
+
+
+readline()
+
 # Compute Sherwood number : 1) compute average concentration inside and outside the body : ̅cl = 1/V ∫ cl dV, ̅cg = 1/V ∫ cg dV
 # 2) compute the mass transfer rate : k = (cg(n+1) - cg(n))/(Γ * Δt * (He*cg(n+1) - cl(n+1))) with Γ the area of the interface
 # 3) compute the Sherwood number : Sh = k * L/D with L the characteristic length and D the diffusion coefficient
@@ -201,6 +240,6 @@ Sh_val = compute_sherwood_all(solver, capacity, capacity_c, Δt, He, lx, 1.0)
 # Plot Sherwood number
 fig = Figure()
 ax = Axis(fig[1, 1], xlabel="t", ylabel="Sh", title="Sherwood number")
-scatter!(ax,0:Δt:Tend+Δt/2,Sh_val, color=:blue, label="Sherwood number")
+scatter!(ax,Δt:Δt:Tend,Sh_val, color=:blue, label="Sherwood number")
 axislegend(ax, position=:rt)
 display(fig)
