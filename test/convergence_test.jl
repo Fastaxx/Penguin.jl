@@ -1,5 +1,6 @@
 using Penguin
 using Test
+using SpecialFunctions
 
 @testset "Convergence Test 1D" begin
     nx = 40
