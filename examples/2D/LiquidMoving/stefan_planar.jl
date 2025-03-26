@@ -19,13 +19,13 @@ mesh = Penguin.Mesh((nx, ny), (lx, ly), (x0, y0))
 ampl = 0.05 * ly
 center = 0.5 * ly
 sigma = 0.1 * ly
-#sₙ(y) = 0.1 * ly + ampl * exp(-((y - center)^2) / (2*sigma^2))
-sₙ(y) = 0.2 * ly + ampl * ly * sin(4π*y/ly-π/2)
+sₙ(y) = 0.1 * ly + ampl * exp(-((y - center)^2) / (2*sigma^2))
+#sₙ(y) = 0.2 * ly + ampl * ly * sin(4π*y/ly-π/2)
 body = (x, y, t, _=0) -> (x - sₙ(y))
 
 # Define the Space-Time mesh
 Δt = 0.01
-Tend = 0.2
+Tend = 0.5
 STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt], tag=mesh.tag)
 
 # Define the capacity
@@ -50,7 +50,7 @@ operator = DiffusionOps(capacity)
 # Define the boundary conditions
 bc = Dirichlet(0.0)
 ϵᵥ = 0.0
-bc = GibbsThomson(0.0, 0.0, ϵᵥ, operator)
+#bc = GibbsThomson(0.0, 0.0, ϵᵥ, operator)
 bc1 = Dirichlet(1.0)
 
 bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:bottom => bc1))

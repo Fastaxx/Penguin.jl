@@ -21,7 +21,7 @@ body = (x,y,t,_=0)->(x - sₙ(y))
 
 # Define the Space-Time mesh
 Δt = 0.01
-Tend = 0.18
+Tend = 0.25
 STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt], tag=mesh.tag)
 
 # Define the capacity
@@ -45,8 +45,6 @@ operator = DiffusionOps(capacity)
 
 # Define the boundary conditions
 bc = Dirichlet(1.0)
-ϵᵥ = 1.0
-bc = GibbsThomson(1.0, 0.0, ϵᵥ, operator)
 bc1 = Dirichlet(0.0)
 
 bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}( :bottom => bc1))
@@ -594,7 +592,6 @@ function solve_MovingLiquidDiffusionUnsteadyMono2!(s::Solver, phase::Phase, Inte
         k+=1
     end
 return s, residuals, xf_log, reconstruct
-
 end 
 
 # Solve the problem
