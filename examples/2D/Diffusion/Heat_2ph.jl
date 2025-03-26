@@ -63,7 +63,164 @@ solve_DiffusionUnsteadyDiph!(solver, Fluide_1, Fluide_2, Δt, Tend, bc_b, ic, "B
 #plot_profile(solver, mesh; x=lx/2.01)
 
 # Animation
-animate_solution(solver, mesh, circle)
+#animate_solution(solver, mesh, circle)
+
+function animate_diphasic_solution(
+    solver, 
+    mesh, 
+    body1,
+    body2,
+    nx, ny, lx, ly, x0, y0;
+    filename="diphasic_solution_animation.mp4",
+    fps=10,
+    title="Diphasic Heat Transfer",
+    colorrange_bulk=(0,1),
+    colorrange_interface=(0,1),
+    colormap1=:thermal,
+    colormap2=:viridis,
+)
+    body2 = isnothing(body2) ? body1 : body2
+
+    
+    # Create meshgrid for plotting
+    x = range(x0, stop=x0+lx, length=nx+1)
+    y = range(y0, stop=y0+ly, length=ny+1)
+    
+    # Number of frames
+    num_frames = length(solver.states)
+    
+    # Create a figure with 2x2 layout
+    fig = Figure(size=(1200, 900))
+    
+    # Create titles for each subplot
+    titles = [
+        "Bulk Field - Phase 1", 
+        "Interface Field - Phase 1",
+        "Bulk Field - Phase 2", 
+        "Interface Field - Phase 2"
+    ]
+    
+    # Create axes for each subplot
+    ax_bulk1 = Axis3(fig[1, 1], 
+                    title=titles[1],
+                    xlabel="x", ylabel="y", zlabel="Temperature")
+    
+    ax_interface1 = Axis3(fig[1, 2], 
+                        title=titles[2], 
+                        xlabel="x", ylabel="y", zlabel="Temperature")
+    
+    ax_bulk2 = Axis3(fig[2, 1], 
+                    title=titles[3],
+                    xlabel="x", ylabel="y", zlabel="Temperature")
+    
+    ax_interface2 = Axis3(fig[2, 2], 
+                        title=titles[4],
+                        xlabel="x", ylabel="y", zlabel="Temperature")
+    
+    # Add a main title
+    Label(fig[0, :], title, fontsize=20)
+    
+    # Create colorbar for each phase
+    Colorbar(fig[1, 3], colormap=colormap1, limits=colorrange_bulk, label="Temperature (Phase 1)")
+    Colorbar(fig[2, 3], colormap=colormap2, limits=colorrange_bulk, label="Temperature (Phase 2)")
+    
+    # Set common view angles for 3D plots
+    """
+    viewangle = (45, 30)
+    for ax in [ax_bulk1, ax_interface1, ax_bulk2, ax_interface2]
+        ax.azimuth = viewangle[1]
+        ax.elevation = viewangle[2]
+    end
+    """
+
+    # Create a time label
+    time_label = Label(fig[3, :], "t = 0.00", fontsize=16)
+    
+    # Create surface plots - will be updated in the animation
+    bulk1_surface = surface!(ax_bulk1, x, y, zeros(nx+1, ny+1), 
+                          colormap=colormap1, colorrange=colorrange_bulk)
+    
+    interface1_surface = surface!(ax_interface1, x, y, zeros(nx+1, ny+1), 
+                               colormap=colormap1, colorrange=colorrange_interface)
+    
+    bulk2_surface = surface!(ax_bulk2, x, y, zeros(nx+1, ny+1), 
+                          colormap=colormap2, colorrange=colorrange_bulk)
+    
+    interface2_surface = surface!(ax_interface2, x, y, zeros(nx+1, ny+1), 
+                               colormap=colormap2, colorrange=colorrange_interface)
+    
+    # Create record of the animation
+    println("Creating animation with $num_frames frames...")
+    record(fig, filename, 1:num_frames; framerate=fps) do frame_idx
+        # Extract the state at the current frame
+        state = solver.states[frame_idx]
+        
+        # Extract solutions for each field
+        u1_bulk = reshape(state[1:(nx+1)*(ny+1)], (nx+1, ny+1))
+        u1_interface = reshape(state[(nx+1)*(ny+1)+1:2*(nx+1)*(ny+1)], (nx+1, ny+1))
+        u2_bulk = reshape(state[2*(nx+1)*(ny+1)+1:3*(nx+1)*(ny+1)], (nx+1, ny+1))
+        u2_interface = reshape(state[3*(nx+1)*(ny+1)+1:end], (nx+1, ny+1))
+        
+        # Compute phase indicators for masking
+        phase1_indicator = zeros(nx+1, ny+1)
+        phase2_indicator = zeros(nx+1, ny+1)
+        
+        # Compute mask for each phase
+        for i in 1:nx+1
+            for j in 1:ny+1
+                phase1_indicator[i,j] = body1(x[i], y[j]) <= 0 ? 1.0 : NaN
+                phase2_indicator[i,j] = body2(x[i], y[j]) <= 0 ? 1.0 : NaN
+            end
+        end
+        
+        # Apply masks to the solutions
+        u1_bulk_masked = u1_bulk #.* phase1_indicator
+        u1_interface_masked = u1_interface #.* phase1_indicator
+        u2_bulk_masked = u2_bulk #.* phase2_indicator
+        u2_interface_masked = u2_interface #.* phase2_indicator
+        
+        # Update surface plots with current data
+        bulk1_surface[3] = u1_bulk_masked
+        interface1_surface[3] = u1_interface_masked
+        bulk2_surface[3] = u2_bulk_masked
+        interface2_surface[3] = u2_interface_masked
+        
+        # Update time label
+        time_t = round((frame_idx-1)*(Δt), digits=3)
+        time_label.text = "t = $time_t"
+        
+        if frame_idx % 10 == 0
+            println("Processing frame $frame_idx / $num_frames")
+        end
+    end
+    
+    println("Animation saved to $filename")
+end
+
+# Example usage
+function create_diphasic_animation(solver, mesh)
+    # Define the body functions
+    circle = (x,y,_=0) -> sqrt((x-center[1])^2 + (y-center[2])^2) - radius
+    circle_c = (x,y,_=0) -> -(sqrt((x-center[1])^2 + (y-center[2])^2) - radius)
+    
+    # Create animation
+    animate_diphasic_solution(
+        solver, 
+        mesh, 
+        circle,
+        circle_c,
+        nx, ny, lx, ly, x0, y0,
+        filename="diphasic_heat_transfer.mp4",
+        fps=15,
+        colorrange_bulk=(0, 0.5),
+        colorrange_interface=(0, 0.5),
+        colormap1=:viridis,
+        colormap2=:viridis,
+    )
+end
+
+# Run the animation function
+create_diphasic_animation(solver, mesh)
 
 
 """
