@@ -569,7 +569,6 @@ function run_diphasic_mesh_convergence_2D(
         write(io, "  Mesh sizes: $nx_list\n")
         write(io, "  Norm: L$norm\n")
         write(io, "  Relative error: $relative\n")
-        write(io, "  Interface position: $xint\n")
         write(io, "  Final time: $Tend\n")
         write(io, "  Henry coefficient: $He\n")
         write(io, "  Diffusion coefficients: D1=$D1, D2=$D2\n\n")
