@@ -2,26 +2,40 @@ using Penguin, LsqFit, SparseArrays, LinearAlgebra
 using IterativeSolvers
 using CairoMakie
 using SpecialFunctions
-using Roots
+using QuadGK
 using DelimitedFiles
 using Printf
 
+# Define parameters
+lx, ly = 8.0, 8.0
+center = (lx/2, ly/2)
+radius = ly/4
+Tend = 0.1
+Dg, Dl = 1.0, 1.0
+cg0, cl0 = 1.0, 0.0
+He = 1.0    
+D = sqrt(Dg/Dl)
+
 """
-Run mesh convergence study for diphasic heat transfer problem
+Run mesh convergence study for 2D diphasic heat transfer problem with circular interface
 """
-function run_diphasic_mesh_convergence(
+function run_diphasic_mesh_convergence_2D(
     nx_list::Vector{Int},
     u1_analytical::Function,
     u2_analytical::Function;
     lx::Float64=8.0,
+    ly::Float64=8.0,
     x0::Float64=0.0,
-    xint::Float64=4.0,
+    y0::Float64=0.0,
+    radius::Float64=2.0,
+    center::Tuple{Float64,Float64}=(4.0,4.0),
     Tend::Float64=0.5,
-    He::Float64=0.5,
+    He::Float64=1.0,
     D1::Float64=1.0,
     D2::Float64=1.0,
     norm::Real=2,
-    relative::Bool=false
+    relative::Bool=false,
+    npts::Int=3
 )
     # Initialize storage arrays
     h_vals = Float64[]
@@ -43,32 +57,32 @@ function run_diphasic_mesh_convergence(
 
     # For each mesh resolution
     for nx in nx_list
-        println("\n===== Testing mesh size nx = $nx =====")
+        ny = nx  # Use square meshes
+        println("\n===== Testing mesh size nx = ny = $nx =====")
         
         # Build mesh
-        mesh = Penguin.Mesh((nx,), (lx,), (x0,))
+        mesh = Penguin.Mesh((nx, ny), (lx, ly), (x0, y0))
         
-        # Define the body
-        body = (x, _=0) -> (x - xint)
-        body_c = (x, _=0) -> -(x - xint)
+        # Define the body functions
+        circle = (x,y,_=0) -> sqrt((x-center[1])^2 + (y-center[2])^2) - radius
+        circle_c = (x,y,_=0) -> -(sqrt((x-center[1])^2 + (y-center[2])^2) - radius)
         
-        # Define the capacity
-        capacity = Capacity(body, mesh)
-        capacity_c = Capacity(body_c, mesh)
+        # Define capacities
+        capacity = Capacity(circle, mesh)
+        capacity_c = Capacity(circle_c, mesh)
         
-        # Define the operators
+        # Define operators
         operator = DiffusionOps(capacity)
         operator_c = DiffusionOps(capacity_c)
         
-        # Define the boundary conditions
-        bc1 = Dirichlet(0.0)
-        bc0 = Dirichlet(1.0)
-        bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:top => bc0, :bottom => bc1))
+        # Define boundary conditions
+        bc = Dirichlet(0.0)
+        bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}())
         
         # Interface conditions
-        ic = InterfaceConditions(ScalarJump(1.0, 0.5, 0.0), FluxJump(1.0, 1.0, 0.0))
+        ic = InterfaceConditions(ScalarJump(1.0, He, 0.0), FluxJump(1.0, 1.0, 0.0))
         
-        # Define the source term
+        # Define source terms
         f1 = (x,y,z,t)->0.0
         f2 = (x,y,z,t)->0.0
         
@@ -81,18 +95,17 @@ function run_diphasic_mesh_convergence(
         Fluide_2 = Phase(capacity_c, operator_c, f2, D2_func)
         
         # Initial condition
-        u0ₒ1 = zeros(nx+1)
-        u0ᵧ1 = zeros(nx+1)
-        u0ₒ2 = ones(nx+1)
-        u0ᵧ2 = ones(nx+1)
-        
+        u0ₒ1 = ones((nx+1)*(ny+1))
+        u0ᵧ1 = ones((nx+1)*(ny+1))
+        u0ₒ2 = zeros((nx+1)*(ny+1))
+        u0ᵧ2 = zeros((nx+1)*(ny+1))
         u0 = vcat(u0ₒ1, u0ᵧ1, u0ₒ2, u0ᵧ2)
         
         # Time step based on mesh size
-        Δt = 0.5 * (lx/nx)^2
+        Δt = 0.5 * (lx/nx)^2  # Stability factor for diffusion
         
         # Define the solver
-        solver = DiffusionUnsteadyDiph(Fluide_1, Fluide_2, bc_b, ic, Δt, u0, "CN")
+        solver = DiffusionUnsteadyDiph(Fluide_1, Fluide_2, bc_b, ic, Δt, u0, "BE")
         
         # Solve the problem
         solve_DiffusionUnsteadyDiph!(solver, Fluide_1, Fluide_2, Δt, Tend, bc_b, ic, "CN"; method=Base.:\)
@@ -124,51 +137,109 @@ function run_diphasic_mesh_convergence(
         push!(err2_cut_vals, err2_cut)
         push!(err_cut_combined_vals, err_cut_combined)
         
-        # For the largest mesh, save a plot of the solution and error
+        # For the largest mesh, save a visualization of the solution
         if nx == maximum(nx_list)
-            # Create x coordinates
-            x = range(x0, stop = lx, length = nx+1)
+            # Create a grid for visualization
+            x = range(x0, stop=x0+lx, length=nx+1)
+            y = range(y0, stop=y0+ly, length=ny+1)
             
             # Extract solutions
             (u1_ana, u2_ana) = ana_sols
             (u1_num, u2_num) = num_sols
             
-            # Mask empty cells with NaN
-            u1_ana[capacity.cell_types .== 0] .= NaN
-            u2_ana[capacity_c.cell_types .== 0] .= NaN
-            u1_num[capacity.cell_types .== 0] .= NaN
-            u2_num[capacity_c.cell_types .== 0] .= NaN
+            # Reshape solutions for 2D visualization
+            u1_ana_2d = reshape(u1_ana, (ny+1, nx+1))
+            u2_ana_2d = reshape(u2_ana, (ny+1, nx+1))
+            u1_num_2d = reshape(u1_num, (ny+1, nx+1))
+            u2_num_2d = reshape(u2_num, (ny+1, nx+1))
             
-            # Plot solutions
-            fig_sol = Figure()
-            ax_sol = Axis(fig_sol[1, 1], 
-                         xlabel="x", 
-                         ylabel="u", 
-                         title="Diphasic Solution (nx=$nx)")
+            # Create masks for inside/outside the circle
+            mask_inside = zeros(Bool, ny+1, nx+1)
+            mask_outside = zeros(Bool, ny+1, nx+1)
             
-            scatter!(ax_sol, x, u1_ana, color=:blue, label="Phase 1 Analytical")
-            scatter!(ax_sol, x, u1_num, color=:red, label="Phase 1 Numerical")
-            scatter!(ax_sol, x, u2_ana, color=:green, label="Phase 2 Analytical")
-            scatter!(ax_sol, x, u2_num, color=:orange, label="Phase 2 Numerical")
+            for j in 1:ny+1
+                for i in 1:nx+1
+                    # Check if point is inside or outside circle
+                    if circle(x[i], y[j]) <= 0
+                        mask_inside[j, i] = true
+                    else
+                        mask_outside[j, i] = true
+                    end
+                end
+            end
             
-            axislegend(ax_sol, position=:rb)
-            display(fig_sol)
+            # Apply masks to solutions
+            u1_ana_masked = copy(u1_ana_2d)
+            u2_ana_masked = copy(u2_ana_2d)
+            u1_num_masked = copy(u1_num_2d)
+            u2_num_masked = copy(u2_num_2d)
             
-            # Plot errors
-            err1 = abs.(u1_ana .- u1_num)
-            err2 = abs.(u2_ana .- u2_num)
+            u1_ana_masked[.!mask_inside] .= NaN
+            u2_ana_masked[.!mask_outside] .= NaN
+            u1_num_masked[.!mask_inside] .= NaN
+            u2_num_masked[.!mask_outside] .= NaN
             
-            fig_err = Figure()
+            # Compute errors
+            err1_2d = abs.(u1_ana_2d .- u1_num_2d)
+            err2_2d = abs.(u2_ana_2d .- u2_num_2d)
+            err1_masked = copy(err1_2d)
+            err2_masked = copy(err2_2d)
+            err1_masked[.!mask_inside] .= NaN
+            err2_masked[.!mask_outside] .= NaN
+            
+            # Plot analytical solution
+            fig_ana = Figure(size=(1000, 800))
+            ax_ana = Axis(fig_ana[1, 1], 
+                title="Analytical Solution (t = $Tend)",
+                xlabel="x",
+                ylabel="y")
+            
+            hm1 = heatmap!(ax_ana, x, y, u1_ana_masked, colormap=:viridis, colorrange=(0, 1))
+            hm2 = heatmap!(ax_ana, x, y, u2_ana_masked, colormap=:plasma, colorrange=(0, 1))
+            
+            # Add circle boundary
+            theta = range(0, 2π, length=100)
+            circle_x = center[1] .+ radius .* cos.(theta)
+            circle_y = center[2] .+ radius .* sin.(theta)
+            lines!(ax_ana, circle_x, circle_y, color=:white, linewidth=2)
+            
+            Colorbar(fig_ana[1, 2], hm1, label="Phase 1 concentration")
+            Colorbar(fig_ana[1, 3], hm2, label="Phase 2 concentration")
+            
+            # Plot numerical solution
+            fig_num = Figure(size=(1000, 800))
+            ax_num = Axis(fig_num[1, 1], 
+                title="Numerical Solution (t = $Tend, nx = $nx)",
+                xlabel="x",
+                ylabel="y")
+            
+            hm1_num = heatmap!(ax_num, x, y, u1_num_masked, colormap=:viridis, colorrange=(0, 1))
+            hm2_num = heatmap!(ax_num, x, y, u2_num_masked, colormap=:plasma, colorrange=(0, 1))
+            
+            # Add circle boundary
+            lines!(ax_num, circle_x, circle_y, color=:white, linewidth=2)
+            
+            Colorbar(fig_num[1, 2], hm1_num, label="Phase 1 concentration")
+            Colorbar(fig_num[1, 3], hm2_num, label="Phase 2 concentration")
+            
+            # Plot error
+            fig_err = Figure(size=(1000, 800))
             ax_err = Axis(fig_err[1, 1], 
-                         xlabel="x", 
-                         ylabel="Absolute Error", 
-                         title="Diphasic Error (nx=$nx)",
-                         yscale=log10)
+                title="Absolute Error (t = $Tend, nx = $nx)",
+                xlabel="x",
+                ylabel="y")
             
-            scatter!(ax_err, x, err1, color=:blue, label="Phase 1 Error")
-            scatter!(ax_err, x, err2, color=:red, label="Phase 2 Error")
+            hm1_err = heatmap!(ax_err, x, y, err1_masked, colormap=:viridis)
+            hm2_err = heatmap!(ax_err, x, y, err2_masked, colormap=:plasma)
             
-            axislegend(ax_err, position=:rt)
+            # Add circle boundary
+            lines!(ax_err, circle_x, circle_y, color=:white, linewidth=2)
+            
+            Colorbar(fig_err[1, 2], hm1_err, label="Phase 1 error")
+            Colorbar(fig_err[1, 3], hm2_err, label="Phase 2 error")
+            
+            display(fig_ana)
+            display(fig_num)
             display(fig_err)
         end
     end
@@ -205,18 +276,18 @@ function run_diphasic_mesh_convergence(
     p2_cut_all, _ = do_fit(log.(err2_cut_vals), length(err2_cut_vals))
     p_cut_combined_all, _ = do_fit(log.(err_cut_combined_vals), length(err_cut_combined_vals))
     
-    # Fit convergence rates using only last 3 points
-    p1_global, _ = do_fit(log.(err1_vals), 3)
-    p2_global, _ = do_fit(log.(err2_vals), 3)
-    p_combined, _ = do_fit(log.(err_combined_vals), 3)
+    # Fit convergence rates using only last n points
+    p1_global, _ = do_fit(log.(err1_vals), npts)
+    p2_global, _ = do_fit(log.(err2_vals), npts)
+    p_combined, _ = do_fit(log.(err_combined_vals), npts)
     
-    p1_full, _ = do_fit(log.(err1_full_vals), 3)
-    p2_full, _ = do_fit(log.(err2_full_vals), 3)
-    p_full_combined, _ = do_fit(log.(err_full_combined_vals), 3)
+    p1_full, _ = do_fit(log.(err1_full_vals), npts)
+    p2_full, _ = do_fit(log.(err2_full_vals), npts)
+    p_full_combined, _ = do_fit(log.(err_full_combined_vals), npts)
     
-    p1_cut, _ = do_fit(log.(err1_cut_vals), 3)
-    p2_cut, _ = do_fit(log.(err2_cut_vals), 3)
-    p_cut_combined, _ = do_fit(log.(err_cut_combined_vals), 3)
+    p1_cut, _ = do_fit(log.(err1_cut_vals), npts)
+    p2_cut, _ = do_fit(log.(err2_cut_vals), npts)
+    p_cut_combined, _ = do_fit(log.(err_cut_combined_vals), npts)
     
     # Round for display
     p1_global_all = round(p1_global_all, digits=2)
@@ -246,19 +317,19 @@ function run_diphasic_mesh_convergence(
     # Print convergence rates
     println("\n===== Convergence Rates =====")
     println("\n--- Global Errors (All Cells) ---")
-    println("Phase 1: p = $p1_global (last 3), p = $p1_global_all (all)")
-    println("Phase 2: p = $p2_global (last 3), p = $p2_global_all (all)")
-    println("Combined: p = $p_combined (last 3), p = $p_combined_all (all)")
+    println("Phase 1: p = $p1_global (last $npts), p = $p1_global_all (all)")
+    println("Phase 2: p = $p2_global (last $npts), p = $p2_global_all (all)")
+    println("Combined: p = $p_combined (last $npts), p = $p_combined_all (all)")
     
     println("\n--- Full Cell Errors ---")
-    println("Phase 1: p = $p1_full (last 3), p = $p1_full_all (all)")
-    println("Phase 2: p = $p2_full (last 3), p = $p2_full_all (all)")
-    println("Combined: p = $p_full_combined (last 3), p = $p_full_combined_all (all)")
+    println("Phase 1: p = $p1_full (last $npts), p = $p1_full_all (all)")
+    println("Phase 2: p = $p2_full (last $npts), p = $p2_full_all (all)")
+    println("Combined: p = $p_full_combined (last $npts), p = $p_full_combined_all (all)")
     
     println("\n--- Cut Cell Errors ---")
-    println("Phase 1: p = $p1_cut (last 3), p = $p1_cut_all (all)")
-    println("Phase 2: p = $p2_cut (last 3), p = $p2_cut_all (all)")
-    println("Combined: p = $p_cut_combined (last 3), p = $p_cut_combined_all (all)")
+    println("Phase 1: p = $p1_cut (last $npts), p = $p1_cut_all (all)")
+    println("Phase 2: p = $p2_cut (last $npts), p = $p2_cut_all (all)")
+    println("Combined: p = $p_cut_combined (last $npts), p = $p_cut_combined_all (all)")
     
     # Plot global errors
     fig_global = Figure()
@@ -268,7 +339,13 @@ function run_diphasic_mesh_convergence(
         ylabel = "L$norm error",
         title  = "Global Errors (All Cells)",
         xscale = log10,
-        yscale = log10
+        yscale = log10,
+        xminorticksvisible = true, 
+        xminorgridvisible = true,
+        xminorticks = IntervalsBetween(5),
+        yminorticksvisible = true,
+        yminorgridvisible = true,
+        yminorticks = IntervalsBetween(5),
     )
     
     scatter!(ax_global, h_vals, err1_vals, 
@@ -305,7 +382,7 @@ function run_diphasic_mesh_convergence(
     err_fit1 = c_est_p1 * h_range.^p1_global
     lines!(ax_global, h_range, err_fit1, 
            color=:blue, linestyle=:dot, linewidth=2, 
-           label="Last 3 fit (p = $p1_global)")
+           label="Last $npts fit (p = $p1_global)")
     
     axislegend(ax_global, position=:rb)
     display(fig_global)
@@ -318,7 +395,13 @@ function run_diphasic_mesh_convergence(
         ylabel = "L$norm error",
         title  = "Full Cell Errors",
         xscale = log10,
-        yscale = log10
+        yscale = log10,
+        xminorticksvisible = true, 
+        xminorgridvisible = true,
+        xminorticks = IntervalsBetween(5),
+        yminorticksvisible = true,
+        yminorgridvisible = true,
+        yminorticks = IntervalsBetween(5),
     )
     
     scatter!(ax_full, h_vals, err1_full_vals, label="Phase 1 ($p1_full)", markersize=12, color=:blue)
@@ -345,7 +428,13 @@ function run_diphasic_mesh_convergence(
         ylabel = "L$norm error",
         title  = "Cut Cell Errors",
         xscale = log10,
-        yscale = log10
+        yscale = log10,
+        xminorticksvisible = true, 
+        xminorgridvisible = true,
+        xminorticks = IntervalsBetween(5),
+        yminorticksvisible = true,
+        yminorgridvisible = true,
+        yminorticks = IntervalsBetween(5),
     )
     
     scatter!(ax_cut, h_vals, err1_cut_vals, label="Phase 1 ($p1_cut)", markersize=12, color=:blue)
@@ -374,7 +463,13 @@ function run_diphasic_mesh_convergence(
         ylabel = "L$norm error",
         title  = "Global Errors",
         xscale = log10,
-        yscale = log10
+        yscale = log10,
+        xminorticksvisible = true, 
+        xminorgridvisible = true,
+        xminorticks = IntervalsBetween(5),
+        yminorticksvisible = true,
+        yminorgridvisible = true,
+        yminorticks = IntervalsBetween(5),
     )
     
     # Full cell errors panel
@@ -384,7 +479,13 @@ function run_diphasic_mesh_convergence(
         ylabel = "L$norm error",
         title  = "Full Cell Errors",
         xscale = log10,
-        yscale = log10
+        yscale = log10,
+        xminorticksvisible = true, 
+        xminorgridvisible = true,
+        xminorticks = IntervalsBetween(5),
+        yminorticksvisible = true,
+        yminorgridvisible = true,
+        yminorticks = IntervalsBetween(5),
     )
     
     # Cut cell errors panel
@@ -394,7 +495,13 @@ function run_diphasic_mesh_convergence(
         ylabel = "L$norm error",
         title  = "Cut Cell Errors",
         xscale = log10,
-        yscale = log10
+        yscale = log10,
+        xminorticksvisible = true, 
+        xminorgridvisible = true,
+        xminorticks = IntervalsBetween(5),
+        yminorticksvisible = true,
+        yminorgridvisible = true,
+        yminorticks = IntervalsBetween(5),
     )
     
     # Combined errors panel
@@ -404,7 +511,13 @@ function run_diphasic_mesh_convergence(
         ylabel = "L$norm error",
         title  = "Combined Errors",
         xscale = log10,
-        yscale = log10
+        yscale = log10,
+        xminorticksvisible = true, 
+        xminorgridvisible = true,
+        xminorticks = IntervalsBetween(5),
+        yminorticksvisible = true,
+        yminorgridvisible = true,
+        yminorticks = IntervalsBetween(5),
     )
     
     # Plot in global panel
@@ -506,41 +619,85 @@ function run_diphasic_mesh_convergence(
     )
 end
 
+# Analytical solution functions
+function compute_cg_analytical(x, y, t)
+    r = sqrt((x-center[1])^2 + (y-center[2])^2)
+    if r >= radius
+        return 0.0
+    end
+    
+    prefactor = (4*cg0*Dg*Dl*Dl*He)/(π^2*radius)
+    Umax = 5.0/sqrt(Dg*t)
+    val, _ = quadgk(u->cg_integrand(u, x, y, t), 0, Umax; atol=1e-6, rtol=1e-6)
+    return prefactor*val
+end
+
+function compute_cl_analytical(x, y, t)
+    r = sqrt((x-center[1])^2 + (y-center[2])^2)
+    if r < radius
+        return 0.0
+    end
+    
+    prefactor = (2*cg0*Dg*sqrt(Dl)*He)/π
+    Umax = 5.0/sqrt(Dg*t)
+    val, _ = quadgk(u->cl_integrand(u, x, y, t), 0, Umax; atol=1e-6, rtol=1e-6)
+    return prefactor*val
+end
+
+function Phi(u)
+    term1 = Dg*sqrt(Dl)*besselj1(u*radius)*bessely0(D*u*radius)
+    term2 = He*Dl*sqrt(Dg)*besselj0(u*radius)*bessely1(D*u*radius)
+    return term1 - term2
+end
+
+function Psi(u)
+    term1 = Dg*sqrt(Dl)*besselj1(u*radius)*besselj0(D*u*radius)
+    term2 = He*Dl*sqrt(Dg)*besselj0(u*radius)*besselj1(D*u*radius)
+    return term1 - term2
+end
+
+function cg_integrand(u, x, y, t)
+    r = sqrt((x-center[1])^2 + (y-center[2])^2)
+    Φu = Phi(u)
+    Ψu = Psi(u)
+    denom = u^2*(Φu^2 + Ψu^2)
+    num   = exp(-Dg*u^2*t)*besselj0(u*r)*besselj1(u*radius)
+    return iszero(denom) ? 0.0 : num/denom
+end
+
+function cl_integrand(u, x, y, t)
+    r = sqrt((x-center[1])^2 + (y-center[2])^2)
+    Φu = Phi(u)
+    Ψu = Psi(u)
+    denom = u*(Φu^2 + Ψu^2)
+    term1 = besselj0(D*u*r)*Φu
+    term2 = bessely0(D*u*r)*Ψu
+    num   = exp(-Dg*u^2*t)*besselj1(u*radius)*(term1 - term2)
+    return iszero(denom) ? 0.0 : num/denom
+end
+
+# Create analytical solution functions that capture the final time
+final_time = Tend
+cg_analytical(x, y) = compute_cg_analytical(x, y, final_time)
+cl_analytical(x, y) = compute_cl_analytical(x, y, final_time)
+
+# Define mesh sizes to test
+nx_list = [20, 40, 80, 160]  # Mesh resolutions to test
+
 # Run the convergence study
-nx_list = [40, 80, 160, 320, 640]
-xint = 4.01
-Tend = 0.5
-He = 0.5
-D1 = 1.0
-D2 = 1.0
-
-# Define analytical solutions
-function T1(x)
-    t = Tend
-    x = x - xint
-    return - He/(1+He*sqrt(D1/D2))*(erfc(x/(2*sqrt(D1*t))) - 2)
-end
-
-function T2(x)
-    t = Tend
-    x = x - xint
-    return - He/(1+He*sqrt(D1/D2))*erfc(x/(2*sqrt(D2*t))) + 1
-end
-
-# Run convergence study
-results = run_diphasic_mesh_convergence(
+results = run_diphasic_mesh_convergence_2D(
     nx_list,
-    T1,
-    T2,
-    lx=8.0,
+    cg_analytical,
+    cl_analytical;
+    lx=lx,
+    ly=ly,
     x0=0.0,
-    xint=xint,
-    Tend=Tend,
+    y0=0.0,
+    radius=radius,
+    center=center,
+    Tend=final_time,
     He=He,
-    D1=D1,
-    D2=D2,
-    norm=2,
-    relative=false
+    D1=Dg,
+    D2=Dl,
+    norm=2
 )
-
-println("\nDiphasic heat transfer convergence study completed!")

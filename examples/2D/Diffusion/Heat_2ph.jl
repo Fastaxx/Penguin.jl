@@ -28,7 +28,7 @@ operator_c = DiffusionOps(capacity_c)
 bc = Dirichlet(0.0)
 bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:left => bc, :right => bc, :top => bc, :bottom => bc))
 
-ic = InterfaceConditions(ScalarJump(1.0, 2.0, 0.0), FluxJump(1.0, 1.0, 0.0))
+ic = InterfaceConditions(ScalarJump(1.0, 0.5, 0.0), FluxJump(1.0, 1.0, 0.0))
 
 # Define the source term
 f1 = (x,y,z,t)->0.0
@@ -42,12 +42,12 @@ Fluide_2 = Phase(capacity_c, operator_c, f2, (x,y,z)->1.0)
 u0ₒ1 = ones((nx+1)*(ny+1))
 u0ᵧ1 = ones((nx+1)*(ny+1))
 u0ₒ2 = zeros((nx+1)*(ny+1))
-u0ᵧ2 = ones((nx+1)*(ny+1))
+u0ᵧ2 = zeros((nx+1)*(ny+1))
 u0 = vcat(u0ₒ1, u0ᵧ1, u0ₒ2, u0ᵧ2)
 
 # Define the solver
 Δt = 0.1
-Tend = 5.0
+Tend = 3.0
 solver = DiffusionUnsteadyDiph(Fluide_1, Fluide_2, bc_b, ic, Δt, u0, "BE")
 
 # Solve the problem
@@ -61,9 +61,6 @@ solve_DiffusionUnsteadyDiph!(solver, Fluide_1, Fluide_2, Δt, Tend, bc_b, ic, "B
 
 # Plot the Profile
 #plot_profile(solver, mesh; x=lx/2.01)
-
-# Animation
-#animate_solution(solver, mesh, circle)
 
 function animate_diphasic_solution(
     solver, 
@@ -212,8 +209,8 @@ function create_diphasic_animation(solver, mesh)
         nx, ny, lx, ly, x0, y0,
         filename="diphasic_heat_transfer.mp4",
         fps=15,
-        colorrange_bulk=(0, 0.5),
-        colorrange_interface=(0, 0.5),
+        colorrange_bulk=(0, 1.0),
+        colorrange_interface=(0, 1.0),
         colormap1=:viridis,
         colormap2=:viridis,
     )
@@ -221,6 +218,124 @@ end
 
 # Run the animation function
 create_diphasic_animation(solver, mesh)
+
+# Analytical solution
+using QuadGK
+using SpecialFunctions
+
+Dg,Dl = 1.0, 1.0
+R0 = radius
+cg0, cl0 = 1.0, 0.0
+He = 1.0
+
+D = sqrt(Dg/Dl)
+
+function Phi(u)
+    term1 = Dg*sqrt(Dl)*besselj1(u*R0)*bessely0(D*u*R0)
+    term2 = He*Dl*sqrt(Dg)*besselj0(u*R0)*bessely1(D*u*R0)
+    return term1 - term2
+end
+
+function Psi(u)
+    term1 = Dg*sqrt(Dl)*besselj1(u*R0)*besselj0(D*u*R0)
+    term2 = He*Dl*sqrt(Dg)*besselj0(u*R0)*besselj1(D*u*R0)
+    return term1 - term2
+end
+
+function cg_integrand(u, x, y, t)
+    r = sqrt((x-center[1])^2 + (y-center[2])^2)
+    Φu = Phi(u)
+    Ψu = Psi(u)
+    denom = u^2*(Φu^2 + Ψu^2)
+    num   = exp(-Dg*u^2*t)*besselj0(u*r)*besselj1(u*R0)
+    return iszero(denom) ? 0.0 : num/denom
+end
+
+function cl_integrand(u, x, y, t)
+    r = sqrt((x-center[1])^2 + (y-center[2])^2)
+    Φu = Phi(u)
+    Ψu = Psi(u)
+    denom = u*(Φu^2 + Ψu^2)
+    term1 = besselj0(D*u*r)*Φu
+    term2 = bessely0(D*u*r)*Ψu
+    num   = exp(-Dg*u^2*t)*besselj1(u*R0)*(term1 - term2)
+    return iszero(denom) ? 0.0 : num/denom
+end
+
+function compute_cg(x_values, y_values, t_values)
+    prefactor = (4*cg0*Dg*Dl*Dl*He)/(π^2*R0)
+    cg_results = Array{Float64}(undef, length(t_values), length(y_values), length(x_values))
+    for (i, t) in pairs(t_values)
+        Umax = 5.0/sqrt(Dg*t)
+        for (j, y) in pairs(y_values)
+            for (k, x) in pairs(x_values)
+                val, _ = quadgk(u->cg_integrand(u, x, y, t), 0, Umax; atol=1e-6, rtol=1e-6)
+                cg_results[i, j, k] = prefactor*val
+            end
+        end
+    end
+    return cg_results
+end
+
+function compute_cl(x_values, y_values, t_values)
+    prefactor = (2*cg0*Dg*sqrt(Dl)*He)/π
+    cl_results = Array{Float64}(undef, length(t_values), length(y_values), length(x_values))
+    for (i, t) in pairs(t_values)
+        Umax = 5.0/sqrt(Dg*t)
+        for (j, y) in pairs(y_values)
+            for (k, x) in pairs(x_values)
+                val, _ = quadgk(u->cl_integrand(u, x, y, t), 0, Umax; atol=1e-6, rtol=1e-6)
+                cl_results[i, j, k] = prefactor*val
+            end
+        end
+    end
+    return cl_results
+end
+
+nx_plot = 100
+ny_plot = 100
+
+# Create a grid of points in cartesian coordinates
+x_values = range(x0, stop=x0+lx, length=nx_plot)
+y_values = range(y0, stop=y0+ly, length=ny_plot)
+t_values = [0.01]
+
+cg_vals = compute_cg(x_values, y_values, t_values)
+cl_vals = compute_cl(x_values, y_values, t_values)
+
+# Create 2D arrays for plotting
+cg_phase1 = copy(cg_vals[1, :, :])
+cl_phase2 = copy(cl_vals[1, :, :])
+
+# Apply phase indicator - keep values only in relevant phases
+for i in 1:ny_plot
+    for j in 1:nx_plot
+        # Check if the point is inside or outside the circle
+        if circle(x_values[j], y_values[i]) <= 0  # Inside circle (phase 1)
+            cl_phase2[i, j] = NaN
+        else  # Outside circle (phase 2)
+            cg_phase1[i, j] = NaN
+        end
+    end
+end
+
+# Plot the analytical solution using heatmap
+fig = Figure()
+ax = Axis(fig[1, 1], xlabel="x", ylabel="y", title="Analytical Solution - t = $(t_values[1])")
+hm1 = heatmap!(ax, x_values, y_values, cg_phase1, colormap=:viridis, colorrange=(0, 1))
+hm2 = heatmap!(ax, x_values, y_values, cl_phase2, colormap=:plasma, colorrange=(0, 1))
+Colorbar(fig[1, 2], hm1, label="Phase 1 concentration")
+Colorbar(fig[1, 3], hm2, label="Phase 2 concentration")
+
+# Add a circle to show the interface
+theta = range(0, 2π, length=100)
+circle_x = center[1] .+ radius .* cos.(theta)
+circle_y = center[2] .+ radius .* sin.(theta)
+lines!(ax, circle_x, circle_y, color=:white, linewidth=2)
+
+display(fig)
+readline()
+
 
 
 """
@@ -290,97 +405,4 @@ scatter!(ax, Sh_val, color=:blue, label="Sherwood number")
 axislegend(ax, position=:rt)
 display(fig)
 
-# Analytical solution
-using QuadGK
-using SpecialFunctions
-
-Dg,Dl = 1.0, 1.0
-R0 = radius
-cg0, cl0 = 1.0, 0.0
-He = 0.5
-
-D = sqrt(Dg/Dl)
-
-function Phi(u)
-    term1 = Dg*sqrt(Dl)*besselj1(u*R0)*bessely0(D*u*R0)
-    term2 = He*Dl*sqrt(Dg)*besselj0(u*R0)*bessely1(D*u*R0)
-    return term1 - term2
-end
-
-function Psi(u)
-    term1 = Dg*sqrt(Dl)*besselj1(u*R0)*besselj0(D*u*R0)
-    term2 = He*Dl*sqrt(Dg)*besselj0(u*R0)*besselj1(D*u*R0)
-    return term1 - term2
-end
-
-function cg_integrand(u, r, t)
-    Φu = Phi(u)
-    Ψu = Psi(u)
-    denom = u^2*(Φu^2 + Ψu^2)
-    num   = exp(-Dg*u^2*t)*besselj0(u*r)*besselj1(u*R0)
-    return iszero(denom) ? 0.0 : num/denom
-end
-
-function cl_integrand(u, r, t)
-    Φu = Phi(u)
-    Ψu = Psi(u)
-    denom = u*(Φu^2 + Ψu^2)
-    term1 = besselj0(D*u*r)*Φu
-    term2 = bessely0(D*u*r)*Ψu
-    num   = exp(-Dg*u^2*t)*besselj1(u*R0)*(term1 - term2)
-    return iszero(denom) ? 0.0 : num/denom
-end
-
-function compute_cg(r_values, t_values)
-    prefactor = (4*cg0*Dg*Dl*Dl*He)/(π^2*R0)
-    cg_results = Matrix{Float64}(undef, length(t_values), length(r_values))
-    for (i, t) in pairs(t_values)
-        Umax = 5.0/sqrt(Dg*t)
-        for (j, r) in pairs(r_values)
-            val, _ = quadgk(u->cg_integrand(u, r, t), 0, Umax; atol=1e-6, rtol=1e-6)
-            cg_results[i, j] = prefactor*val
-        end
-    end
-    return cg_results
-end
-
-function compute_cl(r_values, t_values)
-    prefactor = (2*cg0*Dg*sqrt(Dl)*He)/π
-    cl_results = Matrix{Float64}(undef, length(t_values), length(r_values))
-    for (i, t) in pairs(t_values)
-        Umax = 5.0/sqrt(Dg*t)
-        for (j, r) in pairs(r_values)
-            val, _ = quadgk(u->cl_integrand(u, r, t), 0, Umax; atol=1e-6, rtol=1e-6)
-            cl_results[i, j] = prefactor*val
-        end
-    end
-    return cl_results
-end
-
-r_values_inside = range(1e-6, stop=R0, length=100)
-r_values_outside = range(R0, stop=4*R0, length=100)
-r_values = range(1e-6, stop=4*R0, length=nx+1)
-t_values = [1.0]
-
-cg_vals = compute_cg(collect(r_values), t_values)
-cl_vals = compute_cl(collect(r_values), t_values)
-
-# Plot the analytical solution and the numerical solution (profile)
-x=2.01
-y = range(mesh.x0[2], stop=mesh.x0[2]+mesh.h[2][1]*length(mesh.h[2]), length=length(mesh.h[2])+1)
-x_idx = round(Int, (x - mesh.x0[1]) / mesh.h[1][1])
-state = solver.states[end]
-u1ₒ = reshape(state[1:length(state) ÷ 4], (length(mesh.centers[1])+1, length(mesh.centers[2])+1))[x_idx, 1:div(length(mesh.centers[2])+1, 2)]
-u2ₒ = reshape(state[2*length(state) ÷ 4 + 1:3*length(state) ÷ 4], (length(mesh.centers[1])+1, length(mesh.centers[2])+1))[x_idx, 1:div(length(mesh.centers[2])+1, 2)]
-
-using CairoMakie
-
-fig = Figure()
-ax = Axis(fig[1, 1], xlabel="r", ylabel="c", title="Analytical solution")
-lines!(ax, r_values, cg_vals[1, :], color=:blue, linewidth=2, label="Analytical solution - Phase 1")
-scatter!(ax, r_values, u1ₒ, color=:red, label="Numerical solution - Phase 1")
-lines!(ax, r_values, cl_vals[1, :], color=:red, linewidth=2, label="Analytical solution - Phase 2")
-scatter!(ax, r_values,u2ₒ, color=:blue, label="Numerical solution - Phase 2")
-axislegend(ax)
-display(fig)
 """
