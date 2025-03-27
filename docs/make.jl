@@ -26,6 +26,7 @@ makedocs(sitename="Penguin.jl", remotes=nothing, modules = [Penguin],
                 ],
             "Benchmark" => [
                 "benchmark/poisson.md",
-                "benchmark/heat.md"
+                "benchmark/heat.md",
+                "benchmark/heat_2ph.md",
             ],
         ])

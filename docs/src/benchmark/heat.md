@@ -1,4 +1,4 @@
-# Heat 2D - Convergence
+# Heat 2D - 2ph - Convergence
 
 This example demonstrates how to solve a 2D diffusion Heat equation inside a circular region with Robin boundary conditions
 
