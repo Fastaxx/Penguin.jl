@@ -6,7 +6,7 @@ using CairoMakie
 
 ### 1D Test Case : Diphasic Unsteady Diffusion Equation inside a moving body
 # Define the spatial mesh
-nx = 40
+nx = 160
 lx = 1.0
 x0 = 0.0
 domain = ((x0, lx),)
@@ -48,9 +48,9 @@ Fluide2 = Phase(capacity_c, operator_c, f2, K2)
 
 # Initial condition
 u0ₒ1 = ones(nx+1)
-u0ᵧ1 = ones(nx+1)
+u0ᵧ1 = ones(nx+1)*0.5
 u0ₒ2 = zeros(nx+1)
-u0ᵧ2 = zeros(nx+1)
+u0ᵧ2 = ones(nx+1)*0.5
 
 u0 = vcat(u0ₒ1, u0ᵧ1, u0ₒ2, u0ᵧ2)
 
@@ -83,9 +83,10 @@ end
 display(figure)
 
 # Plot the position
+time_series = 0:Δt:Tend
 figure = Figure()
 ax = Axis(figure[1,1], xlabel = "Time", ylabel = "Interface position", title = "Interface position")
-lines!(ax, xf_log, label = "Interface position")
+lines!(ax, time_series, xf_log, label = "Interface position")
 display(figure)
 
 # save xf_log
