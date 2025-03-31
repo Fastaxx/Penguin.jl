@@ -59,7 +59,7 @@ Newton_params = (max_iter, tol, reltol, α)
 solver = MovingLiquidDiffusionUnsteadyMono(Fluide, bc_b, bc, Δt, u0, mesh, "BE")
 
 # Solve the problem
-solver, residuals, xf_log = solve_MovingLiquidDiffusionUnsteadyMono!(solver, Fluide, xf, Δt, Tend, bc_b, bc, stef_cond, mesh, "BE"; Newton_params=Newton_params, method=Base.:\)
+solver, residuals, xf_log, timestep_history = solve_MovingLiquidDiffusionUnsteadyMono!(solver, Fluide, xf, Δt, Tend, bc_b, bc, stef_cond, mesh, "BE"; Newton_params=Newton_params, adaptive_timestep=false, method=Base.:\)
 
 # Animation
 animate_solution(solver, mesh, body)

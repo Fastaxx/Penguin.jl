@@ -34,7 +34,10 @@ function MovingLiquidDiffusionUnsteadyMono(phase::Phase, bc_b::BorderConditions,
     return s
 end
 
-function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, bc::AbstractBoundary, ic::InterfaceConditions, mesh::AbstractMesh, scheme::String; Newton_params=(1000, 1e-10, 1e-10, 1.0), method=IterativeSolvers.gmres, kwargs...)
+function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, bc::AbstractBoundary, ic::InterfaceConditions, mesh::AbstractMesh, scheme::String; Newton_params=(1000, 1e-10, 1e-10, 1.0), cfl_target=0.5,
+    Δt_min=1e-4,
+    Δt_max=1.0,
+    adaptive_timestep=true, method=IterativeSolvers.gmres, kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
@@ -59,8 +62,10 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
 
     # Log residuals and interface positions for each time step:
     nt = Int(Tₑ/Δt)
-    residuals = [Float64[] for _ in 1:2nt]
+    residuals = Dict{Int, Vector{Float64}}()
     xf_log = Float64[]
+    timestep_history = Tuple{Float64, Float64}[]
+    push!(timestep_history, (t, Δt))
 
     # Determine how many dimensions
     dims = phase.operator.size
@@ -115,7 +120,11 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
         new_xf = current_xf + α * res
         err = abs(res)
         println("Iteration $iter | xf = $new_xf | error = $err | res = $res")
+        
         # Store residuals
+        if !haskey(residuals, 1)
+            residuals[1] = Float64[]
+        end
         push!(residuals[1], err)
 
         # 3) Update geometry if not converged
@@ -158,9 +167,32 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
     # Time loop
     k=2
     while t < Tₑ
-        t += Δt
-        println("Time : $(t)")
+        # Calcul de la vitesse d'interface à partir des flux
+        W! = phase.operator.Wꜝ[1:n, 1:n]  # n = nx*ny (full 2D system)
+        G  = phase.operator.G[1:n, 1:n]
+        H  = phase.operator.H[1:n, 1:n]
+        V  = phase.operator.V[1:n, 1:n]
+        Id = build_I_D(phase.operator, phase.Diffusion_coeff, phase.capacity)
+        Id = Id[1:n, 1:n]
+        Tₒ, Tᵧ = Tᵢ[1:n], Tᵢ[n+1:end]
+        Interface_term = Id * H' * W! * G * Tₒ + Id * H' * W! * H * Tᵧ
+        velocity_field = 1/(ρL) * abs.(Interface_term)
+        
+        # Adaptation du pas de temps si demandée
+        if adaptive_timestep
+            # Limiter le temps restant pour ne pas dépasser Tₑ
+            time_left = Tₑ - t
+            Δt_max_current = min(Δt_max, time_left)
+            
+            Δt, cfl = adapt_timestep(velocity_field, mesh, cfl_target, Δt, Δt_min, Δt_max_current)
+            push!(timestep_history, (Δt, cfl))
+            println("Adaptive timestep: Δt = $(round(Δt, digits=6)), CFL = $(round(cfl, digits=3))")
+        end
 
+        # Update time
+        t += Δt
+        println("Time : $(round(t, digits=6))")
+        
         # 1) Reconstruct
         STmesh = SpaceTimeMesh(mesh, [Δt, 2Δt], tag=mesh.tag)
         #v_guess = (new_xf - xf)/Δt
@@ -211,6 +243,9 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
             err = abs(new_xf - current_xf)
             println("Iteration $iter | xf = $new_xf | error = $err | res = $res")
             # Store residuals
+            if !haskey(residuals, k)
+                residuals[k] = Float64[]
+            end
             push!(residuals[k], err)
 
             # 3) Update geometry if not converged
@@ -246,13 +281,18 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
             println("Reached max_iter = $max_iter with xf = $new_xf, error = $err")
         end
 
+        # Afficher les informations du pas de temps
+        if adaptive_timestep
+            println("Time step info: Δt = $(round(Δt, digits=6)), CFL = $(round(timestep_history[end][2], digits=3))")
+        end
+
         push!(s.states, s.x)
         println("Time : $(t[1])")
         println("Max value : $(maximum(abs.(s.x)))")
         k += 1
     end
 
-    return s, residuals, xf_log
+    return s, residuals, xf_log, timestep_history
 end 
 
 
