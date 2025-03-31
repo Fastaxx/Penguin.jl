@@ -2,7 +2,7 @@
 
 julia_version = "1.11.2"
 manifest_format = "2.0"
-project_hash = "33dd65a77bf60d303f286ae77c725b31303d1ef2"
+project_hash = "c654f3069bc05f4bd43c3cc8fe826526962c1b51"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -133,6 +133,11 @@ version = "0.4.7"
 [[deps.Base64]]
 uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 version = "1.11.0"
+
+[[deps.Bessels]]
+git-tree-sha1 = "4435559dc39793d53a9e3d278e185e920b4619ef"
+uuid = "0e736298-9ec6-45e8-9647-e4fc86a2fe38"
+version = "0.2.8"
 
 [[deps.Bzip2_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
@@ -295,6 +300,16 @@ weakdeps = ["IntervalSets", "LinearAlgebra", "StaticArrays"]
 git-tree-sha1 = "439e35b0b36e2e5881738abc8857bd92ad6ff9a8"
 uuid = "d38c429a-6771-53c6-b99e-75d170b6e991"
 version = "0.6.3"
+
+[[deps.DSP]]
+deps = ["Bessels", "FFTW", "IterTools", "LinearAlgebra", "Polynomials", "Random", "Reexport", "SpecialFunctions", "Statistics"]
+git-tree-sha1 = "0c8a70a69036d8f3a2426d768d30144547cd73c0"
+uuid = "717857b8-e6f2-59f4-9121-6e50c889abd2"
+version = "0.8.3"
+weakdeps = ["OffsetArrays"]
+
+    [deps.DSP.extensions]
+    OffsetArraysExt = "OffsetArrays"
 
 [[deps.DataAPI]]
 git-tree-sha1 = "abe83f3a2f1b857aac70ef8b269080af17764bbe"
@@ -1153,6 +1168,24 @@ version = "1.4.3"
 git-tree-sha1 = "77b3d3605fc1cd0b42d95eba87dfcd2bf67d5ff6"
 uuid = "647866c9-e3ac-4575-94e7-e3d426903924"
 version = "0.1.2"
+
+[[deps.Polynomials]]
+deps = ["LinearAlgebra", "OrderedCollections", "RecipesBase", "Requires", "Setfield", "SparseArrays"]
+git-tree-sha1 = "555c272d20fc80a2658587fb9bbda60067b93b7c"
+uuid = "f27b6e38-b328-58d1-80ce-0feddd5e7a45"
+version = "4.0.19"
+
+    [deps.Polynomials.extensions]
+    PolynomialsChainRulesCoreExt = "ChainRulesCore"
+    PolynomialsFFTWExt = "FFTW"
+    PolynomialsMakieCoreExt = "MakieCore"
+    PolynomialsMutableArithmeticsExt = "MutableArithmetics"
+
+    [deps.Polynomials.weakdeps]
+    ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
+    FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
+    MakieCore = "20f20a25-4f0e-4fdf-b5d1-57303727442b"
+    MutableArithmetics = "d8a4904e-b15c-11e9-3269-09a3773c0cb0"
 
 [[deps.PrecompileTools]]
 deps = ["Preferences"]

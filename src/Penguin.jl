@@ -12,6 +12,11 @@ using LsqFit
 using SpecialFunctions
 using Roots
 using Interpolations
+using FFTW
+using DSP
+using Colors
+using Statistics
+
 
 # Write your package code here.
 
@@ -39,6 +44,9 @@ include("utils.jl")
 export initialize_temperature_uniform!, initialize_temperature_square!, initialize_temperature_circle!, initialize_temperature_function!
 export initialize_rotating_velocity_field, initialize_radial_velocity_field, initialize_poiseuille_velocity_field
 export volume_redefinition!
+
+include("interpolation.jl")
+export lin_interpol, quad_interpol, cubic_interpol
 
 include("solver.jl")
 export TimeType, PhaseType, EquationType
@@ -71,8 +79,15 @@ include("liquidmotionsolver/diffusion.jl")
 export MovingLiquidDiffusionUnsteadyMono, solve_MovingLiquidDiffusionUnsteadyMono!
 export MovingLiquidDiffusionUnsteadyDiph, solve_MovingLiquidDiffusionUnsteadyDiph!
 
+include("liquidmotionsolver/diffusion2d.jl")
+export MovingLiquidDiffusionUnsteadyMono2D, solve_MovingLiquidDiffusionUnsteadyMono2D!
+
 include("vizualize.jl")
 export plot_solution, animate_solution
+export plot_isotherms
+
+include("vizualize_mov.jl")
+export analyze_convergence_rates_newton, plot_timestep_history, plot_interface_evolution, plot_newton_residuals, analyze_interface_spectrum
 
 include("convergence.jl")
 export check_convergence, check_convergence_diph

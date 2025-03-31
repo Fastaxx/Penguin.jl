@@ -632,3 +632,126 @@ function animate_solution(solver, mesh::Mesh{2}, body::Function)
         display(fig)
     end
 end
+
+"""
+    plot_isotherms(solver, mesh, nx, ny; 
+                   time_steps=nothing, 
+                   levels=[0.01, 0.05, 0.1, 0.2, 0.5, 0.8], 
+                   layout=(2,2), 
+                   colormap=:viridis,
+                   show_interface=true,
+                   interpolate=false)
+
+Trace les isothermes (lignes d'égale température) à différents pas de temps.
+
+Paramètres:
+- `solver` : Solveur contenant les états à différents pas de temps
+- `mesh` : Maillage utilisé
+- `nx`, `ny` : Dimensions du maillage 
+- `time_steps` : Indices des pas de temps à visualiser (par défaut : 4 répartis uniformément)
+- `levels` : Valeurs des isothermes à tracer
+- `layout` : Disposition des sous-graphiques (lignes, colonnes)
+- `colormap` : Palette de couleurs pour les isothermes
+- `show_interface` : Si vrai, affiche la position de l'interface
+- `interpolate` : Si vrai, interpole les données sur une grille plus fine
+
+Retourne:
+- Une figure CairoMakie
+"""
+function plot_isotherms(solver, mesh, nx, ny, reconstruct; 
+                        time_steps=nothing, 
+                        levels=[0.01, 0.05, 0.1, 0.2, 0.5, 0.8], 
+                        layout=(2,2), 
+                        colormap=:viridis,
+                        show_interface=true,
+                        interpolate=false)
+    
+    # Déterminer les pas de temps à afficher
+    num_states = length(solver.states)
+    if time_steps === nothing
+        # Sélectionner automatiquement des pas de temps bien répartis
+        steps_to_show = min(prod(layout), num_states)
+        time_steps = round.(Int, range(1, num_states, length=steps_to_show))
+    end
+    
+    # S'assurer que time_steps ne dépasse pas le nombre d'états disponibles
+    time_steps = filter(t -> 1 <= t <= num_states, time_steps)
+    
+    # Créer la figure
+    fig = Figure(resolution=(800*layout[2], 700*layout[1]))
+    
+    # Coordonnées spatiales pour le traçage
+    x_coords = mesh.nodes[1][1:end-1]
+    y_coords = mesh.nodes[2][1:end-1]
+    
+    # Pour chaque pas de temps sélectionné
+    for (i, step) in enumerate(time_steps)
+        # Calculer la position dans la grille de sous-graphiques
+        row = (i - 1) ÷ layout[2] + 1
+        col = (i - 1) % layout[2] + 1
+        
+        # Créer l'axe pour ce pas de temps
+        ax = Axis(fig[row, col], 
+                 xlabel="x", 
+                 ylabel="y", 
+                 title="Isothermes - Pas de temps $step",
+                 aspect=DataAspect())
+        
+        # Extraire le champ de température pour ce pas de temps
+        T_vec = solver.states[step][1:((nx+1)*(ny+1))]
+        T_field = reshape(T_vec, (nx+1, ny+1))
+        T_field = T_field'  # Transposer pour l'orientation correcte
+        T_field = Float64.(T_field)
+        
+        # Ajuster la taille pour correspondre au maillage
+        T_field = T_field[1:end-1, 1:end-1]
+        
+        # Interpoler sur une grille plus fine si demandé
+        if interpolate
+            # Créer une grille plus fine
+            x_fine = range(minimum(x_coords), maximum(x_coords), length=3*length(x_coords))
+            y_fine = range(minimum(y_coords), maximum(y_coords), length=3*length(y_coords))
+            
+            # Interpoler les données
+            itp = linear_interpolation((x_coords, y_coords), T_field)
+            T_fine = [itp(x,y) for x in x_fine, y in y_fine]
+            
+            # Tracer les contours avec les données interpolées
+            contourf!(ax, x_fine, y_fine, T_fine, levels=levels, colormap=colormap)
+            contour!(ax, x_fine, y_fine, T_fine, levels=levels, color=:black, linewidth=1.5)
+        else
+            # Tracer les contours directement
+            contourf!(ax, x_coords, y_coords, T_field, levels=levels, colormap=colormap)
+            contour!(ax, x_coords, y_coords, T_field, levels=levels, color=:black, linewidth=1.5)
+        end
+        
+        # Ajouter l'interface si demandé
+        if show_interface && step <= length(solver.states) && step <= length(reconstruct)
+            # Obtenir la fonction d'interface pour ce pas de temps
+            s_func = reconstruct[step]
+            
+            # Tracer l'interface
+            y_vals = range(minimum(mesh.nodes[2]), maximum(mesh.nodes[2]), length=100)
+            x_vals = s_func.(y_vals)
+            
+            # Ajouter la ligne d'interface
+            lines!(ax, y_vals, x_vals, color=:red, linewidth=3, label="Interface")
+        end
+        
+        # Limites des axes
+        ax.limits = (minimum(x_coords), maximum(x_coords), minimum(y_coords), maximum(y_coords))
+    end
+    
+    # Ajouter une barre de couleur commune
+    Colorbar(fig[:, layout[2]+1], colormap=colormap, limits=(minimum(levels), maximum(levels)), 
+             label="Température")
+    
+    # Légende commune si l'interface est affichée
+    if show_interface
+        Legend(fig[layout[1]+1, :], [LineElement(color=:red, linewidth=3)], 
+               ["Interface"], orientation=:horizontal)
+    end
+    
+    
+    return fig
+end
