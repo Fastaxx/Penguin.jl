@@ -243,8 +243,11 @@ function solve_MovingLiquidDiffusionUnsteadyMono2D!(s::Solver, phase::Phase, Int
             time_left = Tₑ - t
             Δt_max_current = min(Δt_max, time_left)
             
-            Δt, cfl = adapt_timestep(velocity_field, mesh, cfl_target, Δt, Δt_min, Δt_max_current)
-            push!(timestep_history, (Δt, cfl))
+            # Remarquez les paramètres nommés pour les facteurs
+            Δt, cfl = adapt_timestep(velocity_field, mesh, cfl_target, Δt, Δt_min, Δt_max_current; 
+                                  growth_factor=1.1, shrink_factor=0.8, safety_factor=0.9)
+            
+            push!(timestep_history, (t, Δt))
             println("Adaptive timestep: Δt = $(round(Δt, digits=6)), CFL = $(round(cfl, digits=3))")
         end
 

@@ -6,7 +6,7 @@ using CairoMakie
 
 ### 1D Test Case : Diphasic Unsteady Diffusion Equation inside a moving body
 # Define the spatial mesh
-nx = 160
+nx = 320
 lx = 1.0
 x0 = 0.0
 domain = ((x0, lx),)
@@ -40,7 +40,7 @@ f1 = (x,y,z,t)->0.0
 f2 = (x,y,z,t)->0.0
 
 K1= (x,y,z)->1.0
-K2= (x,y,z)->1.0
+K2= (x,y,z)->0.05
 
 # Define the phase
 Fluide1 = Phase(capacity, operator, f1, K1)
@@ -126,12 +126,217 @@ for (idx, i) in enumerate(1:10:length(solver.states))
         label = (idx == 1 ? "Interface Field - Phase 2" : nothing))
 end
 
-axislegend(ax, position=:rb)
+axislegend(ax, position=:rt)
 display(fig)
 
-# Save the last state
-open("temp_$nx.txt", "w") do io
-    for j in 1:length(solver.states[state_i])
-        println(io, solver.states[state_i][j])
+using Penguin
+using CairoMakie
+using Printf
+using DelimitedFiles
+
+function animate_temperature_profile(
+    solver, 
+    xf_log, 
+    mesh;
+    filename="temperature_evolution.mp4",
+    fps=30
+)
+    # Get domain parameters from the mesh
+
+    
+    # Create spatial grid
+    x_grid = range(x0, stop=x0+lx, length=nx+1)
+    
+    # Time parameters
+    total_frames = length(solver.states)
+    time_points = range(0, step=Δt, length=total_frames)
+    
+    # Choose which frames to render
+    frame_indices = 1:total_frames
+    
+    # Create a figure with wider layout and better aspect ratio
+    fig = Figure(resolution=(1000, 700), fontsize=18)
+    
+    # Use the full width of the figure for both panels
+    # Top panel: Temperature profile (main view)
+    temp_ax = Axis(fig[1, 1:3], 
+                  xlabel = "Position (x)", 
+                  ylabel = "Temperature",
+                  title = "Temperature Profile",
+                  titlesize = 24,
+                  xlabelsize = 20,
+                  ylabelsize = 20,
+                  xticklabelsize = 16,
+                  yticklabelsize = 16)
+    
+    # Bottom panel: Interface position over time
+    interface_ax = Axis(fig[2, 1:3], 
+                      xlabel = "Time", 
+                      ylabel = "Interface Position",
+                      title = "Interface Position",
+                      titlesize = 24,
+                      xlabelsize = 20,
+                      ylabelsize = 20,
+                      xticklabelsize = 16,
+                      yticklabelsize = 16)
+    
+    # Adjust horizontal gap between panels
+    rowgap!(fig.layout, 15)  # Increase gap between rows
+    
+    # Plot complete interface position history
+    lines!(interface_ax, time_points, xf_log[1:total_frames], 
+           color = :blue, linewidth = 3)
+    
+    # Set up time indicator with larger font
+    time_label = Label(fig[0, 1:3], "Time: 0.000", fontsize=24, tellwidth=false)
+    
+    # Record animation
+    record(fig, filename, frame_indices; framerate=fps) do frame_idx
+        # Update time indicator
+        current_time = (frame_idx-1) * Δt
+        time_label.text = "Time: $(round(current_time, digits=3))"
+        
+        # Get current state
+        state = solver.states[frame_idx]
+        
+        # Extract temperature fields
+        u1ₒ = state[1:nx+1]                  # Bulk Field - Phase 1
+        u2ₒ = state[2*(nx+1)+1:3*(nx+1)]      # Bulk Field - Phase 2
+        
+        # Get current interface position
+        xf = xf_log[frame_idx]
+        
+        # Clear the temperature axis for the new frame
+        empty!(temp_ax)
+        
+        # Create a continuous temperature profile that avoids the glitch
+        temp = zeros(nx+1)
+        
+        for i in 1:nx+1
+            if x_grid[i] < xf - 1e-10
+                # Safely in phase 1
+                temp[i] = u1ₒ[i]
+            elseif x_grid[i] > xf + 1e-10
+                # Safely in phase 2
+                temp[i] = u2ₒ[i]
+            else
+                # At or very close to interface - use interface temperature (0.5)
+                temp[i] = 0.5
+            end
+        end
+        
+        # Plot the continuous temperature profile with thicker line
+        lines!(temp_ax, x_grid, temp, color=:red, linewidth=4)
+        
+        # Mark the interface on temperature plot
+        vlines!(temp_ax, xf, color=:black, linewidth=2.5)
+        scatter!(temp_ax, [xf], [0.5], color=:black, markersize=12)
+        
+        # Add annotation for interface position
+        text!(temp_ax, "Interface: x = $(round(xf, digits=4))",
+             position = (0.7*lx, 0.9),
+             fontsize = 18,
+             color = :black)
+        
+        # Mark current position on interface plot
+        scatter!(interface_ax, [current_time], [xf], 
+                color=:red, marker=:circle, markersize=10)
+        
+        # Set y-axis limits
+        limits!(temp_ax, x0, x0+lx, 0, 1.1)
+        upper_limit = ceil(maximum(xf_log) * 10) / 10  # Round up to nearest 0.1
+        limits!(interface_ax, 0, time_points[end], 0, upper_limit+0.05)
     end
+    
+    println("Animation saved to $filename")
+    return fig
 end
+
+# Version with just temperature profile (wide format)
+function animate_temperature_wide(
+    solver, 
+    xf_log, 
+    mesh;
+    filename="temperature_wide.mp4",
+    fps=30
+)
+    # Get domain parameters from the mesh
+
+    # Create spatial grid
+    x_grid = range(x0, stop=x0+lx, length=nx+1)
+    
+    # Time parameters
+    total_frames = length(solver.states)
+    
+    # Create a wide figure for the temperature profile
+    fig = Figure(resolution=(1200, 500), fontsize=18)
+    
+    # Create a single wide axis
+    ax = Axis(fig[1, 1], 
+             xlabel = "Position (x)", 
+             ylabel = "Temperature",
+             title = "Temperature Profile Evolution",
+             titlesize = 24,
+             xlabelsize = 20,
+             ylabelsize = 20)
+    
+    # Time label
+    time_label = Label(fig[0, 1], "Time: 0.000", fontsize=24)
+    
+    # Record animation
+    record(fig, filename, 1:total_frames; framerate=fps) do frame_idx
+        # Update time indicator
+        current_time = (frame_idx-1) * Δt
+        time_label.text = "Time: $(round(current_time, digits=3))"
+        
+        # Get current state
+        state = solver.states[frame_idx]
+        
+        # Extract temperature fields
+        u1ₒ = state[1:nx+1]                  # Bulk Field - Phase 1
+        u2ₒ = state[2*(nx+1)+1:3*(nx+1)]      # Bulk Field - Phase 2
+        
+        # Get current interface position
+        xf = xf_log[frame_idx]
+        
+        # Clear the axis
+        empty!(ax)
+        
+        # Create a continuous temperature profile
+        temp = zeros(nx+1)
+        
+        for i in 1:nx+1
+            if x_grid[i] < xf - 1e-10
+                temp[i] = u1ₒ[i]
+            elseif x_grid[i] > xf + 1e-10
+                temp[i] = u2ₒ[i]
+            else
+                temp[i] = 0.5
+            end
+        end
+        
+        # Plot temperature profile
+        lines!(ax, x_grid, temp, color=:red, linewidth=4)
+        
+        # Mark interface
+        vlines!(ax, xf, color=:black, linewidth=2.5)
+        scatter!(ax, [xf], [0.5], color=:black, markersize=12)
+        
+        # Add interface position text
+        text!(ax, "Interface: x = $(round(xf, digits=4))",
+             position = (0.7*lx, 0.9),
+             fontsize = 18,
+             color = :black)
+        
+        # Set axis limits
+        limits!(ax, x0, x0+lx, 0, 1.1)
+    end
+    
+    println("Animation saved to $filename")
+    return fig
+end
+
+# Call one of these functions
+animate_temperature_profile(solver, xf_log, mesh; filename="temperature_evolution_wide.mp4", fps=30)
+# Or use this version for just the temperature profile
+animate_temperature_wide(solver, xf_log, mesh; filename="temperature_profile_wide.mp4", fps=30)

@@ -540,7 +540,8 @@ end
 
 
 """
-    adapt_timestep(velocity_field, mesh, cfl_target, Δt_current, Δt_min, Δt_max, growth_factor=1.1)
+    adapt_timestep(velocity_field, mesh, cfl_target, Δt_current, Δt_min, Δt_max; 
+                  growth_factor=1.1, shrink_factor=0.8, safety_factor=0.9)
 
 Adapte le pas de temps en fonction du critère CFL basé sur la vitesse de l'interface.
 
@@ -551,19 +552,24 @@ Paramètres:
 - `Δt_current`: Pas de temps actuel [s]
 - `Δt_min`: Pas de temps minimum autorisé [s]
 - `Δt_max`: Pas de temps maximum autorisé [s]
-- `growth_factor`: Facteur limitant l'augmentation du pas de temps (par défaut 1.1)
+- `growth_factor`: Facteur maximum d'augmentation du pas de temps (par défaut 1.1)
+- `shrink_factor`: Facteur minimum de réduction du pas de temps (par défaut 0.8)
+- `safety_factor`: Facteur de sécurité pour le CFL (par défaut 0.9)
 
 Retourne:
 - `Δt_new`: Nouveau pas de temps [s]
 - `cfl_actual`: Nombre CFL qui sera obtenu avec le nouveau pas de temps
 """
-function adapt_timestep(velocity_field, mesh, cfl_target, Δt_current, Δt_min, Δt_max, growth_factor=0.9)
+function adapt_timestep(velocity_field, mesh, cfl_target, Δt_current, Δt_min, Δt_max;
+                       growth_factor=1.1, shrink_factor=0.8, safety_factor=0.9)
     # 1. Calcul de la vitesse maximale de l'interface
     v_max = maximum(abs.(velocity_field))
     
     # Éviter la division par zéro si l'interface est statique
     if v_max < 1e-10
-        return min(Δt_current * growth_factor, Δt_max), 0.0
+        # Si la vitesse est très faible, on peut augmenter le pas de temps
+        Δt_new = min(Δt_current * growth_factor, Δt_max)
+        return Δt_new, 0.0
     end
     
     # 2. Calcul de la taille de maille minimale dans chaque direction
@@ -583,19 +589,27 @@ function adapt_timestep(velocity_field, mesh, cfl_target, Δt_current, Δt_min, 
         error("Unsupported mesh dimension")
     end
     
-    # 3. Calcul du pas de temps optimal pour le CFL cible
-    Δt_optimal = cfl_target * Δh_min / v_max
+    # 3. Calcul du CFL actuel
+    cfl_current = v_max * Δt_current / Δh_min
     
-    # 4. Limitation de la croissance du pas de temps pour éviter les oscillations
-    Δt_limited = min(Δt_optimal, Δt_current * growth_factor)
+    # 4. Calcul du pas de temps optimal pour le CFL cible avec un facteur de sécurité
+    Δt_optimal = safety_factor * cfl_target * Δh_min / v_max
     
-    # 5. Application des contraintes min/max
-    Δt_new = clamp(Δt_limited, Δt_min, Δt_max)
+    # 5. Décision d'augmenter ou diminuer le pas de temps
+    if Δt_optimal > Δt_current
+        # La vitesse a diminué, on peut augmenter le pas de temps (limité par growth_factor)
+        Δt_new = min(Δt_optimal, Δt_current * shrink_factor)
+    else
+        # La vitesse a augmenté, on doit diminuer le pas de temps (mais pas trop brusquement)
+        Δt_new = max(Δt_optimal, Δt_current * growth_factor)
+    end
     
-    # 6. Calcul du CFL effectif avec le nouveau pas de temps
+    # 6. Application des contraintes min/max
+    Δt_new = clamp(Δt_new, Δt_min, Δt_max)
+    
+    # 7. Calcul du CFL effectif avec le nouveau pas de temps
     cfl_actual = v_max * Δt_new / Δh_min
     
     return Δt_new, cfl_actual
 end
-
 
