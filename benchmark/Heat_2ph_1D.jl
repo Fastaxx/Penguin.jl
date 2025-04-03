@@ -319,7 +319,7 @@ function run_diphasic_mesh_convergence(
         ylabel = "L$norm error",
         title  = "Full Cell Errors",
         xscale = log10,
-        yscale = log10
+        yscale = log10,
     )
     
     scatter!(ax_full, h_vals, err1_full_vals, label="Phase 1 ($p1_full)", markersize=12, color=:blue)
@@ -346,7 +346,13 @@ function run_diphasic_mesh_convergence(
         ylabel = "L$norm error",
         title  = "Cut Cell Errors",
         xscale = log10,
-        yscale = log10
+        yscale = log10,
+        xminorticksvisible = true, 
+        xminorgridvisible = true,
+        xminorticks = IntervalsBetween(10),
+        yminorticksvisible = true,
+        yminorgridvisible = true,
+        yminorticks = IntervalsBetween(10),
     )
     
     scatter!(ax_cut, h_vals, err1_cut_vals, label="Phase 1 ($p1_cut)", markersize=12, color=:blue)
@@ -375,7 +381,13 @@ function run_diphasic_mesh_convergence(
         ylabel = "L$norm error",
         title  = "Global Errors",
         xscale = log10,
-        yscale = log10
+        yscale = log10,
+        xminorticksvisible = true, 
+        xminorgridvisible = true,
+        xminorticks = IntervalsBetween(10),
+        yminorticksvisible = true,
+        yminorgridvisible = true,
+        yminorticks = IntervalsBetween(10),
     )
     
     # Full cell errors panel
@@ -385,7 +397,13 @@ function run_diphasic_mesh_convergence(
         ylabel = "L$norm error",
         title  = "Full Cell Errors",
         xscale = log10,
-        yscale = log10
+        yscale = log10,
+        xminorticksvisible = true, 
+        xminorgridvisible = true,
+        xminorticks = IntervalsBetween(10),
+        yminorticksvisible = true,
+        yminorgridvisible = true,
+        yminorticks = IntervalsBetween(10),
     )
     
     # Cut cell errors panel
@@ -395,7 +413,13 @@ function run_diphasic_mesh_convergence(
         ylabel = "L$norm error",
         title  = "Cut Cell Errors",
         xscale = log10,
-        yscale = log10
+        yscale = log10,
+        xminorticksvisible = true, 
+        xminorgridvisible = true,
+        xminorticks = IntervalsBetween(10),
+        yminorticksvisible = true,
+        yminorgridvisible = true,
+        yminorticks = IntervalsBetween(10),
     )
     
     # Combined errors panel
@@ -405,7 +429,14 @@ function run_diphasic_mesh_convergence(
         ylabel = "L$norm error",
         title  = "Combined Errors",
         xscale = log10,
-        yscale = log10
+        yscale = log10,
+        xminorticksvisible = true, 
+        xminorgridvisible = true,
+        xminorticks = IntervalsBetween(10),
+        yminorticksvisible = true,
+        yminorgridvisible = true,
+        yminorticks = IntervalsBetween(10),
+
     )
     
     # Plot in global panel
