@@ -48,7 +48,7 @@ function run_mesh_convergence(
         u0ᵧ = ones((nx+1)*(ny+1))
         u0 = vcat(u0ₒ, u0ᵧ)
 
-        Δt = 0.25*(lx/nx)^2
+        Δt = 0.5*(lx/nx)^2
         Tend = 0.1
 
         solver = DiffusionUnsteadyMono(phase, bc_b, bc_boundary, Δt, u0, "BE") # Start by a backward Euler scheme to prevent oscillation due to CN scheme
@@ -136,11 +136,11 @@ function run_mesh_convergence(
 end
 
 # Example usage:
-nx_list = [20, 40, 80, 160]
-ny_list = [20, 40, 80, 160]
+nx_list = [20, 40, 80, 160, 320]
+ny_list = [20, 40, 80, 160, 320]
 radius, center = 1.0, (2.01, 2.01)
 function radial_heat_(x, y)
-    t=Tend
+    t=0.1
     R=1.0
 
     function j0_zeros(N; guess_shift=0.25)

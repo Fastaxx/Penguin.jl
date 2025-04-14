@@ -2,6 +2,7 @@ using Penguin, LsqFit, SparseArrays, LinearAlgebra
 using IterativeSolvers
 using CairoMakie
 using SpecialFunctions
+using Roots
 
 """
     run_time_convergence(dt_list, radius, center, u_analytical; nx=40, ny=40, lx=4.0, ly=4.0, norm=2, Tend=0.1)
@@ -46,8 +47,8 @@ function run_time_convergence(
     operator = DiffusionOps(capacity)
 
     # Define boundary conditions
-    bc_boundary = Robin(3.0, 1.0, 3.0*400)  # Interface condition (example)
-    bc0 = Dirichlet(400.0)
+    bc_boundary = Dirichlet(1.0)
+    bc0 = Dirichlet(0.0)
     bc_b = BorderConditions(Dict(
         :left   => bc0,
         :right  => bc0,
@@ -57,8 +58,8 @@ function run_time_convergence(
     phase = Phase(capacity, operator, (x,y,z,t)->0.0, (x,y,z)->1.0)
 
     # Define the initial condition (uniform temperature)
-    u0ₒ = ones((nx+1)*(ny+1)) * 270.0
-    u0ᵧ = zeros((nx+1)*(ny+1)) * 270.0
+    u0ₒ = zeros((nx+1)*(ny+1))
+    u0ᵧ = ones((nx+1)*(ny+1))
     u0 = vcat(u0ₒ, u0ᵧ)
 
     # Loop over dt_list for temporal convergence
@@ -69,7 +70,7 @@ function run_time_convergence(
 
         # Create the solver; here we start with a backward Euler for stability.
         solver = DiffusionUnsteadyMono(phase, bc_b, bc_boundary, Δt, u0, "BE") # Start by a backward Euler scheme to prevent oscillation due to CN scheme
-        solve_DiffusionUnsteadyMono!(solver, phase, Δt, Tend, bc_b, bc_boundary, "CN"; method=Base.:\)
+        solve_DiffusionUnsteadyMono!(solver, phase, Δt, Tend, bc_b, bc_boundary, "BE"; method=Base.:\)
 
         # Compute errors with respect to the analytical solution.
         # The function check_convergence is assumed to return (u_ana, u_num, global_err, full_err, cut_err, empty_err)
@@ -86,15 +87,15 @@ function run_time_convergence(
     log_dt = log.(dt_vals)
     fit_result = curve_fit(fit_model, log_dt, log.(err_vals), [-1.0, 0.0])
     fit_result_cut = curve_fit(fit_model, log_dt, log.(err_cut_vals), [-1.0, 0.0])
-    fit_result_empty = curve_fit(fit_model, log_dt, log.(err_empty_vals), [-1.0, 0.0])
+    #fit_result_empty = curve_fit(fit_model, log_dt, log.(err_empty_vals), [-1.0, 0.0])
     fit_result_full = curve_fit(fit_model, log_dt, log.(err_full_vals), [-1.0, 0.0])
     p_est = round(fit_result.param[1], digits=2)
     p_est_cut = round(fit_result_cut.param[1], digits=2)
-    p_est_empty = round(fit_result_empty.param[1], digits=2)
+    #p_est_empty = round(fit_result_empty.param[1], digits=2)
     p_est_full = round(fit_result_full.param[1], digits=2)
     println("Estimated temporal order of convergence (global) = ", p_est)
     println("Estimated temporal order of convergence (cut) = ", p_est_cut)
-    println("Estimated temporal order of convergence (empty) = ", p_est_empty)
+    #println("Estimated temporal order of convergence (empty) = ", p_est_empty)
     println("Estimated temporal order of convergence (full) = ", p_est_full)
 
     # Plot convergence in log–log scale
@@ -109,18 +110,18 @@ function run_time_convergence(
     scatter!(ax, dt_vals, err_vals, markersize = 10, label="Global error")
     scatter!(ax, dt_vals, err_full_vals, markersize = 10, label="Full error")
     scatter!(ax, dt_vals, err_cut_vals, markersize = 10, label="Cut error")
-    scatter!(ax, dt_vals, err_empty_vals, markersize = 10, label="Empty error")
+    #scatter!(ax, dt_vals, err_empty_vals, markersize = 10, label="Empty error")
     lines!(ax, dt_vals, err_vals, color=:black)
     lines!(ax, dt_vals, err_full_vals, color=:black)
     lines!(ax, dt_vals, err_cut_vals, color=:black)
-    lines!(ax, dt_vals, err_empty_vals, color=:black)
+    #lines!(ax, dt_vals, err_empty_vals, color=:black)
 
     lines!(ax, dt_vals, 10.0*dt_vals.^2.0, label="O(Δt²)", color=:black, linestyle=:dash)
     lines!(ax, dt_vals, 1.0*dt_vals.^1.0, label="O(Δt¹)", color=:black, linestyle=:dashdot)
     axislegend(ax, position=:rb)
     display(fig)
 
-    return dt_vals, err_vals, p_est, err_full_vals, p_est_full, err_cut_vals, p_est_cut, err_empty_vals, p_est_empty
+    return dt_vals, err_vals, p_est, err_full_vals, p_est_full, err_cut_vals, p_est_cut#, err_empty_vals, p_est_empty
 end
 
 # Example usage:
@@ -133,25 +134,26 @@ radius, center = 1.0, (2.01, 2.01)
 function radial_heat_(x, y)
     t=0.1
     R=1.0
-    k=3.0
-    a=1.0
 
-    function j0_zeros_robin(N, k, R; guess_shift = 0.25)
-        # Define the function for alpha J1(alpha) - k R J0(alpha) = 0
-        eq(alpha) = alpha * besselj1(alpha) - k * R * besselj0(alpha)
-    
+    function j0_zeros(N; guess_shift=0.25)
         zs = zeros(Float64, N)
+        # The m-th zero of J₀ is *roughly* near (m - guess_shift)*π for large m.
+        # We'll bracket around that approximate location and refine via find_zero.
         for m in 1:N
-            # Approximate location around (m - guess_shift)*π
-            x_left  = (m - guess_shift - 0.5) * π
-            x_right = (m - guess_shift + 0.5) * π
-            x_left  = max(x_left, 1e-6)  # Ensure bracket is positive
-            zs[m]   = find_zero(eq, (x_left, x_right))
+            # approximate location
+            x_left  = (m - guess_shift - 0.5)*pi
+            x_right = (m - guess_shift + 0.5)*pi
+            # ensure left>0
+            x_left = max(x_left, 1e-6)
+            
+            # We'll use bisection or Brent's method from Roots.jl
+            αm = find_zero(besselj0, (x_left, x_right))
+            zs[m] = αm
         end
         return zs
     end
 
-    alphas = j0_zeros_robin(1000, k, R)
+    alphas = j0_zeros(100)
     N=length(alphas)
     r = sqrt((x - center[1])^2 + (y - center[2])^2)
     if r >= R
@@ -163,11 +165,10 @@ function radial_heat_(x, y)
     s = 0.0
     for m in 1:N
         αm = alphas[m]
-        An = 2.0 * k * R / ((k^2 * R^2 + αm^2) * besselj0(αm))
-        s += An * exp(- a * αm^2 * t/R^2) * besselj0(αm * (r / R))
+        s += exp(-αm^2 * t) * besselj0(αm * (r / R)) / (αm * besselj1(αm))
     end
-    return (1.0 - s) * (400 - 270) + 270
+    return 1.0 - 2.0*s
 end
 
 
-run_time_convergence(dt_list, radius, center, radial_heat_; nx=40, ny=40, Tend=0.1)
+run_time_convergence(dt_list, radius, center, radial_heat_; nx=640, ny=640, Tend=0.1)
