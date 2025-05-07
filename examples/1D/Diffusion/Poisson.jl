@@ -8,7 +8,7 @@ nx = 320
 lx = 1.
 x0 = 0.
 domain = ((x0, lx),)
-mesh = Mesh((nx,), (lx,), (x0,))
+mesh = Penguin.Mesh((nx,), (lx,), (x0,))
 
 # Define the body
 center = 0.5
@@ -24,7 +24,7 @@ operator = DiffusionOps(capacity)
 # Redefine W and V : Rebuild the operator
 operator = DiffusionOps(capacity)
 
-volume_redefinition!(capacity, operator)
+#volume_redefinition!(capacity, operator)
 operator = DiffusionOps(capacity)
 # Define the boundary conditions
 bc = Dirichlet(0.0)

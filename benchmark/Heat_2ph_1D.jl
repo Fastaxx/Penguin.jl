@@ -16,7 +16,7 @@ function run_diphasic_mesh_convergence(
     lx::Float64=8.0,
     x0::Float64=0.0,
     xint::Float64=4.0,
-    Tend::Float64=0.5,
+    Tend::Float64=0.1,
     He::Float64=0.5,
     D1::Float64=1.0,
     D2::Float64=1.0,
@@ -540,9 +540,9 @@ end
 
 # Run the convergence study
 nx_list = [40, 80, 160, 320, 640]
-xint = 4.01
+xint = 4.0
 Tend = 0.5
-He = 1.0
+He = 0.5
 D1 = 1.0
 D2 = 1.0
 

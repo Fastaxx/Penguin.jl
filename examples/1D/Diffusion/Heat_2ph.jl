@@ -1,9 +1,9 @@
 using Penguin
 using IterativeSolvers
-
+using CairoMakie
 ### 1D Test Case : Diphasic Unsteady Diffusion Equation 
 # Define the mesh
-nx = 640
+nx = 40
 lx = 8.0
 x0 = 0.0
 domain=((x0,lx),)
@@ -14,14 +14,20 @@ xint = 4.0 #+ 0.1
 body = (x, _=0) -> (x - xint)
 body_c = (x, _=0) -> -(x - xint)
 
+times = Dict{String,Float64}()
+
 # Define the capacity
-capacity = Capacity(body, mesh)
-capacity_c = Capacity(body_c, mesh)
+times["VOFI"] = @elapsed begin
+    capacity  = Capacity(body,  mesh)
+    capacity_c = Capacity(body_c, mesh)
+end
 
 # Define the operators
-operator = DiffusionOps(capacity)
-operator_c = DiffusionOps(capacity_c)
-
+times["Operators"] = @elapsed begin
+    operator   = DiffusionOps(capacity)
+    operator_c = DiffusionOps(capacity_c)
+end
+  
 #volume_redefinition!(capacity, operator)
 #volume_redefinition!(capacity_c, operator_c)
 
@@ -56,21 +62,76 @@ u0 = vcat(u0ₒ1, u0ᵧ1, u0ₒ2, u0ᵧ2)
 
 # Define the solver
 Δt = 0.5 * (lx/nx)^2
-Tend = 0.5
-solver = DiffusionUnsteadyDiph(Fluide_1, Fluide_2, bc_b, ic, Δt, u0, "CN")
-
+Tend = 1.0
+times["Solver setup"] = @elapsed begin
+    # (re-use your u0 definition above)
+    solver = DiffusionUnsteadyDiph(Fluide_1, Fluide_2, bc_b, ic, Δt, u0, "CN")
+end
 # Solve the problem
-solve_DiffusionUnsteadyDiph!(solver, Fluide_1, Fluide_2, Δt, Tend, bc_b, ic, "CN"; method=Base.:\)
+times["Solving"] = @elapsed begin
+    solve_DiffusionUnsteadyDiph!(
+      solver, Fluide_1, Fluide_2,
+      Δt, Tend, bc_b, ic, "CN";
+      method = Base.:\ )
+end
+
+using SparseArrays, CairoMakie
+
+A = solver.A
+b = solver.b
+A, b, rows_idx, cols_idx = remove_zero_rows_cols!(A, b)
+row_idx, col_idx, _ = findnz(A)
+
+fig_spy = Figure()
+ax_spy = Axis(fig_spy[1, 1];
+               xlabel    = "Row",
+               ylabel    = "Column",
+               title     = "Sparsity of A",
+               yreversed=true)    # flip Y so index 1 is at bottom
+
+# swap row/col when scattering
+scatter!(ax_spy, col_idx,row_idx;
+         markersize = 5,
+         color      = :black)
+
+display(fig_spy)
+readline()
+
+
+#––– plot the timings as percentages of T_end –––
+labels = collect(keys(times))
+raw   = collect(values(times))
+# use Tend (end time) instead of total runtime
+pct   = 100 .* raw ./ Tend   # compute percentage of each step relative to simulation end time
+
+fig_cost = Figure(size = (700,400))
+ax_cost = Axis(fig_cost[1,1];
+  xticks            = (1:length(labels), labels),
+  xticklabelrotation= 45,
+  ylabel            = "Time (% of Tend)",
+  title             = "Computational cost vs. Tend")
+
+barplot!(ax_cost, 1:length(pct), pct; color = :skyblue)
+
+# optional: annotate bars
+for (i, p) in enumerate(pct)
+  text!(ax_cost, i, p + 1;
+        text = string(round(p, digits=1), "%"),
+        align = (:center, :bottom), 
+        fontsize = 10)
+end
+
+display(fig_cost)
+readline()  # pause if you want
 
 # Write the solution to a VTK file
 #write_vtk("solution", mesh, solver)
 
 # Plot the solution
-plot_solution(solver, mesh, body, capacity)
+#plot_solution(solver, mesh, body, capacity)
 
 # Animation
 #animate_solution(solver, mesh, body)
-
 
 # Plot the solution
 state_i = 10
@@ -240,6 +301,6 @@ Sh_val = compute_sherwood_all(solver, capacity, capacity_c, Δt, He, lx, 1.0)
 # Plot Sherwood number
 fig = Figure()
 ax = Axis(fig[1, 1], xlabel="t", ylabel="Sh", title="Sherwood number")
-scatter!(ax,Δt:Δt:Tend,Sh_val, color=:blue, label="Sherwood number")
+scatter!(ax,0:Δt:Tend+Δt,Sh_val, color=:blue, label="Sherwood number")
 axislegend(ax, position=:rt)
 display(fig)

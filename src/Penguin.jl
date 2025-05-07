@@ -54,6 +54,7 @@ export Solver, solve_system!
 export build_I_bc, build_I_D, build_source, build_g_g
 export BC_border_mono!, BC_border_diph!
 export cfl_restriction
+export remove_zero_rows_cols!
 
 include("solver/diffusion.jl")
 export DiffusionSteadyMono, solve_DiffusionSteadyMono!
