@@ -26,7 +26,7 @@ operator_c = DiffusionOps(capacity_c)
 
 # Define the boundary conditions
 bc = Dirichlet(0.0)
-bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:left => bc, :right => bc, :top => bc, :bottom => bc))
+bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:left=>bc, :right=>bc, :bottom=>bc, :top=>bc))
 
 ic = InterfaceConditions(ScalarJump(1.0, 0.5, 0.0), FluxJump(1.0, 1.0, 0.0))
 
@@ -47,7 +47,7 @@ u0 = vcat(u0ₒ1, u0ᵧ1, u0ₒ2, u0ᵧ2)
 
 # Define the solver
 Δt = 0.1
-Tend = 3.0
+Tend = 1.0
 solver = DiffusionUnsteadyDiph(Fluide_1, Fluide_2, bc_b, ic, Δt, u0, "BE")
 
 # Solve the problem
@@ -57,7 +57,7 @@ solve_DiffusionUnsteadyDiph!(solver, Fluide_1, Fluide_2, Δt, Tend, bc_b, ic, "B
 #write_vtk("solution", mesh, solver)
 
 # Plot the solution
-#plot_solution(solver, mesh, circle, capacity, state_i=101)
+plot_solution(solver, mesh, circle, capacity, state_i=11)
 
 # Plot the Profile
 #plot_profile(solver, mesh; x=lx/2.01)
@@ -217,7 +217,66 @@ function create_diphasic_animation(solver, mesh)
 end
 
 # Run the animation function
-create_diphasic_animation(solver, mesh)
+#create_diphasic_animation(solver, mesh)
+
+# Plot the solution in a 3D view
+using CairoMakie
+
+function plot_diphasic_solution_3d(solver, mesh, nx, ny, x0, y0, lx, ly)
+    # Create figure
+    fig = Figure(size=(1000, 800))
+    
+    # Create axes for the figure
+    ax1 = Axis3(fig[1, 1], xlabel="x", ylabel="y", zlabel="Temperature", title="Bulk Phase 1")
+    ax2 = Axis3(fig[1, 2], xlabel="x", ylabel="y", zlabel="Temperature", title="Interface Phase 1")
+    ax3 = Axis3(fig[2, 1], xlabel="x", ylabel="y", zlabel="Temperature", title="Bulk Phase 2")
+    ax4 = Axis3(fig[2, 2], xlabel="x", ylabel="y", zlabel="Temperature", title="Interface Phase 2")
+
+    # Create meshgrid for plotting
+    x = range(x0, stop=x0+lx, length=nx+1)
+    y = range(y0, stop=y0+ly, length=ny+1)
+    
+    # Extract the last state
+    u = solver.states[end]
+    u1_bulk = reshape(u[1:(nx+1)*(ny+1)], (nx+1, ny+1))'
+    u1_interface = reshape(u[(nx+1)*(ny+1)+1:2*(nx+1)*(ny+1)], (nx+1, ny+1))'
+    u2_bulk = reshape(u[2*(nx+1)*(ny+1)+1:3*(nx+1)*(ny+1)], (nx+1, ny+1))'
+    u2_interface = reshape(u[3*(nx+1)*(ny+1)+1:end], (nx+1, ny+1))'
+    
+    # Create surface plots
+    s1 = surface!(ax1, x, y, u1_bulk, colormap=:viridis)
+    s2 = surface!(ax2, x, y, u1_interface, colormap=:viridis)
+    s3 = surface!(ax3, x, y, u2_bulk, colormap=:viridis)
+    s4 = surface!(ax4, x, y, u2_interface, colormap=:viridis)
+    
+    # Add colorbars
+    Colorbar(fig[1:2, 3], s1, label="Temperature")
+    
+    # Set common view angle for all plots
+    viewangle = (1.275pi, pi/8)
+    for ax in [ax1, ax2, ax3, ax4]
+        ax.azimuth = viewangle[1]
+        ax.elevation = viewangle[2]
+    end
+    
+    # Set z limits
+    zlims!(ax1, (0, 1))
+    zlims!(ax2, (0, 1))
+    zlims!(ax3, (0, 1))
+    zlims!(ax4, (0, 1))
+    
+    # Add title with time information
+
+    
+    return fig
+end
+
+# Call the function with your solver and mesh parameters
+fig = plot_diphasic_solution_3d(solver, mesh, nx, ny, x0, y0, lx, ly)
+display(fig)
+
+readline()
+
 
 # Analytical solution
 using QuadGK
