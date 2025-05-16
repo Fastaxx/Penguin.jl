@@ -3,7 +3,7 @@ using IterativeSolvers
 
 ### 1D Test Case : Monophasic Unsteady Diffusion Equation 
 # Define the mesh
-nx = 160
+nx = 80
 lx = 10.0
 x0 = 0.0
 domain=((x0,lx),)
@@ -26,7 +26,7 @@ bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:top => Dirichlet(1.0), :
 
 # Define the source term
 f = (x,y,z,t)->0.0
-D = (x,y,z)->1.0
+D = (x,y,z)->5.0
 # Define the phase
 Fluide = Phase(capacity, operator, f, D)
 
@@ -37,7 +37,7 @@ u0 = vcat(u0ₒ, u0ᵧ)
 
 # Define the solver
 Δt = 0.5 * (lx/nx)^2
-Tend = 2.0
+Tend = 1.0
 solver = DiffusionUnsteadyMono(Fluide, bc_b, bc0, Δt, u0, "CN")
 
 # Solve the problem
@@ -56,13 +56,13 @@ plot_solution(solver, mesh, body, capacity; state_i=10)
 using SpecialFunctions
 
 function analytical(x; t=Tend)
-    a=1.0
+    a=5.0
     k=1.0
     x = x - center
     return 1.0*(erf(x/(2*sqrt(a*t))) + exp(k*x+a*k^2*t)*erfc(x/(2*sqrt(a*t)) + k*sqrt(a*t)))
 end
 
-#u_ana, u_num, global_err, full_err, cut_err, empty_err = check_convergence(analytical, solver, capacity, 2)
+u_ana, u_num, global_err, full_err, cut_err, empty_err = check_convergence(analytical, solver, capacity, 2)
 
 
 x = range(x0, stop=lx, length=nx+1)
@@ -81,7 +81,7 @@ scatter!(ax, x, y_num, color = :red, label = "Numerical solution")
 axislegend(ax, position = :rb)
 display(fig)
 
-"""
+
 # Plot analytical solution for different time
 using CairoMakie
 
@@ -94,4 +94,3 @@ for t in [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 end
 axislegend(ax, position = :rb)
 display(fig)
-"""

@@ -3,7 +3,7 @@ using IterativeSolvers
 using CairoMakie
 ### 1D Test Case : Diphasic Unsteady Diffusion Equation 
 # Define the mesh
-nx = 40
+nx = 320
 lx = 8.0
 x0 = 0.0
 domain=((x0,lx),)
@@ -39,8 +39,8 @@ bc1 = Dirichlet(0.0)
 bc0 = Dirichlet(1.0)
 bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:top => bc0, :bottom => bc1))
 
-ic = InterfaceConditions(ScalarJump(1.0, 0.5, 0.0), FluxJump(1.0, 1.0, 0.0))
-He = 0.5
+ic = InterfaceConditions(ScalarJump(1.0, 1.0, 0.0), FluxJump(1.0, 1.0, 0.0))
+He = 1.0
 # Define the source term
 f1 = (x,y,z,t)->0.0
 f2 = (x,y,z,t)->0.0
@@ -121,14 +121,12 @@ for (i, p) in enumerate(pct)
         fontsize = 10)
 end
 
-display(fig_cost)
-readline()  # pause if you want
 
 # Write the solution to a VTK file
 #write_vtk("solution", mesh, solver)
 
 # Plot the solution
-#plot_solution(solver, mesh, body, capacity)
+plot_solution(solver, mesh, body, capacity)
 
 # Animation
 #animate_solution(solver, mesh, body)
@@ -169,7 +167,7 @@ display(fig)
 
 # Analytical solution
 using SpecialFunctions
-He=0.5
+He=1.0
 D1, D2 = 1.0, 1.0
 function T1(x)
     t = Tend
