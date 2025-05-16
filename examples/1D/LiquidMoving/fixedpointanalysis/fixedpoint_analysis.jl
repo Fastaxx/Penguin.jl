@@ -558,3 +558,363 @@ end
 display(fig_summary)
 println("Individual time step analysis plots saved as: stefan_fixed_point_analysis_step*.png")
 println("Summary plot saved as: stefan_fixed_point_summary.png")
+
+using Penguin, SparseArrays, LinearAlgebra
+using IterativeSolvers
+using CairoMakie
+using Printf
+using Statistics
+"""
+Plot the fixed point functions from multiple time steps on a single figure
+with improved visibility and clarity.
+"""
+function plot_fixed_point_functions_improved(xf_samples_list, xf_next_list, time_steps;
+                                           fixed_points_list=nothing, L_values=nothing,
+                                           title="Évolution des Fonctions de Point Fixe",
+                                           domain_range=(0.0, 1.0))
+    # Create figure with larger size for better visibility
+    fig = Figure(resolution=(1200, 900))
+    
+    # Main plot for fixed point functions - make it bigger by using more space
+    ax = Axis(fig[1:2, 1:2], 
+              xlabel="xf", ylabel="f(xf)",
+              title=title,
+              aspect=1.5)  # Better aspect ratio for visibility
+    
+    # Add identity line
+    x_min = minimum([minimum(xs) for xs in xf_samples_list])
+    x_max = maximum([maximum(xs) for xs in xf_samples_list])
+    identity_line = range(x_min, x_max, length=100)
+    lines!(ax, identity_line, identity_line, 
+           color=:black, linestyle=:dash, linewidth=3, label="y = x")
+    
+    # Use a colormap for better differentiation between time steps
+    n_steps = length(time_steps)
+    cmap = cgrad(:viridis, n_steps, categorical=true)
+    
+    # Store legend entries for better organization
+    legend_entries = []
+    
+    # Plot each fixed point function with better visibility
+    for (i, (xf_samples, xf_next)) in enumerate(zip(xf_samples_list, xf_next_list))
+        # Use color from colormap
+        color = cmap[i]
+        
+        # Plot with thicker lines for better visibility
+        lines!(ax, xf_samples, xf_next, 
+              linewidth=3, color=color,
+              label="Pas $(time_steps[i])" * 
+                   (L_values !== nothing ? ", L=$(round(L_values[i], digits=2))" : ""))
+        
+        # Add to legend entries
+        push!(legend_entries, (
+            LineElement(linewidth=3, color=color),
+            "Pas $(time_steps[i]), L=$(round(L_values[i], digits=2))"
+        ))
+        
+        # Highlight fixed points if provided
+        if fixed_points_list !== nothing && !isempty(fixed_points_list[i])
+            # Create interpolation to get y values at fixed points
+            itp = linear_interpolation(xf_samples, xf_next, extrapolation_bc=Flat())
+            
+            # Plot fixed points
+            for fp in fixed_points_list[i]
+                try
+                    fp_y = itp(fp)
+                    scatter!(ax, [fp], [fp_y],
+                            markersize=15, color=color, marker=:star8)
+                    
+                    # Add label for fixed point
+                    text!(ax, "x* = $(round(fp, digits=4))",
+                         position=(fp, fp_y + 0.01),
+                         fontsize=12, color=color, 
+                         align=(:center, :bottom))
+                catch e
+                    println("Warning: Could not plot fixed point $(fp) for time step $(i)")
+                end
+            end
+        end
+    end
+    
+    # Add a well-formatted legend with custom entries
+    #Legend(fig[1:2, 3], legend_entries, ["Fonctions de point fixe"])
+    
+    return fig
+end
+
+"""
+Enhanced version of the analyze_stefan_fixed_point_over_time function
+with more time steps and improved visualization.
+"""
+function analyze_stefan_fixed_point_over_time_improved(xf_initial, num_time_steps=20; 
+                                                     mesh_size=40, Δt=0.001, num_samples=50,
+                                                     alpha=1.0)
+    # Store Lipschitz constants over time
+    time_steps = collect(1:num_time_steps)
+    L_values = zeros(num_time_steps)
+    fixed_points_history = Vector{Vector{Float64}}(undef, num_time_steps)
+    xf_values = [xf_initial]
+    
+    # Store data for combined plot
+    xf_samples_list = []
+    xf_next_list = []
+    
+    # Run initial model to get the true evolution of xf
+    nx = mesh_size
+    lx = 1.0
+    x0 = 0.0
+    domain = ((x0, lx),)
+    mesh = Penguin.Mesh((nx,), (lx,), (x0,))
+    
+    # Define the body
+    body = (x, t, _=0) -> (x - xf_initial)
+    
+    # Define the Space-Time mesh
+    STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt], tag=mesh.tag)
+    
+    # Define capacity and operators
+    capacity = Capacity(body, STmesh)
+    operator = DiffusionOps(capacity)
+    
+    # Define boundary conditions
+    bc = Dirichlet(0.0)
+    bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:top => Dirichlet(0.0), :bottom => Dirichlet(1.0)))
+    ρ, L = 1.0, 1.0
+    stef_cond = InterfaceConditions(nothing, FluxJump(1.0, 1.0, ρ*L))
+    
+    # Define the source term
+    f = (x, y, z, t) -> 0.0
+    K = (x, y, z) -> 1.0
+    
+    # Define the phase
+    phase = Phase(capacity, operator, f, K)
+    
+    # Initial condition
+    u0ₒ = zeros((nx+1))
+    u0ᵧ = zeros((nx+1))
+    u0 = vcat(u0ₒ, u0ᵧ)
+    
+    # Newton parameters
+    Newton_params = (1000, 1e-15, 1e-15, alpha)
+    
+    # Define the solver
+    solver = MovingLiquidDiffusionUnsteadyMono(phase, bc_b, bc, Δt, u0, mesh, "BE")
+    
+    # Solve for all time steps to get xf evolution
+    solver, _, xf_log, _ = solve_MovingLiquidDiffusionUnsteadyMono!(
+        solver, phase, xf_initial, Δt, Δt*(num_time_steps+1), 
+        bc_b, bc, stef_cond, mesh, "BE", 
+        Newton_params=Newton_params, adaptive_timestep=false, method=Base.:\
+    )
+    
+    # For each time step, analyze the fixed-point function
+    for i in 1:num_time_steps
+        println("\nAnalyzing Time Step $(i)...")
+        current_xf = xf_log[i]
+        push!(xf_values, current_xf)
+        
+        # Define range around the current xf for sampling
+        sample_width = 0.5*current_xf
+        xf_range = (max(0.001, current_xf - sample_width), 
+                   min(1.0, current_xf + sample_width))
+        
+        # Generate samples for this time step
+        xf_samples = range(xf_range[1], xf_range[2], length=num_samples)
+        xf_next = zeros(length(xf_samples))
+        
+        # For each sample point, compute one step of the fixed-point iteration
+        for (j, xf) in enumerate(xf_samples)
+            # Define the body function for current xf
+            body = (x, t, _=0) -> (x - xf)
+            
+            # Define capacity, operator, source, etc.
+            capacity = Capacity(body, STmesh)
+            operator = DiffusionOps(capacity)
+            f = (x, y, z, t) -> 0.0
+            K = (x, y, z) -> 1.0
+            phase = Phase(capacity, operator, f, K)
+            
+            # Define boundary conditions
+            bc = Dirichlet(0.0)
+            bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(
+                :top => Dirichlet(0.0), :bottom => Dirichlet(1.0)))
+            ρL = 1.0
+            
+            # Initial condition
+            u0ₒ = zeros(nx+1)
+            u0ᵧ = zeros(nx+1)
+            u0 = vcat(u0ₒ, u0ᵧ)
+            
+            # Define the solver
+            solver = MovingLiquidDiffusionUnsteadyMono(phase, bc_b, bc, Δt, u0, mesh, "BE")
+            
+            # Solve one iteration
+            solve_system!(solver, method=Base.:\)
+            
+            # Extract dimensions
+            dims = phase.operator.size
+            len_dims = length(dims)
+            cap_index = len_dims
+            
+            if len_dims == 2
+                nx, _ = dims
+                n = nx
+            elseif len_dims == 3
+                nx, ny, _ = dims
+                n = nx*ny
+            end
+            
+            # Update volumes / compute new interface position
+            Vn_1 = phase.capacity.A[cap_index][1:end÷2, 1:end÷2]
+            Vn = phase.capacity.A[cap_index][end÷2+1:end, end÷2+1:end]
+            Hₙ = sum(diag(Vn))
+            Hₙ₊₁ = sum(diag(Vn_1))
+            
+            # Compute interface flux
+            Tᵢ = solver.x
+            W! = phase.operator.Wꜝ[1:n, 1:n]
+            G = phase.operator.G[1:n, 1:n]
+            H = phase.operator.H[1:n, 1:n]
+            V = phase.operator.V[1:n, 1:n]
+            Id = build_I_D(phase.operator, phase.Diffusion_coeff, phase.capacity)
+            Id = Id[1:n, 1:n]
+            Tₒ, Tᵧ = Tᵢ[1:n], Tᵢ[n+1:end]
+            Interface_term = Id * H' * W! * G * Tₒ + Id * H' * W! * H * Tᵧ
+            Interface_term = 1/ρL * sum(Interface_term)
+            
+            # Apply update rule
+            xf_next[j] = Hₙ + alpha * Interface_term
+        end
+        
+        # Store data for combined plot
+        push!(xf_samples_list, xf_samples)
+        push!(xf_next_list, xf_next)
+        
+        # Compute Lipschitz constant and find fixed points
+        # Make sure points are sorted by x
+        sorted_indices = sortperm(xf_samples)
+        x_sorted = xf_samples[sorted_indices]
+        y_sorted = xf_next[sorted_indices]
+        
+        # Compute differences between consecutive points
+        dx = diff(x_sorted)
+        dy = diff(y_sorted)
+        
+        # Calculate slopes
+        slopes = dy ./ dx
+        
+        # Compute Lipschitz constant (maximum absolute slope)
+        L = maximum(abs.(slopes))
+        
+        # Find fixed points (where f(x) ≈ x)
+        fixed_points = Float64[]
+        g_vals = y_sorted - x_sorted
+        
+        # Look for sign changes in g(x)
+        for k in 1:length(g_vals)-1
+            if g_vals[k] * g_vals[k+1] <= 0
+                # Sign change detected, approximate fixed point by linear interpolation
+                x1, x2 = x_sorted[k], x_sorted[k+1]
+                g1, g2 = g_vals[k], g_vals[k+1]
+                
+                # Linear interpolation to find where g(x) = 0
+                x_fixed = x1 - g1 * (x2 - x1) / (g2 - g1)
+                push!(fixed_points, x_fixed)
+            end
+        end
+        
+        # Store results
+        L_values[i] = L
+        fixed_points_history[i] = fixed_points
+    end
+    
+    # Create the combined fixed point function plot
+    fig_fixed_points = plot_fixed_point_functions_improved(
+        xf_samples_list, xf_next_list, time_steps,
+        fixed_points_list=fixed_points_history, L_values=L_values,
+        title="Évolution des Fonctions de Point Fixe (α=$alpha, Δt=$Δt, $num_time_steps pas)",
+        domain_range=(0.0, 1.0)
+    )
+    
+    # Save and display figure
+    save("stefan_fixed_point_functions_combined.png", fig_fixed_points)
+    display(fig_fixed_points)
+    
+    # Create summary figure
+    fig_summary = Figure(resolution=(1000, 800))
+    
+    # Plot the Lipschitz constant evolution
+    ax1 = Axis(fig_summary[1, 1], 
+              xlabel="Pas de temps", ylabel="Constante de Lipschitz",
+              title="Évolution de la Constante de Lipschitz")
+    
+    lines!(ax1, time_steps, L_values, linewidth=3, color=:blue)
+    scatter!(ax1, time_steps, L_values, markersize=10, color=:blue)
+    
+    # Add reference line at L=1
+    hlines!(ax1, [1.0], color=:red, linestyle=:dash, linewidth=2, 
+           label="Valeur critique L=1")
+    
+    # Color regions for convergence
+    for i in 1:length(L_values)-1
+        if L_values[i] < 1.0
+            color = (:green, 0.1)
+        else
+            color = (:red, 0.1)
+        end
+        poly!(ax1, [i, i+1, i+1, i], [0, 0, L_values[i+1], L_values[i]], color=color)
+    end
+    
+    axislegend(ax1)
+    
+    # Plot the interface position evolution
+    ax2 = Axis(fig_summary[2, 1],
+              xlabel="Pas de temps", ylabel="Position de l'interface",
+              title="Évolution de la Position de l'Interface")
+    
+    lines!(ax2, 0:num_time_steps, xf_values, linewidth=3, color=:blue)
+    scatter!(ax2, 0:num_time_steps, xf_values, markersize=10, color=:blue, 
+            label="Évolution xf")
+    
+    # Add convergence info based on L values
+    for i in 1:num_time_steps
+        if L_values[i] < 1.0
+            marker = :circle
+            color = :green
+            size = 12
+        else
+            marker = :xcross
+            color = :red
+            size = 12
+        end
+        
+        scatter!(ax2, [i], [xf_values[i+1]], marker=marker, 
+                color=color, markersize=size)
+    end
+    
+    axislegend(ax2)
+    
+    # Save the summary figure
+    save("stefan_fixed_point_summary_improved.png", fig_summary)
+    display(fig_summary)
+    
+    return L_values, fixed_points_history, xf_values, fig_fixed_points, fig_summary
+end
+
+# Run the improved analysis
+println("Starting Enhanced Stefan Problem Fixed-Point Analysis")
+println("==================================================")
+
+# Set parameters
+mesh_size = 80
+Δt = 0.001
+xf_initial = 0.05
+alpha = 1.0  # Newton relaxation parameter
+num_time_steps = 20  # Increased from 5 to 20
+num_samples = 200    # Reduced for faster computation with more time steps
+
+# Run the analysis
+L_values, fixed_points, xf_values, fig_fixed_points, fig_summary = analyze_stefan_fixed_point_over_time_improved(
+    xf_initial, num_time_steps, 
+    mesh_size=mesh_size, Δt=Δt, num_samples=num_samples, alpha=alpha
+)

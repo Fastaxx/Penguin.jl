@@ -9,7 +9,7 @@ using Statistics
 
 ### 2D Test Case : Two-phase Stefan Problem : Growing Interface
 # Define the spatial mesh
-nx, ny = 40, 40
+nx, ny = 64, 64
 lx, ly = 1.0, 1.0
 x0, y0 = 0.0, 0.0
 Δx, Δy = lx/(nx), ly/(ny)
@@ -17,15 +17,15 @@ domain = ((x0, lx), (y0, ly))
 mesh = Penguin.Mesh((nx, ny), (lx, ly), (x0, y0))
 
 # Define the initial interface shape
-sₙ(y) = 0.1 * ly + 0.05 * ly * sin(2π*y)
+sₙ(y) = 0.5 * ly + 0.05 * ly * sin(2π*y)
 
 # Define the body for each phase
 body1 = (x,y,t,_=0) -> (x - sₙ(y))          # Phase 1 (left)
 body2 = (x,y,t,_=0) -> -(x - sₙ(y))         # Phase 2 (right)
 
 # Define the Space-Time mesh
-Δt = 0.01
-Tend = 0.5
+Δt = 0.005
+Tend = 0.08
 STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt], tag=mesh.tag)
 
 # Define the capacity for both phases
@@ -57,14 +57,14 @@ bc_hot = Dirichlet(1.0)    # bottom boundary (hot)
 bc_cold = Dirichlet(0.0)   # top boundary (cold)
 
 bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(
-    :bottom => bc_hot,
-    :top => bc_cold
+    :bottom => bc_cold,
+    :top => bc_hot
 ))
 
 # Phase properties
 ρ, L = 1.0, 1.0               # Density and latent heat
-D1, D2 = 1.0, 0.2             # Diffusion coefficients
-Tm = 0.25                      # Melting temperature
+D1, D2 = 1.0, 1.0             # Diffusion coefficients
+Tm = 0.3                      # Melting temperature
 
 # Stefan condition
 stef_cond = InterfaceConditions(
@@ -214,10 +214,10 @@ function A_diph_unstead_diff_moving_stef2(operator1::DiffusionOps, operator2::Di
     A[1:n, 2n+1:3n]     = spzeros(n, n)
     A[1:n, 3n+1:4n]     = spzeros(n, n)
 
-    A[n+1:2n, 1:n]      = block5
-    A[n+1:2n, n+1:2n]   = block6 + Iₐ1
-    A[n+1:2n, 2n+1:3n]  = -block7
-    A[n+1:2n, 3n+1:4n]  = -block8
+    A[n+1:2n, 1:n]      = spzeros(n, n)
+    A[n+1:2n, n+1:2n]   = Iₐ1
+    A[n+1:2n, 2n+1:3n]  = spzeros(n, n)
+    A[n+1:2n, 3n+1:4n]  = spzeros(n, n) #-Iₐ2
 
     A[2n+1:3n, 1:n]     = spzeros(n, n)
     A[2n+1:3n, n+1:2n]  = spzeros(n, n)
@@ -225,7 +225,7 @@ function A_diph_unstead_diff_moving_stef2(operator1::DiffusionOps, operator2::Di
     A[2n+1:3n, 3n+1:4n] = block4
 
     A[3n+1:4n, 1:n]     = spzeros(n, n)
-    A[3n+1:4n, n+1:2n]  = -Iₐ1
+    A[3n+1:4n, n+1:2n]  = spzeros(n, n)
     A[3n+1:4n, 2n+1:3n] = spzeros(n, n)
     A[3n+1:4n, 3n+1:4n] = Iₐ2
 
@@ -333,8 +333,64 @@ function b_diph_unstead_diff_moving_stef2(operator1::DiffusionOps, operator2::Di
     return vcat(b1, b2, b3, b4)
 end
 
+# Create a linear interpolant function from centroids to values.
+function create_linear_interpolant(centroids::AbstractVector{T}, values::AbstractVector{T}) where T<:Real
+    N = length(centroids)
+    @assert N == length(values) "Centroids and values must have the same length."
+    # Assumes centroids are sorted in increasing order.
+    return function (x::Real)
+        if x <= centroids[1]
+            # Extrapolate to the left
+            x0, x1 = centroids[1], centroids[2]
+            y0, y1 = values[1], values[2]
+            return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+        elseif x >= centroids[end]
+            # Extrapolate to the right
+            x0, x1 = centroids[end-1], centroids[end]
+            y0, y1 = values[end-1], values[end]
+            return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+        else
+            # Find the interval containing x using searchsortedlast
+            i = searchsortedlast(centroids, x)
+            # Ensure we have a valid index i (should be between 1 and N-1)
+            x0, x1 = centroids[i], centroids[i+1]
+            y0, y1 = values[i], values[i+1]
+            return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+        end
+    end
+end
+
+# Create a constant (upwind) interpolant function from centroids to values.
+function create_constant_interpolant(centroids::AbstractVector{T}, values::AbstractVector{T}) where T<:Real
+    N = length(centroids)
+    @assert N == length(values) "Centroids and values must have the same length."
+    return function (x::Real)
+        if x < centroids[1]
+            # Extrapolate (use the first constant value)
+            return values[1]
+        elseif x >= centroids[end]
+            # Extrapolate to the right (use the last constant value)
+            return values[end]
+        else
+            # Find the interval: return the left (upwind) value in the interval
+            i = searchsortedlast(centroids, x)
+            return values[i]
+        end
+    end
+end
+
+# Create a full constant interpolant function that return the mean value of all the values
+function create_full_constant_interpolant(values::AbstractVector{T}) where T<:Real
+    N = length(values)
+    # Compute the mean value of the values. Remove the last value
+    val = values[1:end-1]
+    m̅ =  sum(val)/length(val)
+    return function (x::Real)
+        return m̅
+    end
+end
 # Main solver function for the diphasic Stefan problem in 2D
-function solve_MovingLiquidDiffusionUnsteadyDiph2!(s::Solver, phase1::Phase, phase2::Phase, Interface_position, Hₙ⁰, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, ic::InterfaceConditions, mesh, scheme::String; interpo="linear", Newton_params=(1000, 1e-10, 1e-10, 1.0), method=IterativeSolvers.gmres, kwargs...)
+function solve_MovingLiquidDiffusionUnsteadyDiph2!(s::Solver, phase1::Phase, phase2::Phase, Interface_position, Hₙ⁰, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, ic::InterfaceConditions, mesh, scheme::String; interpo="quad", Newton_params=(1000, 1e-10, 1e-10, 1.0), method=IterativeSolvers.gmres, kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
@@ -452,7 +508,7 @@ function solve_MovingLiquidDiffusionUnsteadyDiph2!(s::Solver, phase1::Phase, pha
 
         # 5) Update geometry if not converged
         if (err <= tol) || (err_rel <= reltol)
-            push!(xf_log, new_Hₙ)
+            push!(xf_log, new_xf)
             break
         end
 
@@ -463,11 +519,11 @@ function solve_MovingLiquidDiffusionUnsteadyDiph2!(s::Solver, phase1::Phase, pha
         # 7) Construct interpolation functions for new interface position
         centroids = range(mesh.nodes[2][1], mesh.nodes[2][end], length=length(mesh.nodes[2]))
         if interpo == "linear"
-            sₙ₊₁ = linear_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Periodic())
+            sₙ₊₁ = linear_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Line())
         elseif interpo == "quad"
-            sₙ₊₁ = extrapolate(scale(interpolate(new_xf, BSpline(Quadratic())), centroids), Interpolations.Periodic())
+            sₙ₊₁ = extrapolate(scale(interpolate(new_xf, BSpline(Quadratic())), centroids), Interpolations.Line())
         elseif interpo == "cubic"
-            sₙ₊₁ = cubic_spline_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Periodic())
+            sₙ₊₁ = cubic_spline_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Line())
         else
             println("Interpolation method not supported")
         end
@@ -475,9 +531,46 @@ function solve_MovingLiquidDiffusionUnsteadyDiph2!(s::Solver, phase1::Phase, pha
         # 8) Rebuild the domains with linear time interpolation
         tₙ₊₁ = t + Δt
         tₙ = t
-        body1 = (xx,yy,tt,_=0) -> (xx - (sₙ(yy)*(tₙ₊₁ - tt)/Δt + sₙ₊₁(yy)*(tt - tₙ)/Δt))
-        body2 = (xx,yy,tt,_=0) -> -(xx - (sₙ(yy)*(tₙ₊₁ - tt)/Δt + sₙ₊₁(yy)*(tt - tₙ)/Δt))
-        
+        body1 = (xx, yy, tt, _=0) -> begin
+            # Normalized time parameter (0 to 1 over the interval [tₙ, tₙ₊₁])
+            t_norm = (tt - tₙ) / Δt
+            
+            # Quadratic interpolation coefficients
+            a = 2.0 * t_norm^2 - 3.0 * t_norm + 1.0  # = (1-t)² * (2t+1)
+            b = -4.0 * t_norm^2 + 4.0 * t_norm      # = 4t(1-t)
+            c = 2.0 * t_norm^2 - t_norm            # = t²(2t-1)
+            
+            # Position at start, middle, and end points
+            pos_start = sₙ(yy)
+            pos_mid = 0.5 * (sₙ(yy) + sₙ₊₁(yy))  # on pourrait utiliser une autre valeur intermédiaire
+            pos_end = sₙ₊₁(yy)
+            
+            # Compute interpolated position
+            x_interp = a * pos_start + b * pos_mid + c * pos_end
+            
+            # Return signed distance
+            return xx - x_interp
+        end
+        body2 = (xx, yy, tt, _=0) -> begin
+            # Normalized time parameter (0 to 1 over the interval [tₙ, tₙ₊₁])
+            t_norm = (tt - tₙ) / Δt
+            
+            # Quadratic interpolation coefficients
+            a = 2.0 * t_norm^2 - 3.0 * t_norm + 1.0  # = (1-t)² * (2t+1)
+            b = -4.0 * t_norm^2 + 4.0 * t_norm      # = 4t(1-t)
+            c = 2.0 * t_norm^2 - t_norm            # = t²(2t-1)
+            
+            # Position at start, middle, and end points
+            pos_start = sₙ(yy)
+            pos_mid = 0.5 * (sₙ(yy) + sₙ₊₁(yy))  # on pourrait utiliser une autre valeur intermédiaire
+            pos_end = sₙ₊₁(yy)
+            
+            # Compute interpolated position
+            x_interp = a * pos_start + b * pos_mid + c * pos_end
+            
+            # Return signed distance
+            return -(xx - x_interp)
+        end        
         STmesh = SpaceTimeMesh(mesh, [tₙ, tₙ₊₁], tag=mesh.tag)
         capacity1 = Capacity(body1, STmesh; compute_centroids=false)
         capacity2 = Capacity(body2, STmesh; compute_centroids=false)
@@ -513,27 +606,67 @@ function solve_MovingLiquidDiffusionUnsteadyDiph2!(s::Solver, phase1::Phase, pha
     k = 2
     while t < Tₑ
         t += Δt
+        tₙ = t
+        tₙ₊₁ = t + Δt
         println("Time : $(t)")
 
         # 1) Construct interpolation functions for interface position
         centroids = range(mesh.nodes[2][1], mesh.nodes[2][end], length=length(mesh.nodes[2]))
         if interpo == "linear"
-            sₙ = linear_interpolation(centroids, current_xf, extrapolation_bc=Interpolations.Periodic())
-            sₙ₊₁ = linear_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Periodic())
+            sₙ = linear_interpolation(centroids, current_xf, extrapolation_bc=Interpolations.Line())
+            sₙ₊₁ = linear_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Line())
         elseif interpo == "quad"
-            sₙ = extrapolate(scale(interpolate(current_xf, BSpline(Quadratic())), centroids), Interpolations.Periodic())
-            sₙ₊₁ = extrapolate(scale(interpolate(new_xf, BSpline(Quadratic())), centroids), Interpolations.Periodic())
+            sₙ = extrapolate(scale(interpolate(current_xf, BSpline(Quadratic())), centroids), Interpolations.Line())
+            sₙ₊₁ = extrapolate(scale(interpolate(new_xf, BSpline(Quadratic())), centroids), Interpolations.Line())
         elseif interpo == "cubic"
-            sₙ = cubic_spline_interpolation(centroids, current_xf, extrapolation_bc=Interpolations.Periodic())# filepath: /home/libat/github/Penguin.jl/examples/2D/LiquidMoving/stefan_2d_2ph.jl
-            sₙ₊₁ = cubic_spline_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Periodic())
+            sₙ = cubic_spline_interpolation(centroids, current_xf, extrapolation_bc=Interpolations.Line())# filepath: /home/libat/github/Penguin.jl/examples/2D/LiquidMoving/stefan_2d_2ph.jl
+            sₙ₊₁ = cubic_spline_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Line())
         else
             println("Interpolation method not supported")
         end
 
         # 1) Reconstruct
         STmesh = SpaceTimeMesh(mesh, [t-Δt, t], tag=mesh.tag)
-        body1 = (xx,yy,tt,_=0) -> (xx - (sₙ(yy)*(2*Δt - tt)/Δt + sₙ₊₁(yy)*(tt - Δt)/Δt))
-        body2 = (xx,yy,tt,_=0) -> -(xx - (sₙ(yy)*(2*Δt - tt)/Δt + sₙ₊₁(yy)*(tt - Δt)/Δt))
+        body1 = (xx, yy, tt, _=0) -> begin
+            # Normalized time parameter (0 to 1 over the interval [tₙ, tₙ₊₁])
+            t_norm = (tt - tₙ) / Δt
+            
+            # Quadratic interpolation coefficients
+            a = 2.0 * t_norm^2 - 3.0 * t_norm + 1.0  # = (1-t)² * (2t+1)
+            b = -4.0 * t_norm^2 + 4.0 * t_norm      # = 4t(1-t)
+            c = 2.0 * t_norm^2 - t_norm            # = t²(2t-1)
+            
+            # Position at start, middle, and end points
+            pos_start = sₙ(yy)
+            pos_mid = 0.5 * (sₙ(yy) + sₙ₊₁(yy))  # on pourrait utiliser une autre valeur intermédiaire
+            pos_end = sₙ₊₁(yy)
+            
+            # Compute interpolated position
+            x_interp = a * pos_start + b * pos_mid + c * pos_end
+            
+            # Return signed distance
+            return xx - x_interp
+        end
+        body2 = (xx, yy, tt, _=0) -> begin
+            # Normalized time parameter (0 to 1 over the interval [tₙ, tₙ₊₁])
+            t_norm = (tt - tₙ) / Δt
+            
+            # Quadratic interpolation coefficients
+            a = 2.0 * t_norm^2 - 3.0 * t_norm + 1.0  # = (1-t)² * (2t+1)
+            b = -4.0 * t_norm^2 + 4.0 * t_norm      # = 4t(1-t)
+            c = 2.0 * t_norm^2 - t_norm            # = t²(2t-1)
+            
+            # Position at start, middle, and end points
+            pos_start = sₙ(yy)
+            pos_mid = 0.5 * (sₙ(yy) + sₙ₊₁(yy))  # on pourrait utiliser une autre valeur intermédiaire
+            pos_end = sₙ₊₁(yy)
+            
+            # Compute interpolated position
+            x_interp = a * pos_start + b * pos_mid + c * pos_end
+            
+            # Return signed distance
+            return -(xx - x_interp)
+        end
         capacity1 = Capacity(body1, STmesh; compute_centroids=false)
         capacity2 = Capacity(body2, STmesh; compute_centroids=false)
         operator1 = DiffusionOps(capacity1)
@@ -619,22 +752,22 @@ function solve_MovingLiquidDiffusionUnsteadyDiph2!(s::Solver, phase1::Phase, pha
 
             # 5) Update geometry if not converged
             if (err <= tol) || (err_rel <= reltol)
-                push!(xf_log, new_Hₙ)
+                push!(xf_log, new_xf)
                 break
             end
 
             # 6) Compute the new interface position table
             new_xf = x0 .+ new_Hₙ./Δy
-            new_xf[end] = new_xf[1]  # Ensure periodic BC in y-direction
+            new_xf[end] = new_xf[1]  # Ensure Line BC in y-direction
 
             # 7) Construct interpolation functions for new interface position
             centroids = range(mesh.nodes[2][1], mesh.nodes[2][end], length=length(mesh.nodes[2]))
             if interpo == "linear"
-                sₙ₊₁ = linear_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Periodic())
+                sₙ₊₁ = linear_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Line())
             elseif interpo == "quad"
-                sₙ₊₁ = extrapolate(scale(interpolate(new_xf, BSpline(Quadratic())), centroids), Interpolations.Periodic())
+                sₙ₊₁ = extrapolate(scale(interpolate(new_xf, BSpline(Quadratic())), centroids), Interpolations.Line())
             elseif interpo == "cubic"
-                sₙ₊₁ = cubic_spline_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Periodic())
+                sₙ₊₁ = cubic_spline_interpolation(centroids, new_xf, extrapolation_bc=Interpolations.Line())
             else
                 println("Interpolation method not supported")
             end
@@ -643,9 +776,46 @@ function solve_MovingLiquidDiffusionUnsteadyDiph2!(s::Solver, phase1::Phase, pha
             tₙ₊₁ = t + Δt
             tₙ = t
 
-            body1 = (xx,yy,tt,_=0) -> (xx - (sₙ(yy)*(tₙ₊₁ - tt)/Δt + sₙ₊₁(yy)*(tt - tₙ)/Δt))
-            body2 = (xx,yy,tt,_=0) -> -(xx - (sₙ(yy)*(tₙ₊₁ - tt)/Δt + sₙ₊₁(yy)*(tt - tₙ)/Δt))
-
+            body1 = (xx, yy, tt, _=0) -> begin
+                # Normalized time parameter (0 to 1 over the interval [tₙ, tₙ₊₁])
+                t_norm = (tt - tₙ) / Δt
+                
+                # Quadratic interpolation coefficients
+                a = 2.0 * t_norm^2 - 3.0 * t_norm + 1.0  # = (1-t)² * (2t+1)
+                b = -4.0 * t_norm^2 + 4.0 * t_norm      # = 4t(1-t)
+                c = 2.0 * t_norm^2 - t_norm            # = t²(2t-1)
+                
+                # Position at start, middle, and end points
+                pos_start = sₙ(yy)
+                pos_mid = 0.5 * (sₙ(yy) + sₙ₊₁(yy))  # on pourrait utiliser une autre valeur intermédiaire
+                pos_end = sₙ₊₁(yy)
+                
+                # Compute interpolated position
+                x_interp = a * pos_start + b * pos_mid + c * pos_end
+                
+                # Return signed distance
+                return xx - x_interp
+            end
+            body2 = (xx, yy, tt, _=0) -> begin
+                # Normalized time parameter (0 to 1 over the interval [tₙ, tₙ₊₁])
+                t_norm = (tt - tₙ) / Δt
+                
+                # Quadratic interpolation coefficients
+                a = 2.0 * t_norm^2 - 3.0 * t_norm + 1.0  # = (1-t)² * (2t+1)
+                b = -4.0 * t_norm^2 + 4.0 * t_norm      # = 4t(1-t)
+                c = 2.0 * t_norm^2 - t_norm            # = t²(2t-1)
+                
+                # Position at start, middle, and end points
+                pos_start = sₙ(yy)
+                pos_mid = 0.5 * (sₙ(yy) + sₙ₊₁(yy))  # on pourrait utiliser une autre valeur intermédiaire
+                pos_end = sₙ₊₁(yy)
+                
+                # Compute interpolated position
+                x_interp = a * pos_start + b * pos_mid + c * pos_end
+                
+                # Return signed distance
+                return -(xx - x_interp)
+            end      
             STmesh = SpaceTimeMesh(mesh, [tₙ, tₙ₊₁], tag=mesh.tag)
             capacity1 = Capacity(body1, STmesh; compute_centroids=false)
             capacity2 = Capacity(body2, STmesh; compute_centroids=false)
@@ -683,7 +853,7 @@ function solve_MovingLiquidDiffusionUnsteadyDiph2!(s::Solver, phase1::Phase, pha
 end
 
 # Solve the problem
-solver, residuals, xf_log, reconstruct= solve_MovingLiquidDiffusionUnsteadyDiph2!(solver, Fluide1, Fluide2, Interface_position, Hₙ⁰, Δt, Tend, bc_b, stef_cond, mesh, "BE"; interpo="quad", Newton_params=Newton_params, method=Base.:\)
+solver, residuals, xf_log, reconstruct= solve_MovingLiquidDiffusionUnsteadyDiph2!(solver, Fluide1, Fluide2, Interface_position, Hₙ⁰, Δt, Tend, bc_b, stef_cond, mesh, "BE"; interpo="linear", Newton_params=Newton_params, method=Base.:\)
 
 # Plot the position of the interface
 fig = Figure()
@@ -708,6 +878,14 @@ display(figure)
 # Collect the interface position for column 5 from each time step in xf_log
 column_vals = [xf[5] for xf in xf_log]
 
+# save xf_log
+open("xf_log_$nx.txt", "w") do io
+    for i in 1:length(column_vals)
+        println(io, column_vals[i])
+    end
+end
+
+
 # Create a time axis (assuming each entry in xf_log corresponds to a time step; adjust if needed)
 time_axis = Δt * collect(1:length(xf_log))
 
@@ -718,7 +896,8 @@ lines!(ax, time_axis, column_vals, color=:blue)
 display(fig)
 
 # Animation
-#animate_solution(solver, mesh, body1)
+animate_solution(solver, mesh, body1)
+
 
 function animate_stefan_diphasic(
     solver, 
@@ -1080,9 +1259,9 @@ animate_stefan_diphasic(
     title="Stefan Problem - Diphasic Heat Transfer",
     colorrange_bulk1=(0, 1.0),
     colorrange_interface1=(0.4, 0.6),
-    colorrange_bulk2=(0, 0.6),
+    colorrange_bulk2=(0, 1.0),
     colorrange_interface2=(0.4, 0.6),
-    colormap1=:thermal,
+    colormap1=:viridis,
     colormap2=:viridis,
     interpo="linear"
 )
@@ -1097,9 +1276,9 @@ last_frame_fig = plot_stefan_diphasic_frame(
     interpo="linear",
     colorrange_bulk1=(0, 1.0),
     colorrange_interface1=(0.4, 0.6),
-    colorrange_bulk2=(0, 0.6),
+    colorrange_bulk2=(0, 1.0),
     colorrange_interface2=(0.4, 0.6),
-    colormap1=:thermal,
+    colormap1=:viridis,
     colormap2=:viridis
 )
 display(last_frame_fig)

@@ -50,8 +50,8 @@ u0 = vcat(u0ₒ, u0ᵧ)
 
 # Newton parameters
 max_iter = 1000
-tol = 1e-5
-reltol = 1e-5
+tol = 1e-10
+reltol = 1e-10
 α = 1.0
 Newton_params = (max_iter, tol, reltol, α)
 
@@ -83,7 +83,8 @@ lines!(ax, xf_log, label = "Interface position")
 display(figure)
 
 # Add convergence rate analysis for residuals
-function analyze_convergence_rates(residuals)
+# Add convergence rate analysis for residuals
+function analyze_convergence_rates(residuals::Dict{Int, Vector{Float64}})
     figure = Figure(resolution=(1000, 800))
     ax1 = Axis(figure[1, 1], 
                xlabel="Newton Iteration (k)", 
@@ -99,7 +100,11 @@ function analyze_convergence_rates(residuals)
     rates = Float64[]
     times = Float64[]
     
-    for (i, res) in enumerate(residuals)
+    # Process each time step in order
+    time_steps = sort(collect(keys(residuals)))
+    
+    for i in time_steps
+        res = residuals[i]
         if length(res) < 3
             println("Skipping time step $i (not enough iterations)")
             continue
@@ -153,6 +158,12 @@ function analyze_convergence_rates(residuals)
                   fontsize=12, 
                   align=(:left, :bottom))
         end
+    end
+    
+    # Safety check if we have any rates
+    if isempty(rates)
+        println("Warning: No convergence rates could be calculated.")
+        return Float64[], Float64[]
     end
     
     # Plot the evolution of convergence rates

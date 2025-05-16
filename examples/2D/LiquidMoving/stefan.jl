@@ -12,7 +12,7 @@ using DSP
 
 ### 2D Test Case : One-phase Stefan Problem : Growing Planar Interface
 # Define the spatial mesh
-nx, ny = 64, 64
+nx, ny = 32, 32
 lx, ly = 1., 1.
 x0, y0 = 0., 0.
 Δx, Δy = lx/(nx), ly/(ny)
@@ -25,7 +25,7 @@ body = (x,y,t,_=0)->(x - sₙ(y))
 
 # Define the Space-Time mesh
 Δt = 0.001
-Tend = 0.012
+Tend = 0.01
 STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt], tag=mesh.tag)
 
 # Define the capacity
@@ -77,18 +77,95 @@ Newton_params = (max_iter, tol, reltol, α)
 solver = MovingLiquidDiffusionUnsteadyMono2D(Fluide, bc_b, bc, Δt, u0, mesh, "BE")
 
 # Solve the problem
-solver, residuals, xf_log, reconstruct, timestep_history = solve_MovingLiquidDiffusionUnsteadyMono2D!(solver, Fluide, Interface_position, Hₙ⁰, sₙ, Δt, Tend, bc_b, bc, stef_cond, mesh, "BE"; interpo="quad", Newton_params=Newton_params, adaptive_timestep=false, Δt_min=5e-5, method=Base.:\)
+solver, residuals, xf_log, reconstruct, timestep_history = solve_MovingLiquidDiffusionUnsteadyMono2D!(solver, Fluide, Interface_position, Hₙ⁰, sₙ, Δt, Tend, bc_b, bc, stef_cond, mesh, "BE"; interpo="quad", Newton_params=Newton_params, adaptive_timestep=false, Δt_min=5e-4, method=Base.:\)
+
+
+using CairoMakie, Printf
+
+function animate_temperature_3d(solver, mesh, nx, ny, reconstruct; 
+                              framerate=15, 
+                              resolution=(1000, 800))
+    
+    println("Creating 3D temperature animation...")
+    
+    # Create figure
+    fig = Figure(resolution=resolution)
+    ax = Axis3(fig[1, 1], 
+               xlabel="x", ylabel="y", zlabel="Temperature",
+               title="Temperature Evolution in Stefan Problem")
+    
+    # Create x, y coordinates grid for plotting
+    x = range(x0, stop=x0 + lx, length=nx+1)
+    y = range(x0, stop=x0 + lx, length=ny+1)
+    
+    # Get the number of time steps
+    n_frames = length(solver.states)
+    
+    # Create the initial surface plot
+    state = solver.states[1]
+    
+    # Extract temperature field (first half of the state vector contains temperature)
+    temp = state[1:(nx+1)*(ny+1)]  # First part is temperature
+    temperature = reshape(temp, (nx+1, ny+1))
+    
+    # Create surface plot
+    surf = surface!(ax, x, y, temperature, colormap=:viridis)
+    
+    # Add colorbar
+    cbar = Colorbar(fig[1, 2], surf, label="Temperature")
+    
+    # Set the zlim to the max temperature (typically 1.0 in this problem)
+    zlims!(ax, 0, 1)
+    
+    # Add time label
+    time_label = Label(fig[0, :], @sprintf("t = %.4f", 0.0), fontsize=20)
+    
+    # Create animation
+    record(fig, "temperature_3d_evolution.mp4", 1:n_frames; framerate=framerate) do frame
+        # Update plot with current time step data
+        state = solver.states[frame]
+        
+        # Extract temperature field
+        temp = state[1:(nx+1)*(ny+1)]  # First part is temperature
+        temperature = reshape(temp, (nx+1, ny+1))
+        
+        # Update surface plot
+        surf[3] = temperature
+        
+        # Update time label
+        time_t = (frame-1) * Δt
+        time_label.text = @sprintf("t = %.4f", time_t)
+        
+   
+        
+        # Print progress
+        if frame % 10 == 0 || frame == 1 || frame == n_frames
+            println("Rendering frame $frame / $n_frames")
+        end
+    end
+    
+    println("Animation saved to temperature_3d_evolution.mp4")
+    
+    return fig
+end
+
+# Call the function
+fig = animate_temperature_3d(solver, mesh, nx, ny, reconstruct)
+display(fig)
+
+readline()
 
 # Plot the timestep:
 fig = plot_timestep_history(timestep_history)
 display(fig)
 
 # Plot the position of the interface
-fig_styles = plot_interface_evolution(xf_log, 
+fig_styles = plot_interface_evolution(xf_log,
                                     time_steps=:all,
-                                    n_times=13, 
+                                    n_times=8, 
                                     color_gradient=false,
-                                    line_styles=true)
+                                    line_styles=true,
+                                    y_resolution=1000)
 display(fig_styles)
 
 # Plot the residuals

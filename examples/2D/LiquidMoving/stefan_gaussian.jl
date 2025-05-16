@@ -5,27 +5,30 @@ using SparseArrays
 using SpecialFunctions, LsqFit
 using CairoMakie
 using Interpolations
+using Colors
+using Statistics
+using FFTW
+using DSP
 
 ### 2D Test Case : One-phase Stefan Problem : Growing Planar Interface
 # Define the spatial mesh
-nx, ny = 80, 80
+nx, ny = 64, 64
 lx, ly = 1., 1.
 x0, y0 = 0., 0.
 Δx, Δy = lx/(nx), ly/(ny)
 domain = ((x0, lx), (y0, ly))
 mesh = Penguin.Mesh((nx, ny), (lx, ly), (x0, y0))
 
-# Define the body with a Gaussian bump
-ampl = 0.05 * ly
+# Define the body : Gaussian bump
+ampl = 0.1 * ly
 center = 0.5 * ly
 sigma = 0.2 * ly
-#sₙ(y) = 0.1 * ly + ampl * exp(-((y - center)^2) / (2*sigma^2))
-sₙ(y) = 0.2 * ly + ampl * ly * sin(4π*y/ly-π/2)
-body = (x, y, t, _=0) -> (x - sₙ(y))
+sₙ(y) = 0.1 * ly + ampl * exp(-((y - center)^2) / (2*sigma^2))
+body = (x,y,t,_=0)->(x - sₙ(y))
 
 # Define the Space-Time mesh
-Δt = 0.01
-Tend = 0.1
+Δt = 0.001
+Tend = 0.020
 STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt], tag=mesh.tag)
 
 # Define the capacity
@@ -49,11 +52,9 @@ operator = DiffusionOps(capacity)
 
 # Define the boundary conditions
 bc = Dirichlet(0.0)
-ϵᵥ = 0.0
-#bc = GibbsThomson(0.0, 0.0, ϵᵥ, operator)
 bc1 = Dirichlet(1.0)
 
-bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:bottom => bc1))
+bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}( :bottom => bc1, :top => bc))
 ρ, L = 1.0, 1.0
 stef_cond = InterfaceConditions(nothing, FluxJump(1.0, 1.0, ρ*L))
 
@@ -70,8 +71,8 @@ u0 = vcat(u0ₒ, u0ᵧ)
 
 # Newton parameters
 max_iter = 10000
-tol = 1e-5
-reltol = 1e-5
+tol = 1e-6
+reltol = 1e-6
 α = 1.0
 Newton_params = (max_iter, tol, reltol, α)
 
@@ -79,18 +80,22 @@ Newton_params = (max_iter, tol, reltol, α)
 solver = MovingLiquidDiffusionUnsteadyMono2D(Fluide, bc_b, bc, Δt, u0, mesh, "BE")
 
 # Solve the problem
-solver, residuals, xf_log, reconstruct = solve_MovingLiquidDiffusionUnsteadyMono2D!(solver, Fluide, Interface_position, Hₙ⁰, sₙ, Δt, Tend, bc_b, bc, stef_cond, mesh, "BE"; interpo="linear", Newton_params=Newton_params, method=Base.:\)
+solver, residuals, xf_log, reconstruct, timestep_history = solve_MovingLiquidDiffusionUnsteadyMono2D!(solver, Fluide, Interface_position, Hₙ⁰, sₙ, Δt, Tend, bc_b, bc, stef_cond, mesh, "BE"; interpo="quad", Newton_params=Newton_params, adaptive_timestep=true, Δt_min=5e-4, method=Base.:\)
+
+# Animate the solution
+animate_solution(solver, mesh, body)
 
 # Plot the timestep:
 fig = plot_timestep_history(timestep_history)
 display(fig)
 
 # Plot the position of the interface
-fig_styles = plot_interface_evolution(xf_log, 
+fig_styles = plot_interface_evolution(xf_log,
                                     time_steps=:all,
-                                    n_times=13, 
+                                    n_times=8, 
                                     color_gradient=false,
-                                    line_styles=true)
+                                    line_styles=true,
+                                    y_resolution=1000)
 display(fig_styles)
 
 # Plot the residuals
