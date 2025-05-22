@@ -83,6 +83,9 @@ export MovingLiquidDiffusionUnsteadyDiph, solve_MovingLiquidDiffusionUnsteadyDip
 include("liquidmotionsolver/diffusion2d.jl")
 export MovingLiquidDiffusionUnsteadyMono2D, solve_MovingLiquidDiffusionUnsteadyMono2D!
 
+include("binarysolver/binary.jl")
+export DiffusionUnsteadyBinary, solve_DiffusionUnsteadyBinary!
+
 include("vizualize.jl")
 export plot_solution, animate_solution
 export plot_isotherms
