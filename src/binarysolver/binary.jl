@@ -138,10 +138,6 @@ function A_binary_unsteady_diph(
     blockC7 = IᵦC2 * HC2' * W!C2 * GC2 * ΨnC2
     blockC8 = IᵦC2 * HC2' * W!C2 * HC2 * ΨnC2
     
-    # Coupling blocks for liquidus relation (T = m*C + T0)
-    # Simplified representation of coupling - actual implementation would depend on exactl model
-    couplingTC = m * I(n)
-    
     # Build the 8n×8n matrix for T1, T1γ, T2, T2γ, C1, C1γ, C2, C2γ
     A = spzeros(Float64, 8n, 8n)
     
@@ -149,33 +145,32 @@ function A_binary_unsteady_diph(
     A[1:n, 1:n] = blockT1
     A[1:n, n+1:2n] = blockT2
     
-    # Interface temperature (T1γ)
-    A[n+1:2n, n+1:2n] = IₐT1
-    A[n+1:2n, 3n+1:4n] = -IₐT2
-    A[n+1:2n, 5n+1:6n] = -couplingTC  # Liquidus relation coupling 
+    # Interface temperature (T1γ) - Set to Tm directly
+    A[n+1:2n, n+1:2n] = I(n)
+    # No coupling to concentration, just fixed value Tm
     
     # Temperature phase 2 (T2)
     A[2n+1:3n, 2n+1:3n] = blockT3
     A[2n+1:3n, 3n+1:4n] = blockT4
     
-    # Interface temperature (T2γ)
-    A[3n+1:4n, 3n+1:4n] = IₐT2
+    # Interface temperature (T2γ) - Set to Tm directly
+    A[3n+1:4n, 3n+1:4n] = I(n)
     
     # Concentration phase 1 (C1)
     A[4n+1:5n, 4n+1:5n] = blockC1
     A[4n+1:5n, 5n+1:6n] = blockC2
     
-    # Interface concentration (C1γ)
-    A[5n+1:6n, 5n+1:6n] = IₐC1
-    A[5n+1:6n, 7n+1:8n] = -k * IₐC2  # Partition coefficient relation
+    # Interface concentration (C1γ) - Set to cm directly
+    A[5n+1:6n, 5n+1:6n] = I(n)
     
     # Concentration phase 2 (C2)
     A[6n+1:7n, 6n+1:7n] = blockC3
     A[6n+1:7n, 7n+1:8n] = blockC4
     
-    # Interface concentration (C2γ)
-    A[7n+1:8n, 7n+1:8n] = IₐC2
+    # Interface concentration (C2γ) - Set to cm directly
+    A[7n+1:8n, 7n+1:8n] = I(n)
     
+    """
     # Energy balance (Stefan condition)
     A[n+1:2n, 1:n] = blockT5
     A[n+1:2n, n+1:2n] = blockT6
@@ -187,7 +182,8 @@ function A_binary_unsteady_diph(
     A[5n+1:6n, 5n+1:6n] = blockC6
     A[5n+1:6n, 6n+1:7n] = blockC7
     A[5n+1:6n, 7n+1:8n] = blockC8
-    
+    """
+
     return A
 end
 
@@ -239,6 +235,11 @@ function b_binary_unsteady_diph(
     jumpT, fluxT = icT.scalar, icT.flux
     jumpC, fluxC = icC.scalar, icC.flux
     
+    # Get the fixed temperature and concentration at the interface
+    Tm = jumpT.value  # Fixed interface temperature
+    Cm = jumpC.value  # Fixed interface concentration
+    
+    # Extract interface data
     IᵧT1, IᵧT2 = capacityT1.Γ, capacityT2.Γ
     IᵧC1, IᵧC2 = capacityC1.Γ, capacityC2.Γ
     
@@ -350,12 +351,14 @@ function b_binary_unsteady_diph(
         bC3 = VnC2 * Cₒ2 + VC2 * fC2ₒn1
     end
     
-    # Interface conditions
-    bT2 = gᵧT
-    bT4 = hᵧT
+    # Modified interface conditions - fixed values
+    # Temperature interface values
+    bT2 = ones(n) * Tm  # T1γ = Tm
+    bT4 = ones(n) * Tm  # T2γ = Tm
     
-    bC2 = gᵧC
-    bC4 = hᵧC
+    # Concentration interface values
+    bC2 = ones(n) * Cm  # C1γ = Cm
+    bC4 = ones(n) * Cm  # C2γ = Cm
     
     # Combine all components
     return vcat(bT1, bT2, bT3, bT4, bC1, bC2, bC3, bC4)
@@ -469,7 +472,7 @@ Solve the binary diffusion problem with temperature and concentration coupling.
 function solve_DiffusionUnsteadyBinary!(
     s::Solver, 
     phaseT1::Phase, phaseT2::Phase, 
-    phaseC1::Phase, phaseC2::Phase,
+    phaseC1::Phase, phaseC2::Phase, xf,
     Δt::Float64, Tend::Float64, 
     bc_bT::BorderConditions, bc_bC::BorderConditions,
     icT::InterfaceConditions, icC::InterfaceConditions,
@@ -532,7 +535,7 @@ function solve_DiffusionUnsteadyBinary!(
     println("Max concentration: $(maximum(abs.(u_C)))")
     
     # Initial interface position
-    current_xf = phaseT1.capacity.body(0, 0) # Extract from body function
+    current_xf = xf
     new_xf = current_xf
     push!(xf_log, current_xf)
     

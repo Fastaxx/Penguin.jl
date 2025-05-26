@@ -83,6 +83,9 @@ export MovingLiquidDiffusionUnsteadyDiph, solve_MovingLiquidDiffusionUnsteadyDip
 include("liquidmotionsolver/diffusion2d.jl")
 export MovingLiquidDiffusionUnsteadyMono2D, solve_MovingLiquidDiffusionUnsteadyMono2D!
 
+include("concentrationsolver/species.jl")
+export DiffusionUnsteadyConcentration, solve_DiffusionUnsteadyConcentration!
+
 include("binarysolver/binary.jl")
 export DiffusionUnsteadyBinary, solve_DiffusionUnsteadyBinary!
 

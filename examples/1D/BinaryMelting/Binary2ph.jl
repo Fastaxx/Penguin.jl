@@ -9,15 +9,15 @@ using CairoMakie
 
 # Define the spatial mesh
 nx = 160
-lx = 4.0
+lx = 1.0
 x0 = 0.0
 domain = ((x0, lx),)
 mesh = Penguin.Mesh((nx,), (lx,), (x0,))
 
 # Define the interface location
-xint = 2.0
-body = (x, t=0, _=0) -> (x - xint)      # For liquid phase
-body_c = (x, t=0, _=0) -> -(x - xint)   # For solid phase
+xint = 0.05*lx  # Interface location
+body = (x, t, _=0) -> (x - xint)      # For liquid phase
+body_c = (x, t, _=0) -> -(x - xint)   # For solid phase
 
 # Define the Space-Time mesh
 Δt = 0.001
@@ -36,7 +36,7 @@ operator_solid = DiffusionOps(capacity_solid)
 # Temperature BCs
 Tcold = 0.0
 Thot = 1.0
-Tinterface = 0.5  # Temperature at the interface
+Tinterface = 0.0  # Temperature at the interface
 bc_b_T = BorderConditions(Dict{Symbol, AbstractBoundary}(:top => Dirichlet(Tcold), :bottom => Dirichlet(Thot)))
 
 # Concentration BCs
@@ -56,10 +56,10 @@ m = λ*1.0/1.0   # Liquidus slope
 # Define the diffusion coefficients
 # Thermal diffusivity for both phases
 D_T_liquid = (x,y,z) -> 1.0
-D_T_solid = (x,y,z) -> 0.05
+D_T_solid = (x,y,z) -> 1.0
 # Mass diffusivity for both phases
-D_C_liquid = (x,y,z) -> 0.5
-D_C_solid = (x,y,z) -> 0.01
+D_C_liquid = (x,y,z) -> 1.0
+D_C_solid = (x,y,z) -> 1.0
 
 # Define the source terms
 f_T = (x,y,z,t) -> 0.0
@@ -111,4 +111,4 @@ Newton_params = (max_iter, tol, reltol, α)
 solver = DiffusionUnsteadyBinary(T_liquid, T_solid, C_liquid, C_solid, bc_b_T, bc_b_C, ic_T, ic_C, Δt, u0_T, u0_C, "CN", Newton_params)
 
 # Solve the problem
-solver, residuals, xf_log = solve_DiffusionUnsteadyBinary!(solver, T_liquid, T_solid, C_liquid, C_solid, Δt, Tend, bc_b_T, bc_b_C, ic_T, ic_C, mesh; Newton_params=Newton_params, method=Base.:\)
+solver, residuals, xf_log = solve_DiffusionUnsteadyBinary!(solver, T_liquid, T_solid, C_liquid, C_solid, xint,Δt, Tend, bc_b_T, bc_b_C, ic_T, ic_C, mesh; Newton_params=Newton_params, method=Base.:\)
