@@ -35,3 +35,5 @@ Manifest.toml
 sandbox
 
 quarto/
+
+sdf_debug/
