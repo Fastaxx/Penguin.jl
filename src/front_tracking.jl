@@ -498,7 +498,7 @@ end
 Calculates the volume Jacobian matrix for a given mesh and interface.
 This is a more reliable Julia implementation that avoids Python interop issues.
 """
-function compute_volume_jacobian(ft::FrontTracker, x_faces::AbstractVector{<:Real}, y_faces::AbstractVector{<:Real}, epsilon::Float64=1e-6)
+function compute_volume_jacobian(ft::FrontTracker, x_faces::AbstractVector{<:Real}, y_faces::AbstractVector{<:Real}, epsilon::Float64=1e-8)
     # Convert ranges to vectors if needed
     x_faces_vec = collect(x_faces)
     y_faces_vec = collect(y_faces)
@@ -548,35 +548,74 @@ function compute_volume_jacobian(ft::FrontTracker, x_faces::AbstractVector{<:Rea
         volume_jacobian[key] = []
     end
     
-    # Process each marker except the duplicated closing point
-    n_markers = ft.is_closed ? length(markers) - 1 : length(markers)
+    # Track which markers have entries
+    markers_with_entries = Set{Int}()
+    
+    # IMPORTANT CHANGE: Process ALL markers including the duplicated closing point
+    n_markers = length(markers)
     
     for marker_idx in 1:n_markers
+        # Skip processing if this is the duplicated last marker in a closed interface
+        # But still include it in the Jacobian by copying values from the first marker
+        if ft.is_closed && marker_idx == n_markers && markers[1] == markers[end]
+            # For each cell with entries for the first marker, copy to the last marker
+            for ((i, j), entries) in volume_jacobian
+                for (idx, value) in entries
+                    if idx == 1  # If this entry corresponds to the first marker
+                        # Add an identical entry for the last marker
+                        push!(volume_jacobian[(i, j)], (n_markers, value))
+                        push!(markers_with_entries, n_markers)
+                    end
+                end
+            end
+            continue  # Skip the regular processing for this marker
+        end
+        
         # Original marker position
         original_marker = markers[marker_idx]
         
-        # Calculate perturbed position
+        # Calculate perturbed positions (both positive and negative)
         normal = normals[marker_idx]
-        perturbed_marker = (
+        
+        # Positive perturbation
+        pos_perturbed_marker = (
             original_marker[1] + epsilon * normal[1],
             original_marker[2] + epsilon * normal[2]
         )
         
-        # Create a copy of markers with this one perturbed
-        perturbed_markers = copy(markers)
-        perturbed_markers[marker_idx] = perturbed_marker
+        # Negative perturbation
+        neg_perturbed_marker = (
+            original_marker[1] - epsilon * normal[1],
+            original_marker[2] - epsilon * normal[2]
+        )
+        
+        # Create copies of markers with positive perturbation
+        pos_perturbed_markers = copy(markers)
+        pos_perturbed_markers[marker_idx] = pos_perturbed_marker
+        
+        # Create copies of markers with negative perturbation
+        neg_perturbed_markers = copy(markers)
+        neg_perturbed_markers[marker_idx] = neg_perturbed_marker
         
         # Update last marker if interface is closed and first marker is perturbed
         if ft.is_closed && marker_idx == 1 && markers[1] == markers[end]
-            perturbed_markers[end] = perturbed_marker
+            pos_perturbed_markers[end] = pos_perturbed_marker
+            neg_perturbed_markers[end] = neg_perturbed_marker
         end
         
-        # Create a new front tracker with perturbed markers
-        perturbed_tracker = FrontTracker(perturbed_markers, ft.is_closed)
-        perturbed_fluid_poly = get_fluid_polygon(perturbed_tracker)
+        # Create new front trackers with perturbed markers
+        pos_perturbed_tracker = FrontTracker(pos_perturbed_markers, ft.is_closed)
+        neg_perturbed_tracker = FrontTracker(neg_perturbed_markers, ft.is_closed)
         
-        # Calculate perturbed volumes
-        for ((i, j), original_volume) in original_volumes
+        pos_fluid_poly = get_fluid_polygon(pos_perturbed_tracker)
+        neg_fluid_poly = get_fluid_polygon(neg_perturbed_tracker)
+        
+        # Track the max Jacobian value for this marker
+        max_jac_value = 0.0
+        max_jac_cell = nothing
+        
+        # Calculate perturbed volumes using central differencing
+        for ((i, j), _) in original_volumes
             # Create cell coordinates
             cell_coords = [
                 [x_faces_vec[i], y_faces_vec[j]],
@@ -586,28 +625,44 @@ function compute_volume_jacobian(ft::FrontTracker, x_faces::AbstractVector{<:Rea
                 [x_faces_vec[i], y_faces_vec[j]]  # Close the polygon
             ]
             
-            # Create cell polygon properly using a vector of coordinate vectors
+            # Create cell polygon
             cell_poly = LibGEOS.Polygon([cell_coords])
             
-            # Calculate intersection with perturbed fluid polygon
-            intersection = LibGEOS.intersection(cell_poly, perturbed_fluid_poly)
+            # Calculate intersection with positive perturbed fluid polygon
+            pos_intersection = LibGEOS.intersection(cell_poly, pos_fluid_poly)
+            pos_volume = LibGEOS.isEmpty(pos_intersection) ? 0.0 : LibGEOS.area(pos_intersection)
             
-            # Calculate perturbed volume
-            perturbed_volume = LibGEOS.isEmpty(intersection) ? 0.0 : LibGEOS.area(intersection)
+            # Calculate intersection with negative perturbed fluid polygon
+            neg_intersection = LibGEOS.intersection(cell_poly, neg_fluid_poly)
+            neg_volume = LibGEOS.isEmpty(neg_intersection) ? 0.0 : LibGEOS.area(neg_intersection)
             
-            # Calculate Jacobian value
-            jacobian_value = (perturbed_volume - original_volume) / epsilon
+            # Calculate Jacobian value using central differencing
+            jacobian_value = (pos_volume - neg_volume) / (2.0 * epsilon)
             
-            # Store only significant changes
+            # Store significant changes and track maximum value
             if abs(jacobian_value) > 1e-10
                 push!(volume_jacobian[(i, j)], (marker_idx, jacobian_value))
+                push!(markers_with_entries, marker_idx)
+                
+                if abs(jacobian_value) > abs(max_jac_value)
+                    max_jac_value = jacobian_value
+                    max_jac_cell = (i, j)
+                end
+            elseif abs(jacobian_value) > abs(max_jac_value)
+                max_jac_value = jacobian_value
+                max_jac_cell = (i, j)
             end
+        end
+        
+        # If this marker has no entries, add its maximum value entry
+        if marker_idx ∉ markers_with_entries && max_jac_cell !== nothing
+            push!(volume_jacobian[max_jac_cell], (marker_idx, max_jac_value))
+            push!(markers_with_entries, marker_idx)
         end
     end
     
     return volume_jacobian
 end
-
 
 """
     fluid_cell_properties(mesh::Mesh{2}, front::FrontTracker)
@@ -628,9 +683,10 @@ function fluid_cell_properties(mesh::Mesh{2}, front::FrontTracker)
     
     # Initialisation des matrices de résultats
     fractions = zeros(nx+1, ny+1)  # Fraction fluide
-    volumes = zeros(nx+1, ny+1)   # Volume fluide
+    volumes = zeros(nx+1, ny+1)    # Volume fluide
     centroids_x = zeros(nx+1, ny+1)  # Coordonnées du centroïde fluide en x
     centroids_y = zeros(nx+1, ny+1)  # Coordonnées du centroïde fluide en y
+    cell_types = zeros(Int, nx+1, ny+1)  # Type de cellule (0: solide/empty, 1: fluide/full, -1: cut)
     
     # Récupération du domaine fluide
     fluid_poly = get_fluid_polygon(front)
@@ -665,10 +721,20 @@ function fluid_cell_properties(mesh::Mesh{2}, front::FrontTracker)
                     centroid = LibGEOS.centroid(intersection)
                     centroids_x[i, j] = GeoInterface.x(centroid)
                     centroids_y[i, j] = GeoInterface.y(centroid)
+                    
+                    # Détermination du type de cellule
+                    if isapprox(fractions[i, j], 1.0, atol=1e-10)
+                        cell_types[i, j] = 1   # Cellule complètement fluide
+                    elseif isapprox(fractions[i, j], 0.0, atol=1e-10)
+                        cell_types[i, j] = 0   # Cellule vide
+                    else
+                        cell_types[i, j] = -1  # Cellule coupée
+                    end
                 else
                     # Cellule entièrement solide
                     centroids_x[i, j] = (x_nodes[i] + x_nodes[i+1]) / 2
                     centroids_y[i, j] = (y_nodes[j] + y_nodes[j+1]) / 2
+                    cell_types[i, j] = 0  # Cellule vide
                 end
             else
                 # Vérification si le centre est dans le fluide
@@ -680,15 +746,17 @@ function fluid_cell_properties(mesh::Mesh{2}, front::FrontTracker)
                     volumes[i, j] = cell_area
                     centroids_x[i, j] = center_x
                     centroids_y[i, j] = center_y
+                    cell_types[i, j] = 1  # Cellule complètement fluide
                 else
                     centroids_x[i, j] = center_x
                     centroids_y[i, j] = center_y
+                    cell_types[i, j] = 0  # Cellule vide
                 end
             end
         end
     end
 
-    return fractions, volumes, centroids_x, centroids_y
+    return fractions, volumes, centroids_x, centroids_y, cell_types
 end
 
 """
@@ -713,7 +781,10 @@ function compute_surface_capacities(mesh::Mesh{2}, front::FrontTracker)
     # Récupération du domaine fluide
     fluid_poly = get_fluid_polygon(front)
     
-    # Calcul pour les faces verticales
+    # Calculer les fractions fluides pour toutes les cellules d'abord
+    fractions, _, _, _,_ = fluid_cell_properties(mesh, front)
+    
+    # Calcul pour les faces verticales (Ax)
     for i in 1:nx+1
         for j in 1:ny
             x = x_nodes[i]
@@ -722,22 +793,94 @@ function compute_surface_capacities(mesh::Mesh{2}, front::FrontTracker)
             # Création d'une ligne pour la face
             face_line = LibGEOS.LineString([[x, y_min], [x, y_max]])
             
-            if LibGEOS.intersects(face_line, fluid_poly)
-                intersection = LibGEOS.intersection(face_line, fluid_poly)
+            # Si la face est entre deux cellules (comme dans le code Python)
+            if 1 < i <= nx
+                # Identifier les cellules gauche et droite
+                left_cell_fluid = fractions[i-1, j] > 0
+                right_cell_fluid = fractions[i, j] > 0
                 
-                Ax[i,j] = LibGEOS.geomLength(intersection)
-
-            else
-                # Face entièrement dans le fluide ou dans le solide
-                mid_y = (y_min + y_max) / 2
-                if is_point_inside(front, x, mid_y)
+                if left_cell_fluid && right_cell_fluid && fractions[i-1, j] == 1.0 && fractions[i, j] == 1.0
+                    # Face entre deux cellules entièrement fluides
                     Ax[i, j] = y_max - y_min
+                elseif !left_cell_fluid && !right_cell_fluid
+                    # Face entre deux cellules entièrement solides
+                    Ax[i, j] = 0.0
+                else
+                    # Face à la frontière fluide/solide ou impliquant une cut cell
+                    if isnothing(front.interface)
+                        # Sans interface définie
+                        if left_cell_fluid && right_cell_fluid
+                            Ax[i, j] = y_max - y_min
+                        end
+                    else
+                        # Vérifier si la face est intersectée par l'interface
+                        if LibGEOS.intersects(face_line, fluid_poly)
+                            intersection = LibGEOS.intersection(face_line, fluid_poly)
+                            
+                            # Calculer la longueur correctement selon le type de géométrie
+                            if isa(intersection, LibGEOS.LineString)
+                                Ax[i, j] = LibGEOS.geomLength(intersection)
+                            elseif isa(intersection, LibGEOS.MultiLineString)
+                                # Somme des longueurs pour géométries multiples
+                                total_length = 0.0
+                                for k in 1:LibGEOS.getNumGeometries(intersection)
+                                    line = LibGEOS.getGeometry(intersection, k-1)
+                                    total_length += LibGEOS.geomLength(line)
+                                end
+                                Ax[i, j] = total_length
+                            elseif isa(intersection, LibGEOS.Point) || isa(intersection, LibGEOS.MultiPoint)
+                                # Un point n'a pas de longueur
+                                Ax[i, j] = 0.0
+                            else
+                                # Type de géométrie inconnu - utiliser le test du point milieu
+                                mid_y = (y_min + y_max) / 2
+                                if is_point_inside(front, x, mid_y)
+                                    Ax[i, j] = y_max - y_min
+                                end
+                            end
+                        else
+                            # Face non intersectée par l'interface
+                            mid_y = (y_min + y_max) / 2
+                            if is_point_inside(front, x, mid_y)
+                                Ax[i, j] = y_max - y_min
+                            else
+                                Ax[i, j] = 0.0
+                            end
+                        end
+                    end
                 end
+            else
+                # Faces aux bords du domaine (i=1 ou i=nx+1)
+                # Vérifier si la face intersecte le domaine fluide
+                if LibGEOS.intersects(face_line, fluid_poly)
+                    intersection = LibGEOS.intersection(face_line, fluid_poly)
+                    if isa(intersection, LibGEOS.LineString)
+                        Ax[i, j] = LibGEOS.geomLength(intersection)
+                    elseif isa(intersection, LibGEOS.MultiLineString)
+                        total_length = 0.0
+                        for k in 1:LibGEOS.getNumGeometries(intersection)
+                            line = LibGEOS.getGeometry(intersection, k-1)
+                            total_length += LibGEOS.geomLength(line)
+                        end
+                        Ax[i, j] = total_length
+                    end
+                else
+                    # Vérifier si le milieu est dans le fluide
+                    mid_y = (y_min + y_max) / 2
+                    if is_point_inside(front, x, mid_y)
+                        Ax[i, j] = y_max - y_min
+                    end
+                end
+            end
+            
+            # Valider la valeur calculée (ne devrait pas dépasser la hauteur de la cellule)
+            if Ax[i, j] > (y_max - y_min) * (1 + 1e-10)
+                Ax[i, j] = y_max - y_min
             end
         end
     end
     
-    # Calcul pour les faces horizontales
+    # Même logique pour les faces horizontales (Ay)
     for i in 1:nx
         for j in 1:ny+1
             y = y_nodes[j]
@@ -746,16 +889,83 @@ function compute_surface_capacities(mesh::Mesh{2}, front::FrontTracker)
             # Création d'une ligne pour la face
             face_line = LibGEOS.LineString([[x_min, y], [x_max, y]])
             
-            if LibGEOS.intersects(face_line, fluid_poly)
-                intersection = LibGEOS.intersection(face_line, fluid_poly)
-                Ay[i, j] = LibGEOS.geomLength(intersection)
-
-            else
-                # Face entièrement dans le fluide ou dans le solide
-                mid_x = (x_min + x_max) / 2
-                if is_point_inside(front, mid_x, y)
+            # Si la face est entre deux cellules
+            if 1 < j <= ny
+                bottom_cell_fluid = fractions[i, j-1] > 0
+                top_cell_fluid = fractions[i, j] > 0
+                
+                if bottom_cell_fluid && top_cell_fluid && fractions[i, j-1] == 1.0 && fractions[i, j] == 1.0
+                    # Face entre deux cellules entièrement fluides
                     Ay[i, j] = x_max - x_min
+                elseif !bottom_cell_fluid && !top_cell_fluid
+                    # Face entre deux cellules entièrement solides
+                    Ay[i, j] = 0.0
+                else
+                    # Face à la frontière fluide/solide ou impliquant une cut cell
+                    if isnothing(front.interface)
+                        if bottom_cell_fluid && top_cell_fluid
+                            Ay[i, j] = x_max - x_min
+                        end
+                    else
+                        # Vérifier si la face est intersectée par l'interface
+                        if LibGEOS.intersects(face_line, fluid_poly)
+                            intersection = LibGEOS.intersection(face_line, fluid_poly)
+                            
+                            # Calculer la longueur selon le type de géométrie
+                            if isa(intersection, LibGEOS.LineString)
+                                Ay[i, j] = LibGEOS.geomLength(intersection)
+                            elseif isa(intersection, LibGEOS.MultiLineString)
+                                total_length = 0.0
+                                for k in 1:LibGEOS.getNumGeometries(intersection)
+                                    line = LibGEOS.getGeometry(intersection, k-1)
+                                    total_length += LibGEOS.geomLength(line)
+                                end
+                                Ay[i, j] = total_length
+                            elseif isa(intersection, LibGEOS.Point) || isa(intersection, LibGEOS.MultiPoint)
+                                Ay[i, j] = 0.0
+                            else
+                                # Type de géométrie inconnu - utiliser le test du point milieu
+                                mid_x = (x_min + x_max) / 2
+                                if is_point_inside(front, mid_x, y)
+                                    Ay[i, j] = x_max - x_min
+                                end
+                            end
+                        else
+                            # Face non intersectée
+                            mid_x = (x_min + x_max) / 2
+                            if is_point_inside(front, mid_x, y)
+                                Ay[i, j] = x_max - x_min
+                            else
+                                Ay[i, j] = 0.0
+                            end
+                        end
+                    end
                 end
+            else
+                # Faces aux bords du domaine (j=1 ou j=ny+1)
+                if LibGEOS.intersects(face_line, fluid_poly)
+                    intersection = LibGEOS.intersection(face_line, fluid_poly)
+                    if isa(intersection, LibGEOS.LineString)
+                        Ay[i, j] = LibGEOS.geomLength(intersection)
+                    elseif isa(intersection, LibGEOS.MultiLineString)
+                        total_length = 0.0
+                        for k in 1:LibGEOS.getNumGeometries(intersection)
+                            line = LibGEOS.getGeometry(intersection, k-1)
+                            total_length += LibGEOS.geomLength(line)
+                        end
+                        Ay[i, j] = total_length
+                    end
+                else
+                    mid_x = (x_min + x_max) / 2
+                    if is_point_inside(front, mid_x, y)
+                        Ay[i, j] = x_max - x_min
+                    end
+                end
+            end
+            
+            # Valider la valeur calculée
+            if Ay[i, j] > (x_max - x_min) * (1 + 1e-10)
+                Ay[i, j] = x_max - x_min
             end
         end
     end
@@ -789,116 +999,192 @@ function compute_second_type_capacities(mesh::Mesh{2}, front::FrontTracker,
     
     # Récupération du domaine fluide
     fluid_poly = get_fluid_polygon(front)
+
+    # Récupération des volumes fluides pour chaque cellule
+    fractions, volumes, _, _,_ = fluid_cell_properties(mesh, front)
     
-    # Calcul des capacités de volume horizontales Wx
-    for i in 1:nx-1
+     # Calcul des capacités de volume horizontales Wx
+    for i in 1:nx
         for j in 1:ny
-            # Définition du domaine d'intégration entre les centroïdes
-            x_left = centroids_x[i, j]
-            x_right = centroids_x[i+1, j]
-            y_min, y_max = y_nodes[j], y_nodes[j+1]
-            
-            # Création du polygone pour le domaine d'intégration
-            poly_coords = [
-                [x_left, y_min],
-                [x_right, y_min],
-                [x_right, y_max],
-                [x_left, y_max],
-                [x_left, y_min]
-            ]
-            poly = LibGEOS.Polygon([poly_coords])
-            
-            # Calcul de l'intersection avec le domaine fluide
-            if LibGEOS.intersects(poly, fluid_poly)
-                intersection = LibGEOS.intersection(poly, fluid_poly)
-                Wx[i, j] = LibGEOS.area(intersection)
-            else
-                # Vérification si le milieu est dans le fluide
-                mid_x = (x_left + x_right) / 2
-                mid_y = (y_min + y_max) / 2
-                if is_point_inside(front, mid_x, mid_y)
-                    Wx[i, j] = LibGEOS.area(poly)
+            # Uniquement calculer si au moins une des cellules contient du fluide
+            if volumes[i, j] > 0 || volumes[i+1, j] > 0
+                # Définition du domaine d'intégration entre les centroïdes
+                x_left = centroids_x[i, j]
+                x_right = centroids_x[i+1, j]
+                y_min, y_max = y_nodes[j], y_nodes[j+1]
+                
+                # Création du polygone pour le domaine d'intégration
+                poly_coords = [
+                    [x_left, y_min],
+                    [x_right, y_min],
+                    [x_right, y_max],
+                    [x_left, y_max],
+                    [x_left, y_min]
+                ]
+                poly = LibGEOS.Polygon([poly_coords])
+                
+                # Calcul de l'intersection avec le domaine fluide
+                if LibGEOS.intersects(poly, fluid_poly)
+                    intersection = LibGEOS.intersection(poly, fluid_poly)
+                    Wx[i+1, j] = LibGEOS.area(intersection)
+                else
+                    # Vérification si le milieu est dans le fluide
+                    mid_x = (x_left + x_right) / 2
+                    mid_y = (y_min + y_max) / 2
+                    if is_point_inside(front, mid_x, mid_y)
+                        Wx[i+1, j] = LibGEOS.area(poly)
+                    else
+                        # Si complètement dans le solide
+                        Wx[i+1, j] = 0.0
+                    end
                 end
+            else
+                # Si les deux cellules sont solides, Wx est 0
+                Wx[i+1, j] = 0.0
             end
         end
     end
     
     # Calcul des capacités de volume verticales Wy
     for i in 1:nx
-        for j in 1:ny-1
-            # Définition du domaine d'intégration entre les centroïdes
-            y_bottom = centroids_y[i, j]
-            y_top = centroids_y[i, j+1]
-            x_min, x_max = x_nodes[i], x_nodes[i+1]
-            
-            # Création du polygone pour le domaine d'intégration
-            poly_coords = [
-                [x_min, y_bottom],
-                [x_max, y_bottom],
-                [x_max, y_top],
-                [x_min, y_top],
-                [x_min, y_bottom]
-            ]
-            poly = LibGEOS.Polygon([poly_coords])
-            
-            # Calcul de l'intersection avec le domaine fluide
-            if LibGEOS.intersects(poly, fluid_poly)
-                intersection = LibGEOS.intersection(poly, fluid_poly)
-                Wy[i, j] = LibGEOS.area(intersection)
-            else
-                # Vérification si le milieu est dans le fluide
-                mid_x = (x_min + x_max) / 2
-                mid_y = (y_bottom + y_top) / 2
-                if is_point_inside(front, mid_x, mid_y)
-                    Wy[i, j] = LibGEOS.area(poly)
+        for j in 1:ny
+            if volumes[i, j] > 0 || volumes[i, j+1] > 0
+                # Définition du domaine d'intégration entre les centroïdes
+                y_bottom = centroids_y[i, j]
+                y_top = centroids_y[i, j+1]
+                x_min, x_max = x_nodes[i], x_nodes[i+1]
+                
+                # Création du polygone pour le domaine d'intégration
+                poly_coords = [
+                    [x_min, y_bottom],
+                    [x_max, y_bottom],
+                    [x_max, y_top],
+                    [x_min, y_top],
+                    [x_min, y_bottom]
+                ]
+                poly = LibGEOS.Polygon([poly_coords])
+                
+                # Calcul de l'intersection avec le domaine fluide
+                if LibGEOS.intersects(poly, fluid_poly)
+                    intersection = LibGEOS.intersection(poly, fluid_poly)
+                    Wy[i, j+1] = LibGEOS.area(intersection)
+                else
+                    # Vérification si le milieu est dans le fluide
+                    mid_x = (x_min + x_max) / 2
+                    mid_y = (y_bottom + y_top) / 2
+                    if is_point_inside(front, mid_x, mid_y)
+                        Wy[i, j+1] = LibGEOS.area(poly)
+                    else
+                        # Si complètement dans le solide
+                        Wy[i, j+1] = 0.0
+                    end
                 end
+            else
+                # Si les deux cellules sont solides, Wy est 0
+                Wy[i, j+1] = 0.0
             end
         end
     end
     
-    # Calcul des longueurs B^x et B^y
+       # Calcul des longueurs B^x et B^y
     for i in 1:nx
         for j in 1:ny
+            # Récupérer le volume et la fraction fluide pour cette cellule
+            cell_volume = volumes[i, j]
+            cell_fraction = fractions[i, j]
             x_cm = centroids_x[i, j]
             y_cm = centroids_y[i, j]
             
-            if x_cm != 0.0 || y_cm != 0.0  # Si la cellule a du fluide
-                # Ligne verticale passant par le centroïde
-                vertical_line = LibGEOS.LineString([
-                    [x_cm, y_nodes[j]],
-                    [x_cm, y_nodes[j+1]]
-                ])
+            # Calculer uniquement pour les cellules avec du fluide
+            if cell_volume > 0
+                # Dimensions de la cellule
+                cell_height = y_nodes[j+1] - y_nodes[j]
+                cell_width = x_nodes[i+1] - x_nodes[i]
                 
-                # Ligne horizontale passant par le centroïde
-                horizontal_line = LibGEOS.LineString([
-                    [x_nodes[i], y_cm],
-                    [x_nodes[i+1], y_cm]
-                ])
-                
-                # Calcul des longueurs mouillées
-                if LibGEOS.intersects(vertical_line, fluid_poly)
-                    intersection = LibGEOS.intersection(vertical_line, fluid_poly)
-                    Bx[i, j] = LibGEOS.geomLength(intersection)
+                # Cellule complètement fluide vs. cellule coupée
+                if cell_fraction == 1.0
+                    # Pour une cellule complètement fluide
+                    Bx[i, j] = cell_height
+                    By[i, j] = cell_width
                 else
-                    mid_y = (y_nodes[j] + y_nodes[j+1]) / 2
-                    if is_point_inside(front, x_cm, mid_y)
-                        Bx[i, j] = y_nodes[j+1] - y_nodes[j]
+                    # Pour une cellule coupée - calculer les intersections
+                    
+                    # Ligne verticale passant par le centroïde fluide
+                    vertical_line = LibGEOS.LineString([
+                        [x_cm, y_nodes[j]],
+                        [x_cm, y_nodes[j+1]]
+                    ])
+                    
+                    # Ligne horizontale passant par le centroïde fluide
+                    horizontal_line = LibGEOS.LineString([
+                        [x_nodes[i], y_cm],
+                        [x_nodes[i+1], y_cm]
+                    ])
+                    
+                    # Calcul de Bx - longueur mouillée verticale
+                    if LibGEOS.intersects(vertical_line, fluid_poly)
+                        intersection = LibGEOS.intersection(vertical_line, fluid_poly)
+                        
+                        if isa(intersection, LibGEOS.LineString)
+                            Bx[i, j] = LibGEOS.geomLength(intersection)
+                        elseif isa(intersection, LibGEOS.MultiLineString)
+                            # Somme des longueurs pour géométries multiples
+                            total_length = 0.0
+                            for k in 1:LibGEOS.getNumGeometries(intersection)
+                                line = LibGEOS.getGeometry(intersection, k-1)
+                                total_length += LibGEOS.geomLength(line)
+                            end
+                            Bx[i, j] = total_length
+                        else
+                            # Point ou autre géométrie - pas de longueur
+                            Bx[i, j] = 0.0
+                        end
+                    else
+                        # Si la ligne ne coupe pas l'interface, vérifier si elle est du côté fluide
+                        # Utiliser le centre de la cellule comme point de test
+                        y_center = (y_nodes[j] + y_nodes[j+1]) / 2
+                        if is_point_inside(front, x_cm, y_center)
+                            Bx[i, j] = cell_height
+                        else
+                            Bx[i, j] = 0.0
+                        end
+                    end
+                    
+                    # Calcul de By - longueur mouillée horizontale
+                    if LibGEOS.intersects(horizontal_line, fluid_poly)
+                        intersection = LibGEOS.intersection(horizontal_line, fluid_poly)
+                        
+                        if isa(intersection, LibGEOS.LineString)
+                            By[i, j] = LibGEOS.geomLength(intersection)
+                        elseif isa(intersection, LibGEOS.MultiLineString)
+                            # Somme des longueurs pour géométries multiples
+                            total_length = 0.0
+                            for k in 1:LibGEOS.getNumGeometries(intersection)
+                                line = LibGEOS.getGeometry(intersection, k-1)
+                                total_length += LibGEOS.geomLength(line)
+                            end
+                            By[i, j] = total_length
+                        else
+                            # Point ou autre géométrie - pas de longueur
+                            By[i, j] = 0.0
+                        end
+                    else
+                        # Si la ligne ne coupe pas l'interface, vérifier si elle est du côté fluide
+                        x_center = (x_nodes[i] + x_nodes[i+1]) / 2
+                        if is_point_inside(front, x_center, y_cm)
+                            By[i, j] = cell_width
+                        else
+                            By[i, j] = 0.0
+                        end
                     end
                 end
-                
-                if LibGEOS.intersects(horizontal_line, fluid_poly)
-                    intersection = LibGEOS.intersection(horizontal_line, fluid_poly)
-                    By[i, j] = LibGEOS.geomLength(intersection)
-                else
-                    mid_x = (x_nodes[i] + x_nodes[i+1]) / 2
-                    if is_point_inside(front, mid_x, y_cm)
-                        By[i, j] = x_nodes[i+1] - x_nodes[i]
-                    end
-                end
+            else
+                # Cellule sans fluide
+                Bx[i, j] = 0.0
+                By[i, j] = 0.0
             end
         end
     end
-    
     return Wx, Wy, Bx, By
 end
 
@@ -1011,7 +1297,7 @@ Retourne un dictionnaire avec tous les résultats.
 """
 function compute_capacities(mesh::Mesh{2}, front::FrontTracker)
     # Calcul des propriétés des cellules
-    fractions, volumes, centroids_x, centroids_y = fluid_cell_properties(mesh, front)
+    fractions, volumes, centroids_x, centroids_y, cell_types = fluid_cell_properties(mesh, front)
     
     # Calcul des capacités de surface
     Ax, Ay = compute_surface_capacities(mesh, front)
@@ -1028,6 +1314,7 @@ function compute_capacities(mesh::Mesh{2}, front::FrontTracker)
         :volumes => volumes,              # Capacités volumiques V_{ij}
         :centroids_x => centroids_x,      # Coordonnées x des centroïdes X_{i,j}
         :centroids_y => centroids_y,      # Coordonnées y des centroïdes Y_{i,j}
+        :cell_types => cell_types,        # Types de cellules (0: empty, 1: full, -1: cut)
         :Ax => Ax,                        # Capacités des faces verticales A^x_{i,j}
         :Ay => Ay,                        # Capacités des faces horizontales A^y_{i,j}
         :Wx => Wx,                        # Capacités de volume horizontales W^x_{i+1/2,j}

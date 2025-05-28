@@ -4,12 +4,33 @@ using Statistics
 using CairoMakie
 using SparseArrays
 
+# Update the difference calculations to use relative error
+
+# Helper function for safe relative error calculation
+function safe_relative_error(ft_val, vofi_val; epsilon=1e-10)
+    if abs(vofi_val) < epsilon
+        # For near-zero vofi values
+        return abs(ft_val) < epsilon ? 0.0 : 1.0  # 0% or 100% error
+    else
+        return abs(ft_val - vofi_val) / abs(vofi_val)
+    end
+end
+
+# Apply this function element-wise
+function relative_error_matrix(ft_mat, vofi_mat; epsilon=1e-10)
+    result = zeros(size(ft_mat))
+    for i in eachindex(ft_mat)
+        result[i] = safe_relative_error(ft_mat[i], vofi_mat[i], epsilon=epsilon)
+    end
+    return result
+end
+
 """
 Compare volume and surface capacity calculations between Front Tracking (LibGEOS) and VOFI
 """
 function compare_volume_capacities()
     # Parameters for the test case
-    nx, ny = 20, 20  # Reduced resolution for better visualization
+    nx, ny = 10, 10  # Reduced resolution for better visualization
     lx, ly = 1.0, 1.0
     
     # Create mesh
@@ -19,12 +40,12 @@ function compare_volume_capacities()
     fig = Figure(size=(1800, 2400))  # Increased height for more plots
     
     # 1. CIRCLE TEST CASE
-    center_x, center_y = 0.5, 0.5
-    radius = 0.3
+    center_x, center_y = 0.55, 0.55
+    radius = 0.31
     
     # Create front tracker for circle
     front_circle = FrontTracker()
-    create_circle!(front_circle, center_x, center_y, radius, 500)
+    create_circle!(front_circle, center_x, center_y, radius, 5000)
     
     # Calculate capacities using Front Tracking
     ft_capacities_circle = compute_capacities(mesh, front_circle)
@@ -56,14 +77,20 @@ function compare_volume_capacities()
                 vofi_V_dense_circle, colormap=:viridis)
     Colorbar(fig[1, 4], hm2)
     
-    # Calculate and plot difference
-    diff_vol = Matrix(abs.(ft_volumes - vofi_V_dense_circle))
-    ax3 = Axis(fig[1, 5], title="Difference (|FT - VOFI|)", 
-            aspect=DataAspect(), xlabel="x", ylabel="y")
-    hm3 = heatmap!(ax3, 0:lx/nx:lx, 0:ly/ny:ly, 
-                diff_vol, colormap=:viridis)
-    Colorbar(fig[1, 6], hm3)
-    
+        # Calculate and plot relative error
+        rel_error_vol = relative_error_matrix(ft_volumes, vofi_V_dense_circle)
+        ax3 = Axis(fig[1, 5], title="Relative Error (|FT - VOFI|/|VOFI|)", 
+                aspect=DataAspect(), xlabel="x", ylabel="y")
+        hm3 = heatmap!(ax3, 0:lx/nx:lx, 0:ly/ny:ly, 
+                rel_error_vol, colormap=:viridis)
+        Colorbar(fig[1, 6], hm3)
+
+        # Print volume statistics
+        println("Circle volume statistics:")
+        println("  Max relative error: $(maximum(rel_error_vol))")
+        println("  Mean relative error: $(mean(rel_error_vol))")
+
+
     # ----- Ax CAPACITIES (row 2) -----
     # Convert VOFI Ax to dense matrix
     vofi_Ax = Array(SparseArrays.diag(vofi_capacity_circle.A[1]))
@@ -84,15 +111,20 @@ function compare_volume_capacities()
     hm5 = heatmap!(ax5, 0:lx/nx:lx, 0:ly/ny:ly, 
                 vofi_Ax, colormap=:viridis)
     Colorbar(fig[2, 4], hm5)
-    
-    # Calculate and plot Ax difference
-    diff_Ax = Matrix(abs.(ft_Ax - vofi_Ax))
-    ax6 = Axis(fig[2, 5], title="Ax Difference (|FT - VOFI|)", 
-            aspect=DataAspect(), xlabel="x", ylabel="y")
-    hm6 = heatmap!(ax6, 0:lx/nx:lx, 0:ly/ny:ly, 
-                diff_Ax, colormap=:viridis)
-    Colorbar(fig[2, 6], hm6)
-    
+        
+        # Calculate and plot Ax relative error
+        rel_error_Ax = relative_error_matrix(ft_Ax, vofi_Ax)
+        ax6 = Axis(fig[2, 5], title="Ax Relative Error (|FT - VOFI|/|VOFI|)", 
+                aspect=DataAspect(), xlabel="x", ylabel="y")
+        hm6 = heatmap!(ax6, 0:lx/nx:lx, 0:ly/ny:ly, 
+                rel_error_Ax, colormap=:viridis)
+        Colorbar(fig[2, 6], hm6)
+
+        # Print Ax capacity statistics
+        println("\nCircle Ax capacity statistics:")
+        println("  Max relative error: $(maximum(rel_error_Ax))")
+        println("  Mean relative error: $(mean(rel_error_Ax))")
+
     # ----- Ay CAPACITIES (row 3) -----
     # Convert VOFI Ay to dense matrix
     vofi_Ay = Array(SparseArrays.diag(vofi_capacity_circle.A[2]))
@@ -113,15 +145,20 @@ function compare_volume_capacities()
     hm8 = heatmap!(ax8, 0:lx/nx:lx, 0:ly/ny:ly, 
                 vofi_Ay, colormap=:viridis)
     Colorbar(fig[3, 4], hm8)
-    
-    # Calculate and plot Ay difference
-    diff_Ay = Matrix(abs.(ft_Ay - vofi_Ay))
-    ax9 = Axis(fig[3, 5], title="Ay Difference (|FT - VOFI|)", 
-            aspect=DataAspect(), xlabel="x", ylabel="y")
-    hm9 = heatmap!(ax9, 0:lx/nx:lx, 0:ly/ny:ly, 
-                diff_Ay, colormap=:viridis)
-    Colorbar(fig[3, 6], hm9)
-    
+        
+        # Calculate and plot Ay relative error
+        rel_error_Ay = relative_error_matrix(ft_Ay, vofi_Ay)
+        ax9 = Axis(fig[3, 5], title="Ay Relative Error (|FT - VOFI|/|VOFI|)", 
+                aspect=DataAspect(), xlabel="x", ylabel="y")
+        hm9 = heatmap!(ax9, 0:lx/nx:lx, 0:ly/ny:ly, 
+                rel_error_Ay, colormap=:viridis)
+        Colorbar(fig[3, 6], hm9)
+
+        # Print Ay capacity statistics
+        println("\nCircle Ay capacity statistics:")
+        println("  Max relative error: $(maximum(rel_error_Ay))")
+        println("  Mean relative error: $(mean(rel_error_Ay))")
+
     # ----- Wx CAPACITIES (row 4) -----
     # Convert VOFI Wx to dense matrix
     vofi_Wx = Array(SparseArrays.diag(vofi_capacity_circle.W[1]))
@@ -144,19 +181,20 @@ function compare_volume_capacities()
                   vofi_Wx, colormap=:viridis)
     Colorbar(fig[4, 4], hm11)
     
-    # Calculate and plot Wx difference (only where we have data)
-    diff_Wx = Matrix(abs.(ft_Wx - vofi_Wx))
-    ax12 = Axis(fig[4, 5], title="Wx Difference (|FT - VOFI|)", 
-              aspect=DataAspect(), xlabel="x", ylabel="y")
-    hm12 = heatmap!(ax12, 0:lx/nx:lx, 0:ly/ny:ly, 
-                  diff_Wx, colormap=:viridis)
-    Colorbar(fig[4, 6], hm12)
-    
-    # Print Wx capacity statistics
-    println("\nCircle Wx capacity statistics:")
-    println("  Max difference: $(maximum(diff_Wx[1:nx, :]))")
-    println("  Mean difference: $(mean(diff_Wx[1:nx, :]))")
-    
+        # Calculate and plot Wx relative error
+        rel_error_Wx = relative_error_matrix(ft_Wx, vofi_Wx)
+        ax12 = Axis(fig[4, 5], title="Wx Relative Error (|FT - VOFI|/|VOFI|)", 
+                aspect=DataAspect(), xlabel="x", ylabel="y")
+        hm12 = heatmap!(ax12, 0:lx/nx:lx, 0:ly/ny:ly, 
+                rel_error_Wx, colormap=:viridis)
+        Colorbar(fig[4, 6], hm12)
+
+        # Print Wx capacity statistics
+        println("\nCircle Wx capacity statistics:")
+        nonzero_wx = rel_error_Wx[1:nx, :]
+        println("  Max relative error: $(maximum(nonzero_wx))")
+        println("  Mean relative error: $(mean(nonzero_wx))")
+
     # ----- Wy CAPACITIES (row 5) -----
     # Convert VOFI Wy to dense matrix
     vofi_Wy = Array(SparseArrays.diag(vofi_capacity_circle.W[2]))
@@ -178,20 +216,21 @@ function compare_volume_capacities()
     hm14 = heatmap!(ax14, 0:lx/nx:lx, 0:ly/ny:ly, 
                   vofi_Wy, colormap=:viridis)
     Colorbar(fig[5, 4], hm14)
-    
-    # Calculate and plot Wy difference (only where we have data)
-    diff_Wy = Matrix(abs.(ft_Wy - vofi_Wy))
-    ax15 = Axis(fig[5, 5], title="Wy Difference (|FT - VOFI|)", 
-              aspect=DataAspect(), xlabel="x", ylabel="y")
-    hm15 = heatmap!(ax15, 0:lx/nx:lx, 0:ly/ny:ly, 
-                  diff_Wy, colormap=:viridis)
-    Colorbar(fig[5, 6], hm15)
-    
-    # Print Wy capacity statistics
-    println("\nCircle Wy capacity statistics:")
-    println("  Max difference: $(maximum(diff_Wy[:, 1:ny]))")
-    println("  Mean difference: $(mean(diff_Wy[:, 1:ny]))")
-    
+        
+        # Calculate and plot Wy relative error
+        rel_error_Wy = relative_error_matrix(ft_Wy, vofi_Wy)
+        ax15 = Axis(fig[5, 5], title="Wy Relative Error (|FT - VOFI|/|VOFI|)", 
+                aspect=DataAspect(), xlabel="x", ylabel="y")
+        hm15 = heatmap!(ax15, 0:lx/nx:lx, 0:ly/ny:ly, 
+                rel_error_Wy, colormap=:viridis)
+        Colorbar(fig[5, 6], hm15)
+
+        # Print Wy capacity statistics
+        println("\nCircle Wy capacity statistics:")
+        nonzero_wy = rel_error_Wy[:, 1:ny]
+        println("  Max relative error: $(maximum(nonzero_wy))")
+        println("  Mean relative error: $(mean(nonzero_wy))")
+
     # ----- Bx CAPACITIES (row 6) -----
     # Convert VOFI Bx to dense matrix
     vofi_Bx = Array(SparseArrays.diag(vofi_capacity_circle.B[1]))
@@ -212,20 +251,20 @@ function compare_volume_capacities()
     hm17 = heatmap!(ax17, 0:lx/nx:lx, 0:ly/ny:ly, 
                   vofi_Bx, colormap=:viridis)
     Colorbar(fig[6, 4], hm17)
-    
-    # Calculate and plot Bx difference
-    diff_Bx = Matrix(abs.(ft_Bx - vofi_Bx))
-    ax18 = Axis(fig[6, 5], title="Bx Difference (|FT - VOFI|)", 
-              aspect=DataAspect(), xlabel="x", ylabel="y")
-    hm18 = heatmap!(ax18, 0:lx/nx:lx, 0:ly/ny:ly, 
-                  diff_Bx, colormap=:viridis)
-    Colorbar(fig[6, 6], hm18)
-    
-    # Print Bx capacity statistics
-    println("\nCircle Bx capacity statistics:")
-    println("  Max difference: $(maximum(diff_Bx))")
-    println("  Mean difference: $(mean(diff_Bx))")
-    
+
+        # Calculate and plot Bx relative error
+        rel_error_Bx = relative_error_matrix(ft_Bx, vofi_Bx)
+        ax18 = Axis(fig[6, 5], title="Bx Relative Error (|FT - VOFI|/|VOFI|)", 
+                aspect=DataAspect(), xlabel="x", ylabel="y")
+        hm18 = heatmap!(ax18, 0:lx/nx:lx, 0:ly/ny:ly, 
+                rel_error_Bx, colormap=:viridis)
+        Colorbar(fig[6, 6], hm18)
+
+        # Print Bx capacity statistics
+        println("\nCircle Bx capacity statistics:")
+        println("  Max relative error: $(maximum(rel_error_Bx))")
+        println("  Mean relative error: $(mean(rel_error_Bx))")
+
     # ----- By CAPACITIES (row 7) -----
     # Convert VOFI By to dense matrix
     vofi_By = Array(SparseArrays.diag(vofi_capacity_circle.B[2]))
@@ -247,19 +286,18 @@ function compare_volume_capacities()
                   vofi_By, colormap=:viridis)
     Colorbar(fig[7, 4], hm20)
     
-    # Calculate and plot By difference
-    diff_By = Matrix(abs.(ft_By - vofi_By))
-    ax21 = Axis(fig[7, 5], title="By Difference (|FT - VOFI|)", 
-              aspect=DataAspect(), xlabel="x", ylabel="y")
-    hm21 = heatmap!(ax21, 0:lx/nx:lx, 0:ly/ny:ly, 
-                  diff_By, colormap=:viridis)
-    Colorbar(fig[7, 6], hm21)
-    
-    # Print By capacity statistics
-    println("\nCircle By capacity statistics:")
-    println("  Max difference: $(maximum(diff_By))")
-    println("  Mean difference: $(mean(diff_By))")
-    
+        # Calculate and plot By relative error
+        rel_error_By = relative_error_matrix(ft_By, vofi_By)
+        ax21 = Axis(fig[7, 5], title="By Relative Error (|FT - VOFI|/|VOFI|)", 
+                aspect=DataAspect(), xlabel="x", ylabel="y")
+        hm21 = heatmap!(ax21, 0:lx/nx:lx, 0:ly/ny:ly, 
+                rel_error_By, colormap=:viridis)
+        Colorbar(fig[7, 6], hm21)
+
+        # Print By capacity statistics
+        println("\nCircle By capacity statistics:")
+        println("  Max relative error: $(maximum(rel_error_By))")
+        println("  Mean relative error: $(mean(rel_error_By))")
 
     return fig
 end

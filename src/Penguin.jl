@@ -90,7 +90,7 @@ include("liquidmotionsolver/diffusion2d.jl")
 export MovingLiquidDiffusionUnsteadyMono2D, solve_MovingLiquidDiffusionUnsteadyMono2D!
 
 include("liquidmotionsolver/stefan.jl")
-export StefanMono2D, solve_StefanMono2D!
+export StefanMono2D, solve_StefanMono2D!,  solve_StefanAdvection!
 export compute_volume_jacobian
 
 include("concentrationsolver/species.jl")

@@ -9,6 +9,55 @@ using Penguin
 using CairoMakie
 # Create a test mesh for the Jacobian visualization
 using Penguin
+function unzip(pairs)
+    return (getindex.(pairs, 1), getindex.(pairs, 2))
+end
+# Function to plot interface and normal vectors
+function plot_interface_with_normals(front::FrontTracker; scale=0.05)
+    # Get markers and compute normals
+    markers = get_markers(front)
+    normals = compute_marker_normals(front, markers)
+    
+    # Create figure
+    fig = Figure(resolution=(800, 600))
+    ax = Axis(fig[1, 1], aspect=DataAspect(), 
+              title="Interface with Normal Vectors",
+              xlabel="x", ylabel="y")
+    
+    # Plot interface
+    marker_xs, marker_ys = unzip(markers)
+    lines!(ax, marker_xs, marker_ys, color=:blue, linewidth=2, label="Interface")
+    scatter!(ax, marker_xs, marker_ys, color=:blue, markersize=5)
+    
+    # Plot normal vectors
+    for i in 1:length(markers)-1  # Skip duplicated endpoint for closed curves
+        x, y = markers[i]
+        nx, ny = normals[i]
+        
+        # Draw normal vector with arrow
+        arrows!(ax, [x], [y], [nx * scale], [ny * scale], 
+                arrowsize=10, linewidth=1.5, color=:red)
+    end
+    
+    # Add legend
+    Legend(fig[1, 2], ax, valign=:top)
+    
+    return fig
+end
+
+# Create a circular interface for testing
+front = FrontTracker()
+create_circle!(front, 0.5, 0.5, 0.3, 32)
+
+# Generate and display the visualization
+fig_normals = plot_interface_with_normals(front)
+
+# Save the figure to a file
+save("interface_with_normals.png", fig_normals)
+
+# Display the figure
+display(fig_normals)
+
 
 # Create a circular interface for testing
 front = FrontTracker()
@@ -24,9 +73,7 @@ mesh = Penguin.Mesh((nx, ny), (lx, ly), (x0, y0))
 
 # Compute the volume Jacobian
 volume_jacobian = compute_volume_jacobian(front, x_nodes, y_nodes)
-function unzip(pairs)
-    return (getindex.(pairs, 1), getindex.(pairs, 2))
-end
+
 function visualize_jacobian_matrix(volume_jacobian, mesh::Penguin.Mesh{2}, front::FrontTracker, markers=nothing)
     # Import Makie if needed
     

@@ -63,6 +63,135 @@ function Capacity(body::Function, mesh::AbstractMesh; method::String = "VOFI", c
 end
 
 """
+    Capacity(front::FrontTracker, mesh::AbstractMesh; compute_centroids::Bool = true)
+
+Compute the capacity directly from a front tracker without using a level set function.
+
+# Arguments
+- `front::FrontTracker`: The front tracker object defining the fluid domain
+- `mesh::AbstractMesh`: The mesh on which to compute the capacity 
+- `compute_centroids::Bool`: Whether to compute interface centroids
+
+# Returns
+- `Capacity{N}`: The capacity of the domain defined by the front tracker
+"""
+function Capacity(front::FrontTracker, mesh::AbstractMesh; compute_centroids::Bool = true)
+    # Convert front tracking capacities to Capacity format
+    A, B, V, W, C_ω, C_γ, Γ, cell_types = FrontTrackingToCapacity(front, mesh; compute_centroids=compute_centroids)
+    N = 2  # Only 2D is supported
+    
+    # Create a dummy level set function based on the front tracker's SDF
+    dummy_body(x, y, z=0.0) = sdf(front, x, y)
+    
+    return Capacity{N}(A, B, V, W, C_ω, C_γ, Γ, cell_types, mesh, dummy_body)
+end
+
+"""
+    FrontTrackingToCapacity(front::FrontTracker, mesh::AbstractMesh; compute_centroids::Bool = true)
+
+Convert front tracking capacities to the format expected by the Capacity struct.
+
+# Arguments
+- `front::FrontTracker`: The front tracker object defining the fluid domain
+- `mesh::AbstractMesh`: The mesh on which to compute the capacity
+- `compute_centroids::Bool`: Whether to compute interface centroids
+
+# Returns
+- Tuple of capacity components in Capacity struct format
+"""
+function FrontTrackingToCapacity(front::FrontTracker, mesh::AbstractMesh; compute_centroids::Bool = true)
+    if isa(mesh, Mesh{2}) || isa(mesh, SpaceTimeMesh{2})
+        # Compute all capacities using front tracking
+        ft_capacities = compute_capacities(mesh, front)
+        
+        # Extract dimensions
+        x_nodes = mesh.nodes[1]
+        y_nodes = mesh.nodes[2]
+        nx = length(x_nodes) 
+        ny = length(y_nodes) 
+        nc = nx * ny  # Total number of cells
+        
+        # Convert volumes to the required sparse format
+        volumes = ft_capacities[:volumes][1:nx, 1:ny]
+        V = spdiagm(0 => reshape(volumes, :))
+        
+        # Get interface information
+        interface_lengths_vec = zeros(nc)
+        for ((i, j), length) in ft_capacities[:interface_lengths]
+            if 1 <= i <= nx && 1 <= j <= ny
+                idx = (j-1)*nx + i
+                interface_lengths_vec[idx] = length
+            end
+        end
+        Γ = spdiagm(0 => interface_lengths_vec)
+        
+        # Extract and convert Ax, Ay to sparse format
+        Ax_dense = ft_capacities[:Ax][1:nx, 1:ny]
+        Ay_dense = ft_capacities[:Ay][1:nx, 1:ny]
+        
+        # Create vectors for the sparse matrices
+        Ax_vec = reshape(ft_capacities[:Ax][1:nx, 1:ny], :)
+        Ay_vec = reshape(ft_capacities[:Ay][1:nx, 1:ny], :)
+        
+        A = (spdiagm(0 => Ax_vec), spdiagm(0 => Ay_vec))
+        
+        # Extract and convert Bx, By
+        Bx_dense = ft_capacities[:Bx][1:nx, 1:ny]
+        By_dense = ft_capacities[:By][1:nx, 1:ny]
+        
+        Bx_vec = reshape(Bx_dense, :)
+        By_vec = reshape(By_dense, :)
+        
+        B = (spdiagm(0 => Bx_vec), spdiagm(0 => By_vec))
+        
+        # Extract and convert Wx, Wy
+        # Note: Need to adjust indices to match VOFI convention
+        Wx_dense = ft_capacities[:Wx][1:nx, 1:ny]  # Wx[i+1,j] in front tracking
+        Wy_dense = ft_capacities[:Wy][1:nx, 1:ny]  # Wy[i,j+1] in front tracking
+        
+        Wx_vec = reshape(Wx_dense, :)
+        Wy_vec = reshape(Wy_dense, :)
+        
+        W = (spdiagm(0 => Wx_vec), spdiagm(0 => Wy_vec))
+        
+        # Create cell centroids in required format
+        centroids_x = ft_capacities[:centroids_x][1:nx, 1:ny]
+        centroids_y = ft_capacities[:centroids_y][1:nx, 1:ny]
+        
+        C_ω = [SVector{2, Float64}(centroids_x[i, j], centroids_y[i, j]) 
+               for j in 1:ny for i in 1:nx]
+        
+        # Get cell fractions (cell types)
+        cell_types = ft_capacities[:cell_types][1:nx, 1:ny]
+        cell_types = reshape(cell_types, :)
+        
+        # Create interface centroids if requested
+        if compute_centroids
+            C_γ = Vector{SVector{2, Float64}}(undef, nc)
+            
+            # Initialize with zeros
+            for i in 1:nc
+                C_γ[i] = SVector{2, Float64}(0.0, 0.0)
+            end
+            
+            # Fill in known interface points
+            for ((i, j), point) in ft_capacities[:interface_points]
+                if 1 <= i <= nx && 1 <= j <= ny
+                    idx = (j-1)*nx + i
+                    C_γ[idx] = SVector{2, Float64}(point[1], point[2])
+                end
+            end
+        else
+            C_γ = Vector{SVector{2, Float64}}(undef, 0)
+        end
+        
+        return A, B, V, W, C_ω, C_γ, Γ, cell_types
+    else
+        error("Front Tracking capacity computation is only supported for 2D meshes")
+    end
+end
+
+"""
     VOFI(body::Function, mesh::CartesianMesh)
 
 Compute the Capacity quantities based on VOFI for a given body and mesh.
