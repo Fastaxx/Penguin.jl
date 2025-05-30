@@ -29,6 +29,8 @@ include("front_tracking.jl")
 export FrontTracker, create_circle!, create_rectangle!, create_ellipse!
 export set_markers!, get_markers, add_marker!, get_fluid_polygon, is_point_inside, get_intersection, get_markers, sdf, compute_marker_normals, compute_volume_jacobian
 export compute_capacities, fluid_cell_properties, compute_surface_capacities, compute_second_type_capacities
+export compute_spacetime_volumes, compute_special_spacetime_volume, find_crossing_times, interpolate_front
+export compute_spacetime_centroid, compute_spacetime_surfaces, compute_spacetime_centerline_lengths
 
 include("capacity.jl")
 export Capacity

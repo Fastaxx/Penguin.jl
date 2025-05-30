@@ -10,9 +10,6 @@ using Statistics
 using FFTW
 using DSP
 
-# No need for Python imports anymore
-# using CondaPkg
-# using PythonCall
 
 ### 2D Test Case: Frank Sphere (Stefan Problem with Circular Interface)
 # Define parameters
@@ -22,6 +19,7 @@ Pe = 1.0
 initial_radius = 0.5
 
 # Find Lambda (interface position in similarity coordinates)
+
 function F_similarity(s)
     # E₁ function from SpecialFunctions
     return expint(s^2/4)
@@ -76,13 +74,13 @@ x0, y0 = -1.0, -1.0
 mesh = Penguin.Mesh((nx, ny), (lx, ly), (x0, y0))
 
 # Time settings
-Δt = 0.005
-t_end = 0.2
+Δt = 0.01
+t_end = 1.0
 
 # Create a global front tracking object to reuse
 # Using the Julia FrontTracker implementation
 global_front = FrontTracker()
-create_circle!(global_front, 0.04, 0.04, initial_radius, 30)
+create_circle!(global_front, 0.0, 0.0, initial_radius, 50)
 
 # Compute volume Jacobian for the mesh
 # Extract x and y face positions from mesh
@@ -114,10 +112,11 @@ operator = DiffusionOps(capacity)
 
 # Define the boundary conditions
 bc = Dirichlet(1.0)  # Temperature = 1.0 at the boundary
-bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:bottom => Dirichlet(0.0), 
-                                                       :top => Dirichlet(0.0), 
-                                                       :left => Dirichlet(0.0), 
-                                                       :right => Dirichlet(0.0)))
+bc_b = Dirichlet(-0.5)  # Temperature = 0.0 at the boundary
+bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:bottom => bc_b, 
+                                                       :top => bc_b, 
+                                                       :left => bc_b, 
+                                                       :right => bc_b))
 
 # Stefan condition at the interface
 stef_cond = InterfaceConditions(nothing, FluxJump(1.0, 1.0, ρL))
@@ -189,66 +188,81 @@ solver, residuals, xf_log, timestep_history = solve_StefanMono2D!(solver, Fluide
 
 # Pb front at n and n+1 are in some place at the same value, so VOFI crashes
 
-# Visualization functions
-function plot_radius_comparison()
-    # Extract simulation times
-    times = [s.time for s in solver.states]
+# Plot the results
+function plot_interface_evolution(xf_log::Dict{Int, Vector{Tuple{Float64, Float64}}})
+    fig = Figure(size=(1000, 800))
+    ax = Axis(fig[1, 1], 
+             title="Interface Evolution Over Time", 
+             xlabel="x", ylabel="y",
+             aspect=DataAspect())
     
-    # Calculate averaged radii from the interface positions
-    simulated_radii = Float64[]
-    sim_times = Float64[]
+    # Get all timesteps sorted
+    timesteps = sort(collect(keys(xf_log)))
+    n_steps = length(timesteps)
     
-    for (idx, time) in enumerate(times)
-        if haskey(xf_log, idx)
-            interface_points = xf_log[idx]
-            # Calculate distance from origin for each point
-            radii = [sqrt(x^2 + y^2) for (x, y) in interface_points if !isnan(x) && !isnan(y)]
-            if !isempty(radii)
-                push!(simulated_radii, mean(radii))
-                push!(sim_times, time)
-            end
+    # Create a color gradient
+    colors = cgrad(:viridis, n_steps, categorical=true)
+    
+    # Plot each timestep's interface
+    for (i, step) in enumerate(timesteps)
+        markers = xf_log[step]
+        
+        # Extract x and y coordinates
+        x_coords = [m[1] for m in markers]
+        y_coords = [m[2] for m in markers]
+        
+        # For closed curves, add the first point again at the end
+        if sqrt((x_coords[1] - x_coords[end])^2 + (y_coords[1] - y_coords[end])^2) < 1e-10
+            push!(x_coords, x_coords[1])
+            push!(y_coords, y_coords[1])
+        end
+        
+        # Plot the interface line
+        lines!(ax, x_coords, y_coords, 
+              color=colors[i], 
+              linewidth=2,
+              label=i == 1 ? "Initial" : (i == n_steps ? "Final" : ""))
+        
+        # Plot markers with smaller size
+        scatter!(ax, x_coords, y_coords,
+                color=colors[i],
+                markersize=3)
+    end
+       # Add analytical solution for comparison
+    times = timestep_history  # This is a list of Tuple{Float64, Float64}
+    theta = range(0, 2π, length=100)
+    
+    for (i, time_tuple) in enumerate(times)
+        if i == 1 || i == n_steps || i % (n_steps ÷ 5) == 0 # Only plot some analytical circles
+            t = time_tuple[1]  # Extract the actual time value from the tuple
+            r = exact_radius(t)
+            x_circle = r .* cos.(theta)
+            y_circle = r .* sin.(theta)
+            
+            lines!(ax, x_circle, y_circle, 
+                  color=:black, 
+                  linestyle=:dash,
+                  linewidth=1.5,
+                  label=i == 1 ? "Analytical" : "")
         end
     end
     
-    # Calculate analytical radii
-    exact_radii = [exact_radius(t) for t in sim_times]
+     # Extract the actual time values from the tuples
+    time_values = [t[1] for t in times]  # Assuming time is stored in first element of tuple
+
+    # Add legend
+    axislegend(position=:rt)
     
-    # Create plot
-    fig = Figure()
-    ax = Axis(fig[1, 1], 
-              xlabel="Time", ylabel="Radius",
-              title="Interface Radius Comparison (Stefan Number = $Stefan_number)")
-    
-    lines!(ax, sim_times, simulated_radii, 
-           label="Numerical", linewidth=3)
-    lines!(ax, sim_times, exact_radii, 
-           label="Analytical", linewidth=2, linestyle=:dash, color=:red)
-    
-    axislegend()
+    # Add title with problem parameters
+    Label(fig[0, :], "Stefan Problem: Stefan Number = $(Stefan_number), Initial Radius = $(initial_radius)",
+         fontsize=16)
     
     return fig
 end
 
-# Call visualization functions
-fig_radius = plot_radius_comparison()
-display(fig_radius)
+# Create and display the interface evolution plot
+interface_evolution = plot_interface_evolution(xf_log)
+display(interface_evolution)
 
-# Plot interface evolution
-fig_interface = plot_interface_evolution(xf_log,
-                                      time_steps=:all,
-                                      n_times=8, 
-                                      color_gradient=false,
-                                      line_styles=true,
-                                      y_resolution=1000)
-display(fig_interface)
-
-# Plot isotherms 
-steps = [1, floor(Int, length(solver.states)/4), 
-         floor(Int, length(solver.states)/2), length(solver.states)]
-fig_isotherms = plot_isotherms(solver, mesh, nx, ny, reconstruct,
-                             time_steps=steps,
-                             layout=(2,2))
-display(fig_isotherms)
-
-# Animate solution
-animate_solution(solver, mesh, body)
+# Save the figure
+save("interface_evolution.png", interface_evolution)

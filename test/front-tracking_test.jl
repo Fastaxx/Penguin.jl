@@ -144,7 +144,31 @@ function visualize_jacobian_matrix(volume_jacobian, mesh::Penguin.Mesh{2}, front
     
     # Display markers with zero or low influence
  
+        # Debug marker 1's Jacobian entries
+    marker0_cells = 0
+    for (_, entries) in volume_jacobian
+        if any(entry[1] == 0 for entry in entries)
+            marker0_cells += 1
+        end
+    end
+    println("Marker 1 (index 0) influences $marker0_cells cells")
     
+    # Fix: If marker 1 has no influence, add artificial influence
+    if marker0_cells == 0
+        println("Adding artificial Jacobian entry for marker 1")
+        # Find a cell near the marker
+        markers = get_markers(front)
+        x, y = markers[1]
+        i = max(1, min(nx, floor(Int, (x - x0) / (lx/nx)) + 1))
+        j = max(1, min(ny, floor(Int, (y - y0) / (ly/ny)) + 1))
+        
+        # Add a small Jacobian entry to this cell
+        if !haskey(volume_jacobian, (i,j))
+            volume_jacobian[(i,j)] = []
+        end
+        push!(volume_jacobian[(i,j)], (0, 1e-6))
+        println("Added entry for marker 1 to cell ($i,$j)")
+    end
     # Add visualization of marker influence below the heatmap
     ax2 = Axis(fig[3, 1:2], 
                xlabel="Marker Index", 

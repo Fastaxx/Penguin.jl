@@ -16,13 +16,8 @@ function StefanMono2D(phase::Phase, bc_b::BorderConditions, bc_i::AbstractBounda
     println("- Diffusion problem")
     
     s = Solver(Unsteady, Monophasic, Diffusion, nothing, nothing, nothing, ConvergenceHistory(), [])    
-    if scheme == "CN"
-        s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, "CN")
-        s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc_i, Tᵢ, Δt, 0.0, "CN")
-    else # BE
-        s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, "BE")
-        s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc_i, Tᵢ, Δt, 0.0, "BE")
-    end
+    s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, scheme)
+    s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc_i, Tᵢ, Δt, 0.0, scheme)
     
     BC_border_mono!(s.A, s.b, bc_b, mesh)
     
@@ -30,7 +25,35 @@ function StefanMono2D(phase::Phase, bc_b::BorderConditions, bc_i::AbstractBounda
     return s
 end
 
-function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, bc::AbstractBoundary, ic::InterfaceConditions, mesh::Penguin.Mesh{2}, scheme::String; 
+"""
+Crée une fonction body pour représenter l'interface en SDF
+- front: l'interface actuelle
+- updated_front: l'interface mise à jour (optionnel)
+- tₙ: temps au début du pas de temps
+- Δt: pas de temps
+"""
+function create_interface_body_function(front::FrontTracker, updated_front::Union{FrontTracker,Nothing}=nothing, 
+                                       tₙ::Float64=0.0, Δt::Float64=1.0)
+    if updated_front === nothing
+        # Pas d'interpolation, utiliser uniquement front actuel
+        return function(x, y, t_local, _=0)
+            return sdf(front, x, y)
+        end
+    else
+        # Interpolation entre deux interfaces
+        return function(x, y, t_local, _=0)
+            # Temps normalisé entre 0 et 1
+            τ = (t_local - tₙ) / Δt
+            
+            # Interpolation linéaire entre les SDFs
+            sdf1 = sdf(front, x, y)
+            sdf2 = sdf(updated_front, x, y)
+            return (1-τ) * sdf1 + τ * sdf2
+        end
+    end
+end
+
+function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::Float64, Tₛ::Float64, Tₑ::Float64, bc_b::BorderConditions, bc::AbstractBoundary, ic::InterfaceConditions, mesh::Penguin.Mesh{2}, scheme::String; 
                             adaptive_timestep=true, method=Base.:\, 
                             Newton_params=(100, 1e-6, 1e-6, 1.0),
                             cfl_target=0.5, Δt_min=1e-4, Δt_max=1.0, kwargs...)
@@ -54,7 +77,7 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
     ρL = ic.flux.value
     
     # Initialize tracking variables
-    t = 0.0
+    t = Tₛ
     residuals = Dict{Int, Vector{Float64}}()
     xf_log = Dict{Int, Vector{Tuple{Float64, Float64}}}()
     timestep_history = Tuple{Float64, Float64}[]
@@ -65,51 +88,23 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
     len_dims = length(dims)
     cap_index = len_dims
 
-    # Create the 1D or 2D indices
-    if len_dims == 2
-        # 1D case
-        nx, nt = dims
-        n = nx
-    elseif len_dims == 3
-        # 2D case
-        nx, ny, nt = dims
-        n = nx*ny
-    else
-        error("Only 1D and 2D problems are supported.")
-    end
-    
+    nx, ny, nt = dims
+    n = nx*ny
+
     # Store initial state
     Tᵢ = s.x
     push!(s.states, s.x)
     
     # Get initial interface markers
     markers = get_markers(front)
-    
+    normals = compute_marker_normals(front, markers)
+
     # Store initial interface position
     xf_log[1] = markers
     
     # Initialize variables for first time step
     timestep = 1
     println("\nFirst time step: t = $(round(t, digits=6))")
-    
-    # Get current markers and calculate normals
-    markers = get_markers(front)
-    normals = compute_marker_normals(front, markers)
-    
-    # Compute velocity field from temperature gradient at interface
-    Vₙ₊₁ = phase.capacity.A[cap_index][1:end÷2, 1:end÷2]
-    Vₙ = phase.capacity.A[cap_index][end÷2+1:end, end÷2+1:end]
-    Vₙ = diag(Vₙ)
-    Vₙ₊₁ = diag(Vₙ₊₁)
-    W! = phase.operator.Wꜝ[1:n, 1:n]
-    G = phase.operator.G[1:n, 1:n]
-    H = phase.operator.H[1:n, 1:n]
-    Id = build_I_D(phase.operator, phase.Diffusion_coeff, phase.capacity)
-    Id = Id[1:n, 1:n]
-    
-    Tₒ, Tᵧ = Tᵢ[1:n], Tᵢ[n+1:end]
-    interface_flux = Id * H' * W! * G * Tₒ + Id * H' * W! * H * Tᵧ
-    interface_velocities = 1/(ρL) * abs.(interface_flux)
     
     # Create time interval for space-time mesh
     t += Δt
@@ -129,7 +124,7 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
     
     # First time step: Gauss-Newton iterations to solve least squares problem
     for iter in 1:max_iter
-                # 1. Solve temperature field with current interface position
+        # 1. Solve temperature field with current interface position
         solve_system!(s; method=method, kwargs...)
         Tᵢ = s.x
         
@@ -150,6 +145,23 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
         
         # Reshape to get flux per cell
         interface_flux = reshape(interface_flux, (nx, ny))
+        
+        # Plot the interface flux for debugging
+        try
+            fig_flux = Figure(size=(800, 600))
+            ax_flux = Axis(fig_flux[1, 1], 
+                           title="Interface Flux at Iteration $iter",
+                           xlabel="x", ylabel="y",
+                           aspect=DataAspect())
+            hm_flux = heatmap!(ax_flux, interface_flux', colormap=:viridis)
+            Colorbar(fig_flux[1, 2], hm_flux, label="Flux")
+            save(joinpath(pwd(), "interface_flux_iter_$iter.png"), fig_flux)
+            println("Interface flux visualization saved for iteration $iter")
+        catch e
+            println("Failed to create interface flux visualization: $e")
+        end
+
+        volume_jacobian = compute_volume_jacobian(mesh, front)
         
         # 3. Build least squares system
         row_indices = Int[]
@@ -209,7 +221,7 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
         newton_step = zeros(n_markers)
         try
             # Try adding a small regularization term
-            reg_JTJ = JTJ + 1e-12 * I(size(JTJ, 1))
+            reg_JTJ = JTJ #+ 1e-12 * I(size(JTJ, 1))
             newton_step = reg_JTJ \ (J' * F)
         catch e
             if isa(e, SingularException)
@@ -230,8 +242,26 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
         end
         
         # Apply the step with the adjusted factor and propagated displacements
-        displacements -= α * newton_step
-        
+        displacements -= α * newton_step 
+        displacements[1] = displacements[end]
+
+        # Smooth the displacements for stability
+        smooth_displacements!(displacements, markers, front.is_closed, 1.0, 4)
+
+        # Print maximum displacement for diagnostics
+        max_disp = maximum(abs.(displacements))
+        println("Maximum displacement (after smoothing): $max_disp")
+
+        """
+        # Optional: Limit maximum displacement if needed
+        max_allowed = min(mesh.nodes[1][2] - mesh.nodes[1][1], mesh.nodes[2][2] - mesh.nodes[2][1]) * 0.2
+        if max_disp > max_allowed
+            scale = max_allowed / max_disp
+            displacements .*= scale
+            println("Scaling displacements by scale to limit maximum displacement")
+        end
+        """
+
         # Calculate residual norm for convergence check
         residual_norm = norm(F)
         push!(residual_norm_history, residual_norm)
@@ -255,29 +285,34 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
             )
         end
         
+        # Print mean radius
+        # Calculate geometric center of the interface
+        center_x = sum(m[1] for m in new_markers) / length(new_markers)
+        center_y = sum(m[2] for m in new_markers) / length(new_markers)
+        
+        # Calculate radius for each marker
+        radii = [sqrt((m[1] - center_x)^2 + (m[2] - center_y)^2) for m in new_markers]
+        mean_radius = sum(radii) / length(radii)
+        radius_std = sqrt(sum((r - mean_radius)^2 for r in radii) / length(radii))
+        
+        println("Mean radius: $(round(mean_radius, digits=6)), std: $(round(radius_std, digits=6))")
+
+        
         # If interface is closed, update the duplicated last marker
-        if front.is_closed && markers[1] == markers[end]
+        if front.is_closed
             new_markers[end] = new_markers[1]
         end
         
+
         # 6. Create updated front tracking object
         updated_front = FrontTracker(new_markers, front.is_closed)
         
         # 7. Create space-time level set for capacity calculation
-        function body(x, y, t_local, _=0)
-            # Normalized time in [0,1]
-            τ = (t_local - tₙ) / Δt
-
-            # Linear interpolation between SDFs
-            sdf1 = sdf(front, x, y)
-            sdf2 = sdf(updated_front, x, y)
-            return (1-τ) * sdf1 + τ * sdf2
-        end
+        body_func = create_interface_body_function(front, updated_front, tₙ, Δt)
 
         # Plot the sdf for debugging
         try
-            
-                        # Create output directory if it doesn't exist
+            # Create output directory if it doesn't exist
             debug_dir = joinpath(pwd(), "sdf_debug")
             if !isdir(debug_dir)
                 mkdir(debug_dir)
@@ -356,8 +391,7 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
                           aspect=(1, 1, 0.5))
             
             surf1 = surface!(ax3d_1, X, Y, phi_original, 
-                            colormap=:viridis,
-                            shading=false)
+                            colormap=:viridis)
             
             # Add zero level contour on 3D plot
             contour3d!(ax3d_1, x_range, y_range, phi_original, 
@@ -372,8 +406,7 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
                           aspect=(1, 1, 0.5))
             
             surf2 = surface!(ax3d_2, X, Y, phi_updated, 
-                            colormap=:viridis,
-                            shading=false)
+                            colormap=:viridis)
             
             # Add zero level contour on 3D plot
             contour3d!(ax3d_2, x_range, y_range, phi_updated,
@@ -398,11 +431,10 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
                 println()
             end
         end
-
         
         # 8. Update space-time mesh and capacity
         STmesh = Penguin.SpaceTimeMesh(mesh, time_interval, tag=mesh.tag)
-        capacity = Capacity(body, STmesh; compute_centroids=false)
+        capacity = Capacity(body_func, STmesh; compute_centroids=false)
         operator = DiffusionOps(capacity)
         phase_updated = Phase(capacity, operator, phase.source, phase.Diffusion_coeff)
         
@@ -417,6 +449,8 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
         
         # 10. Update phase for next iteration
         phase = phase_updated
+
+        front = updated_front
     end
     
     # Store residuals from first time step
@@ -432,11 +466,13 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
         )
     end
     
+    
     # If interface is closed, update the duplicated last marker
-    if front.is_closed && markers[1] == markers[end]
+    if front.is_closed 
         new_markers[end] = new_markers[1]
     end
     
+
     # Update front with new markers
     set_markers!(front, new_markers)
     
@@ -452,13 +488,13 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
     # Main time-stepping loop
     timestep = 2
     while t < Tₑ
-        println("\nTime step $(timestep), t = $(round(t, digits=6))")
+        println("\n--- Timestep $timestep, t = $(round(t, digits=6)) ---")
         
         # Get current markers and calculate normals
         markers = get_markers(front)
         normals = compute_marker_normals(front, markers)
         
-        # Calculate velocity field from temperature gradient at interface
+        # Calculate interface flux using diffusion operators
         W! = phase.operator.Wꜝ[1:n, 1:n]
         G = phase.operator.G[1:n, 1:n]
         H = phase.operator.H[1:n, 1:n]
@@ -496,7 +532,7 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
             end
             
             push!(timestep_history, (t, Δt))
-            println("Adaptive timestep: Δt = $(round(Δt, digits=6))")
+            println("  Adaptive timestep: Δt = $(round(Δt, digits=6))")
         end
         
         # Update time
@@ -510,13 +546,43 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
         # Compute volume Jacobian
         volume_jacobian = compute_volume_jacobian(mesh, front)
         
-        # For each marker, we'll have an equation relating its displacement
-        # to the change in cell volumes based on the Jacobian
+        # Check number of affected cells
+        affected_cells = 0
+        for i in 1:nx
+            for j in 1:ny
+                if haskey(volume_jacobian, (i,j)) && !isempty(volume_jacobian[(i,j)])
+                    affected_cells += 1
+                end
+            end
+        end
+        println("  Number of cells affected by interface: $affected_cells")
+        
+        if affected_cells == 0
+            println("  ERROR: No cells are affected by the interface!")
+            println("  Interface may have moved outside computational domain.")
+            break  # Exit time stepping loop or implement recovery mechanism
+        end
+        
+        # Total markers count (excluding duplicated point if closed)
         n_markers = length(markers) - (front.is_closed ? 1 : 0)
         
         # Initialize displacement vector and residual vector
         displacements = zeros(n_markers)
         residual_norm_history = Float64[]
+
+        body_func = create_interface_body_function(front)
+        STmesh = Penguin.SpaceTimeMesh(mesh, time_interval, tag=mesh.tag)
+        capacity = Capacity(body_func, STmesh; compute_centroids=false)
+        operator = DiffusionOps(capacity)
+        phase = Phase(capacity, operator, phase.source, phase.Diffusion_coeff)
+
+        # Rebuild the matrix system
+        s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, 
+                                        phase.Diffusion_coeff, bc, scheme)
+        s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity,
+                                        phase.Diffusion_coeff, phase.source, 
+                                        bc, Tᵢ, Δt, tₙ, scheme)
+        BC_border_mono!(s.A, s.b, bc_b, mesh)
         
         # Gauss-Newton iterations
         for iter in 1:max_iter
@@ -524,7 +590,12 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
             solve_system!(s; method=method, kwargs...)
             Tᵢ = s.x
             
-            # 2. Calculate the interface flux
+            # Get capacity matrices
+            V_matrices = phase.capacity.A[cap_index]
+            Vₙ₊₁_matrix = V_matrices[1:end÷2, 1:end÷2]
+            Vₙ_matrix = V_matrices[end÷2+1:end, end÷2+1:end]
+            
+            # 2. Calculate the interface flux with properly extracted matrices
             W! = phase.operator.Wꜝ[1:n, 1:n]
             G = phase.operator.G[1:n, 1:n]
             H = phase.operator.H[1:n, 1:n]
@@ -535,97 +606,109 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
             interface_flux = Id * H' * W! * G * Tₒ + Id * H' * W! * H * Tᵧ
             
             # Reshape to get flux per cell
-            interface_flux = reshape(interface_flux, (nx, ny))
+            interface_flux_2d = reshape(interface_flux, (nx, ny))
             
-            # 3. Build Jacobian matrix and residual vector
+            # 3. Build least squares system
             row_indices = Int[]
             col_indices = Int[]
             values = Float64[]
-            desired_changes = Float64[]
+            cells_idx = []
             
-            # Fill the system
+            # Precompute affected cells and their indices for residual vector
             for i in 1:nx
                 for j in 1:ny
                     if haskey(volume_jacobian, (i,j)) && !isempty(volume_jacobian[(i,j)])
-                        # Get desired volume change based on flux
-                        flux_term = interface_flux[i,j] / ρL
-                        
-                        # Add equation for this cell
-                        for (marker_idx, jac_value) in volume_jacobian[(i,j)]
-                            # Ensure marker index is valid
-                            if 0 <= marker_idx < n_markers
-                                push!(row_indices, length(desired_changes) + 1)
-                                # Convert to 1-indexed for Julia
-                                push!(col_indices, marker_idx + 1)
-                                push!(values, jac_value)
-                            end
-                        end
-                        
-                        push!(desired_changes, flux_term)
+                        push!(cells_idx, (i, j))
                     end
                 end
             end
             
-            # Create sparse matrix
-            if isempty(row_indices)
-                println("No Jacobian entries - interface may be far from mesh")
-                break
+            # Number of equations (cells) in our system
+            m = length(cells_idx)
+            println("  Iteration $iter: $m equations for $n_markers unknowns")
+            
+            # Build Jacobian matrix for volume changes
+            for (eq_idx, (i, j)) in enumerate(cells_idx)
+                # Handle each marker affecting this cell
+                for (marker_idx, jac_value) in volume_jacobian[(i,j)]
+                    if 0 <= marker_idx < n_markers
+                        push!(row_indices, eq_idx)
+                        push!(col_indices, marker_idx + 1)  # 1-based indexing
+                        push!(values, ρL * jac_value)
+                    end
+                end
             end
             
-            m = length(desired_changes)
+            # Create Jacobian matrix J
             J = sparse(row_indices, col_indices, values, m, n_markers)
-            b = desired_changes
             
-            # 4. Implement the Gauss-Newton formula: X^{n+1} = X^n - (J^T J)^{-1} J^T (J*X^n - b)
+            # Calculate residual vector F
+            F = zeros(m)
+            for (eq_idx, (i, j)) in enumerate(cells_idx)
+                # Get desired volume change based on interface flux
+                volume_change = Vₙ₊₁_matrix[i,j] - Vₙ_matrix[i,j]
+                F[eq_idx] = ρL * volume_change - interface_flux_2d[i,j]
+            end
+            
+            # 4. Solve the Gauss-Newton system
             JTJ = J' * J
             
-            # Diagnose the singularity 
+            # Diagnostic info
             used_columns = unique(col_indices)
-            println("Matrix info: size(J)=$(size(J)), n_markers=$n_markers")
-            println("Used marker indices: $(sort(used_columns))")
-            println("$(length(used_columns)) of $n_markers markers used in Jacobian")
+            println("    Matrix info: size(J)=$(size(J)), markers used: $(length(used_columns))/$n_markers")
             
             # Check if JTJ is singular and handle appropriately
-            singular = false
             newton_step = zeros(n_markers)
-            residual = zeros(m)
             try
-                # Try adding a small regularization term
+                # Add regularization for numerical stability
+                λ = 1e-1  # Regularization parameter
                 reg_JTJ = JTJ + 1e-12 * I(size(JTJ, 1))
-                residual = J * displacements - b
-                newton_step = reg_JTJ \ (J' * residual)  # Renamed from 'step' to 'newton_step'
+                newton_step = reg_JTJ \ (J' * F)
             catch e
                 if isa(e, SingularException)
-                    singular = true
-                    println("JTJ is singular even with regularization, using SVD solver")
+                    println("    JTJ is singular, using SVD")
                     
-                    # Use SVD-based pseudoinverse for robust solving
-                    F = svd(Matrix(JTJ))
-                    tol = eps(Float64) * max(size(JTJ)...) * maximum(F.S)
-                    S_inv = [s > tol ? 1/s : 0.0 for s in F.S]
+                    # Use SVD-based pseudoinverse
+                    F_svd = svd(Matrix(JTJ))
+                    tol_svd = eps(Float64) * max(size(JTJ)...) * maximum(F_svd.S)
+                    S_inv = [s > tol_svd ? 1/s : 0.0 for s in F_svd.S]
                     
-                    # Compute pseudoinverse solution
-                    residual = J * displacements - b
-                    JTr = J' * residual
-                    newton_step = F.V * (S_inv .* (F.U' * JTr))
+                    # Calculate solution via pseudoinverse
+                    JTF = J' * F
+                    newton_step = F_svd.V * (S_inv .* (F_svd.U' * JTF))
                 else
                     rethrow(e)
                 end
             end
             
-            # Apply step with a reduced step size for stability
-            displacements -= min(0.5, α) * newton_step
+            # Update displacements with relaxation
+            displacements -= α * newton_step
             
-            # Calculate residual norm
-            residual_norm = norm(residual)
+            # Smooth the displacements for stability
+            smooth_displacements!(displacements, markers, front.is_closed, 0.5, 4)
+            
+            # Print maximum displacement for diagnostics
+            max_disp = maximum(abs.(displacements))
+            println("    Maximum displacement (after smoothing): $max_disp")
+            
+            # Optional: Limit maximum displacement if needed
+            max_allowed = min(mesh.nodes[1][2] - mesh.nodes[1][1], mesh.nodes[2][2] - mesh.nodes[2][1]) * 0.2
+            if max_disp > max_allowed
+                scale = max_allowed / max_disp
+                displacements .*= scale
+                println("    Scaling displacements by $scale to limit maximum displacement")
+            end
+            
+            # Calculate residual norm for convergence check
+            residual_norm = norm(F)
             push!(residual_norm_history, residual_norm)
             
             # Report progress
-            println("Iteration $iter | Residual = $residual_norm")
+            println("    Iteration $iter | Residual = $residual_norm | Max disp = $(maximum(abs.(displacements))) | Min disp = $(minimum(abs.(displacements)))")
             
             # Check convergence
             if residual_norm < tol || (iter > 1 && abs(residual_norm_history[end] - residual_norm_history[end-1]) < reltol)
-                println("Converged after $iter iterations with residual $residual_norm")
+                println("    Converged after $iter iterations with residual $residual_norm")
                 break
             end
             
@@ -647,27 +730,12 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
             # 6. Create updated front tracking object
             updated_front = FrontTracker(new_markers, front.is_closed)
             
-            # 7. Create space-time level set for capacity calculation
-            function body(x, y, t_local, _=0)
-                # Normalized time in [0,1]
-                τ = (t_local - tₙ) / Δt
-                
-                # Intermediate shapes: linear interpolation
-                if τ <= 0
-                    return sdf(front, x, y)
-                elseif τ >= 1
-                    return sdf(updated_front, x, y)
-                else
-                    # Linear interpolation between SDFs
-                    sdf1 = sdf(front, x, y)
-                    sdf2 = sdf(updated_front, x, y)
-                    return (1-τ) * sdf1 + τ * sdf2
-                end
-            end
             
+            body_func = create_interface_body_function(front, updated_front, tₙ, Δt)
+
             # 8. Update space-time mesh and capacity
             STmesh = Penguin.SpaceTimeMesh(mesh, time_interval, tag=mesh.tag)
-            capacity = Capacity(body, STmesh; compute_centroids=false)
+            capacity = Capacity(body_func, STmesh; compute_centroids=false)
             operator = DiffusionOps(capacity)
             phase_updated = Phase(capacity, operator, phase.source, phase.Diffusion_coeff)
             
@@ -680,42 +748,92 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
             
             BC_border_mono!(s.A, s.b, bc_b, mesh)
             
-            # 10. Update phase for next iteration
+            # 10. Update phase and front for next iteration
             phase = phase_updated
+            front = updated_front
         end
         
-        # Store residuals
+        # Store residuals from this time step
         residuals[timestep] = residual_norm_history
         
-        # Update front with new marker positions
-        new_markers = copy(markers)
-        for i in 1:n_markers
-            normal = normals[i]
-            new_markers[i] = (
-                markers[i][1] + displacements[i] * normal[1],
-                markers[i][2] + displacements[i] * normal[2]
-            )
-        end
-        
-        # If interface is closed, update the duplicated last marker
-        if front.is_closed && markers[1] == markers[end]
-            new_markers[end] = new_markers[1]
-        end
-        
-        # Update front with new markers
-        set_markers!(front, new_markers)
-        
         # Store updated interface position
-        xf_log[timestep+1] = new_markers
+        xf_log[timestep+1] = get_markers(front)
         
         # Store solution
         push!(s.states, s.x)
         
-        println("Time: $(round(t, digits=6))")
-        println("Max temperature: $(maximum(abs.(s.x[1:n])))")
-        
+        println("  Time: $(round(t, digits=6)), Max temperature: $(maximum(abs.(s.x[1:n])))")
         timestep += 1
     end
     
     return s, residuals, xf_log, timestep_history
+end
+
+"""
+Smooth marker displacements using weighted averaging of neighbors
+This helps maintain interface regularity and stability
+
+Parameters:
+- displacements: Vector of displacement values to smooth
+- markers: Vector of marker positions (Tuple{Float64,Float64})
+- is_closed: Boolean indicating if the interface is a closed curve
+- smoothing_factor: Weight given to neighbor values (0.0-1.0)
+- window_size: Number of neighbors to consider on each side
+"""
+function smooth_displacements!(displacements::Vector{Float64}, 
+                              markers::Vector{Tuple{Float64,Float64}}, 
+                              is_closed::Bool=true,
+                              smoothing_factor::Float64=0.5,
+                              window_size::Int=2)
+    n = length(displacements)
+    if n <= 1
+        return displacements  # Nothing to smooth with single marker
+    end
+    
+    # Create a copy of original displacements
+    original_displacements = copy(displacements)
+    
+    for i in 1:n
+        # Calculate weighted sum of neighbors
+        neighbor_sum = 0.0
+        weight_sum = 0.0
+        
+        for j in -window_size:window_size
+            if j == 0
+                continue  # Skip the marker itself
+            end
+            
+            # Handle wrapping for closed curves
+            idx = i + j
+            if is_closed
+                # Apply modulo to wrap around for closed curves
+                idx = mod1(idx, n)
+            else
+                # Skip out of bounds indices for open curves
+                if idx < 1 || idx > n
+                    continue
+                end
+            end
+            
+            # Calculate weight based on distance (closer markers have higher weight)
+            distance = sqrt((markers[i][1] - markers[idx][1])^2 + 
+                           (markers[i][2] - markers[idx][2])^2)
+            weight = 1.0 / (distance + 1e-10)  # Avoid division by zero
+            
+            # Add weighted contribution
+            neighbor_sum += weight * original_displacements[idx]
+            weight_sum += weight
+        end
+        
+        # Calculate weighted average
+        if weight_sum > 0
+            neighbor_avg = neighbor_sum / weight_sum
+            
+            # Apply smoothing with blend factor
+            displacements[i] = (1.0 - smoothing_factor) * original_displacements[i] + 
+                               smoothing_factor * neighbor_avg
+        end
+    end
+    
+    return displacements
 end
