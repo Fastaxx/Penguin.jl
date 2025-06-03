@@ -154,28 +154,21 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
             Id = Id[1:n, 1:n]
             
             Tₒ, Tᵧ = Tᵢ[1:n], Tᵢ[n+1:end]
-
             interface_flux = Id * H' * W! * G * Tₒ + Id * H' * W! * H * Tᵧ
             
             # Reshape to get flux per cell (with symmetric part)
             interface_flux_2d = reshape(interface_flux, (nx, ny)) 
+                                #reshape(interface_flux, (nx, ny))'
 
-            """
-            # Plot temperature field for debugging
-            fig = Figure()
-            ax = Axis(fig[1, 1], title="Temperature Field", xlabel="x", ylabel="y")
-            hm = heatmap!(ax, reshape(Tₒ, (nx, ny)), colormap=:viridis)
-            Colorbar(fig[1, 2], hm, label="Temperature")
-            display(fig)
-
-            # Plot interface flux for debugging
-            fig = Figure()
-            ax = Axis(fig[1, 1], title="Interface Flux", xlabel="x", ylabel="y")
-            hm = heatmap!(ax, interface_flux_2d, colormap=:viridis)
-            Colorbar(fig[1, 2], hm, label="Interface Flux")
-            display(fig)
-            """
-
+            # Plot the interface flux for diagnostics
+            fig_flux = Figure(size=(800, 600))
+            ax_flux = Axis(fig_flux[1, 1], title="Interface Flux", 
+                          xlabel="x", ylabel="y", aspect=DataAspect())
+            hm = heatmap!(ax_flux, interface_flux_2d, 
+                     colormap=:thermal)
+            Colorbar(fig_flux[1, 2], hm, label="Flux")
+            display(fig_flux) 
+            
             # 3. Compute volume Jacobian for the current front
             volume_jacobian = compute_volume_jacobian(mesh, updated_front)
             
@@ -234,14 +227,14 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
             if timestep == 1
                 println("Matrix info: size(J)=$(size(J)), markers used: $(length(used_columns))/$n_markers")
             else
-                println("    Matrix info: size(J)=$(size(J)), markers used: $(length(used_columns))/$n_markers")
+                println("Matrix info: size(J)=$(size(J)), markers used: $(length(used_columns))/$n_markers")
             end
             
             # Check if JTJ is singular and handle appropriately
             newton_step = zeros(n_markers)
             try
                 # Add regularization for numerical stability
-                reg_JTJ = JTJ + 1e-1 * I(size(JTJ, 1))
+                reg_JTJ = JTJ
                 newton_step = reg_JTJ \ (J' * F)
             catch e
                 if isa(e, SingularException)
@@ -265,11 +258,11 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
             
             # For closed curves, match first and last displacement to ensure continuity
             if front.is_closed
-                displacements[1] = displacements[end]
+                displacements[end] = displacements[1]
             end
 
             # Smooth the displacements for stability
-            smooth_factor = timestep == 1 ? 1.0 : 0.5  # First timestep uses stronger smoothing
+            smooth_factor = 0.5  # Adjust as needed
             smooth_displacements!(displacements, markers, front.is_closed, smooth_factor, 4)
 
             # Print maximum displacement for diagnostics
@@ -291,7 +284,7 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
             # Calculate residual norm for convergence check
             residual_norm = norm(F)
             push!(residual_norm_history, residual_norm)
-            
+
             # Report progress
             if timestep == 1
                 println("Iteration $iter | Residual = $residual_norm")
@@ -300,7 +293,7 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
             end
 
             # Check convergence
-            if residual_norm < tol #|| (iter > 1 && abs(residual_norm_history[end] - residual_norm_history[end-1]) < reltol)
+            if residual_norm < tol || (iter > 1 && abs(residual_norm_history[end] - residual_norm_history[end-1]) < reltol)
                 println(timestep == 1 ? 
                     "Converged after $iter iterations with residual $residual_norm" :
                     "    Converged after $iter iterations with residual $residual_norm")
@@ -318,29 +311,6 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
                 )
             end
             
-            # print mean radius
-            if front.is_closed
-                # Calculer le centre approximatif (centre de masse des marqueurs)
-                center_x = sum(m[1] for m in new_markers) / length(new_markers)
-                center_y = sum(m[2] for m in new_markers) / length(new_markers)
-                
-                # Calculer le rayon moyen
-                mean_radius = mean([sqrt((m[1] - center_x)^2 + (m[2] - center_y)^2) for m in new_markers])
-                
-                # Afficher le rayon moyen
-                if timestep == 1
-                    println("Mean radius: $(round(mean_radius, digits=6))")
-                else
-                    println("    Mean radius: $(round(mean_radius, digits=6))")
-                end
-                
-                # Calculer aussi l'écart-type du rayon (pour vérifier la régularité)
-                std_radius = std([sqrt((m[1] - center_x)^2 + (m[2] - center_y)^2) for m in new_markers])
-                if std_radius / mean_radius > 0.05  # Plus de 5% de variation
-                    println("    ⚠️ Warning: Interface irregularity detected ($(round(100*std_radius/mean_radius, digits=2))% variation)")
-                end
-            end
-            
             # If interface is closed, update the duplicated last marker
             if front.is_closed
                 new_markers[end] = new_markers[1]
@@ -348,23 +318,64 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
             
             # Create updated front tracking object for next iteration
             updated_front = FrontTracker(new_markers, front.is_closed)
+
+                        
+            # Tracer à la fois la température et les marqueurs à chaque itération
+            fig_iter = Figure(size=(800, 600))
+            ax_iter = Axis(fig_iter[1, 1], title="Iter $iter: Temperature & Interface", 
+                          xlabel="x", ylabel="y", aspect=DataAspect())
+            
+            # Tracer le champ de température
+            To = Tᵢ[1:n]  # Temperature at current time step
+            temp_heatmap = heatmap!(ax_iter, 
+                mesh.centers[1], mesh.centers[2], 
+                reshape(To, (nx, ny)), 
+                colormap=:thermal)
+            Colorbar(fig_iter[1, 2], temp_heatmap, label="Temperature")
+            
+            # Extraire et tracer les marqueurs
+            marker_x = [m[1] for m in markers]
+            marker_y = [m[2] for m in markers]
+
+            # Tracer l'interface actuelle comme points
+            scatter!(ax_iter, marker_x, marker_y, 
+                color=:white, markersize=6, 
+                label="Current markers")
+
+            # Option: garder aussi la ligne pour voir l'interface continue
+            lines!(ax_iter, marker_x, marker_y, 
+                color=:white, linewidth=1, linestyle=:solid,
+                label="Current interface")
+
+            # Tracer la position mise à jour (avec déplacement) comme points
+            updated_x = [m[1] for m in new_markers]
+            updated_y = [m[2] for m in new_markers]
+            scatter!(ax_iter, updated_x, updated_y, 
+                color=:red, markersize=4, marker=:diamond,
+                label="Updated markers")
+
+            # Option: garder aussi la ligne pointillée
+            lines!(ax_iter, updated_x, updated_y, 
+                color=:red, linewidth=1, linestyle=:dash,
+                label="Updated interface")
+
+            
+            # Afficher et sauvegarder
+            display(fig_iter)
+            
+            # Option pour sauvegarder chaque figure
+            save_directory = "stefan_iterations"
+            if !isdir(save_directory)
+                mkpath(save_directory)
+            end
+            save(joinpath(save_directory, "timestep_$(timestep)_iter_$(iter).png"), fig_iter)
+            
         end
         
         # Store residuals from this time step
         residuals[timestep] = residual_norm_history
         
         # Update front with final marker positions
-        """
-        new_markers = copy(markers)
-        for i in 1:n_markers
-            normal = normals[i]
-            new_markers[i] = (
-                markers[i][1] + displacements[i] * normal[1],
-                markers[i][2] + displacements[i] * normal[2]
-            )
-        end
-        """
-
         new_markers = get_markers(updated_front)  # Use final updated front markers
         #set_markers!(front, new_markers)
         
@@ -380,7 +391,7 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
         xf_log[timestep+1] = new_markers
         
         # Store solution
-        push!(s.states, s.x)
+        push!(s.states, copy(s.x))
         phase = phase_updated  # Update phase for next timestep
         
         # Print status
@@ -392,7 +403,7 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
         end
         
         # Prepare for next time step
-        Tᵢ = s.x
+        Tᵢ = copy(s.x)  # Update initial temperature for next step
         
         # Adapt timestep if needed based on CFL condition
         if adaptive_timestep && timestep > 1

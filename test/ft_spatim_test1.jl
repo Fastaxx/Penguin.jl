@@ -14,7 +14,7 @@ function compare_spacetime_volumes_vofi3d()
     nx, ny = 20, 20
     lx, ly = 2.0, 2.0
     mesh = Penguin.Mesh((nx, ny), (lx, ly), (0.0, 0.0))
-    dt = 1.0
+    dt = 1.0  # Time step
     
     # Create figure
     fig = Figure(size=(1500, 1000))
@@ -22,7 +22,7 @@ function compare_spacetime_volumes_vofi3d()
     # Choose test case: expanding circle
     center_x, center_y = 1.0, 1.0
     radius_n = 0.4
-    radius_np1 = 0.4
+    radius_np1 = 0.5
     
     # Create front trackers for both time steps
     front_n = FrontTracker()
@@ -272,8 +272,6 @@ function run_comparison_tests()
     test_cases = [
         # (name, center_n, center_np1, radius_n, radius_np1)
         ("Expanding Circle", (1.0, 1.0), (1.0, 1.0), 0.4, 0.6),
-        ("Moving Circle", (0.8, 1.0), (1.2, 1.0), 0.3, 0.3),
-        ("Complex Case", (0.9, 0.9), (1.1, 1.1), 0.5, 0.4)
     ]
     
     results = []

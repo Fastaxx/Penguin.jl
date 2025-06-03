@@ -311,7 +311,7 @@ function test_analytical_stefan_first_step()
     
     # Define the body function - Fix unused parameter
     function body(x, y, t_local)
-        return sdf(front, x, y)
+        return -sdf(front, x, y)
     end
     
     # Create space-time mesh and capacity
@@ -526,8 +526,8 @@ function test_analytical_stefan_first_step()
             τ = (t_local - t) / Δt
             
             # Interpolation linéaire entre les SDFs
-            sdf1 = sdf(front, x, y)
-            sdf2 = sdf(updated_front, x, y)
+            sdf1 = -sdf(front, x, y)
+            sdf2 = -sdf(updated_front, x, y)
             return (1-τ) * sdf1 + τ * sdf2
         end
         

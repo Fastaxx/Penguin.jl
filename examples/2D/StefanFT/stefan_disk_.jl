@@ -36,7 +36,7 @@ println("Similarity parameter S = $S")
 # Set initial conditions as specified
 R0 = 1.56      # Initial radius
 t_init = 1.0   # Initial time
-t_final = 1.05  # Final time
+t_final = 1.3   # Final time
 
 # Analytical temperature function
 function analytical_temperature(r, t)
@@ -73,12 +73,12 @@ mesh = Penguin.Mesh((nx, ny), (lx, ly), (x0, y0))
 println("Mesh created with dimensions: $(nx) x $(ny), Δx=$(Δx), Δy=$(Δy), domain=[$x0, $(x0+lx)], [$y0, $(y0+ly)]")
 
 # Create the front-tracking body
-nmarkers = 30
+nmarkers = 120
 front = FrontTracker() 
 create_circle!(front, 0.0, 0.0, R0, nmarkers)
 
 # Define the initial position of the front
-body = (x, y, t, _=0) -> sdf(front, x, y)
+body = (x, y, t, _=0) -> -sdf(front, x, y)
 
 # Define the Space-Time mesh
 Δt = 0.05
@@ -120,6 +120,7 @@ end
 u0ᵧ = ones((nx+1)*(ny+1))*TM # Initial temperature at the interface
 u0 = vcat(u0ₒ, u0ᵧ)
 
+"""
 # Plot the initial temperature field
 fig_init = Figure(size=(800, 600))
 ax_init = Axis(fig_init[1, 1], 
@@ -131,6 +132,8 @@ hm = heatmap!(ax_init, mesh.centers[1], mesh.centers[2], reshape(u0ₒ, (nx+1, n
             colormap=:thermal)
 Colorbar(fig_init[1, 2], hm, label="Temperature")
 display(fig_init)
+"""
+
 # Newton parameters
 Newton_params = (10000, 1e-6, 1e-6, 1.0) # max_iter, tol, reltol, α
 
@@ -272,39 +275,6 @@ function plot_simulation_results(residuals, xf_log, timestep_history, Ste=nothin
     scatter!(ax_radius, times_for_plot, radii, 
             label="Simulation")
     
-
-    # Plot analytical solution if we have Stefan number
-    if Ste !== nothing
-        # Calculate similarity parameter from Stefan number
-        # For axisymmetric case: S = 2λ where λ satisfies equation with Ste
-        λ = 1.2012  # This should be calculated from Ste or passed in
-        S = λ
-        
-        # Plot analytical solution R = S√t
-        t_range = range(minimum(times), maximum(times), length=100)
-        analytical_radii = [S * sqrt(t) for t in t_range]
-        
-        lines!(ax_radius, t_range, analytical_radii, 
-              linewidth=2, 
-              color=:red, 
-              linestyle=:dash,
-              label="Analytical: R = S√t")
-        
-        # Calculate and display error metrics
-        interpolated_analytical = [S * sqrt(timestep_history[ts][1]) for ts in all_timesteps]
-        rel_errors = abs.(radii .- interpolated_analytical) ./ interpolated_analytical
-        max_rel_error = maximum(rel_errors)
-        mean_rel_error = mean(rel_errors)
-        
-        error_text = "Max relative error: $(round(max_rel_error*100, digits=2))%\n" *
-                    "Mean relative error: $(round(mean_rel_error*100, digits=2))%"
-        
-        text!(ax_radius, 0.05, 0.95, text=error_text,
-             align=(:left, :top),
-             space=:relative,
-             fontsize=12)
-    end
-    
     Legend(fig_radius[1, 2], ax_radius)
     save(joinpath(results_dir, "radius_evolution.png"), fig_radius)
     
@@ -319,66 +289,41 @@ function plot_simulation_results(residuals, xf_log, timestep_history, Ste=nothin
     dt_values = [hist[2] for hist in timestep_history]
     
     lines!(ax_dt, dt_times, dt_values, 
-          linewidth=2, 
-          marker=:circle)
+          linewidth=2)
     
     save(joinpath(results_dir, "timestep_history.png"), fig_dt)
-    
-    # 5. Plot interface shape evolution (deviation from circularity)
-    fig_shape = Figure(size=(900, 500))
-    ax_shape = Axis(fig_shape[1, 1], 
-                   title="Interface Shape Evolution", 
-                   xlabel="Angle (degrees)", 
-                   ylabel="Normalized Radius")
-    
-    # Select a subset of timesteps to avoid overcrowding
-    plot_timesteps = all_timesteps[1:max(1, div(length(all_timesteps), 10)):end]
-    
-    for (i, timestep) in enumerate(plot_timesteps)
-        markers = xf_log[timestep]
-        
-        # Calculate geometric center
-        center_x = sum(m[1] for m in markers) / length(markers)
-        center_y = sum(m[2] for m in markers) / length(markers)
-        
-        # Calculate angles and radii
-        angles = Float64[]
-        marker_radii = Float64[]
-        
-        for marker in markers
-            angle = atan(marker[2] - center_y, marker[1] - center_x)
-            radius = sqrt((marker[1] - center_x)^2 + (marker[2] - center_y)^2)
-            push!(angles, angle)
-            push!(marker_radii, radius)
-        end
-        
-        # Sort by angle
-        p = sortperm(angles)
-        angles = angles[p]
-        marker_radii = marker_radii[p]
-        
-        # Convert angles to degrees
-        angles_deg = rad2deg.(angles)
-        
-        # Normalize radii by mean
-        mean_radius = mean(marker_radii)
-        norm_radii = marker_radii ./ mean_radius
-        
-        # Plot normalized radius vs angle
-        lines!(ax_shape, angles_deg, norm_radii,
-              linewidth=2,
-              color=colors[findfirst(x -> x == timestep, all_timesteps)],
-              label="t=$(round(timestep_history[timestep][1], digits=2))")
-    end
-    
-    # Add perfect circle reference
-    hlines!(ax_shape, [1.0], color=:black, linestyle=:dash, label="Perfect Circle")
-    
-    Legend(fig_shape[1, 2], ax_shape)
-    save(joinpath(results_dir, "interface_shape.png"), fig_shape)
     
     return results_dir
 end
 
 results_dir = plot_simulation_results(residuals, xf_log, timestep_history, Ste)
 println("\nSimulation results visualization saved to: $results_dir")
+
+
+function plot_temperature_heatmaps(solver, mesh, timestep_history)
+    # On suppose que solver.states[i] == vcat(Tw, Tg)
+    xi = mesh.nodes[1]           # vecteur x de taille nx+1
+    yi = mesh.nodes[2]           # vecteur y de taille ny+1
+    nx1, ny1 = length(xi), length(yi)
+    npts = nx1 * ny1
+
+    for (i, Tstate) in enumerate(solver.states)
+        # extraire et reshaper Tw
+        Tw = Tstate[1:npts]
+        Tmat = reshape(Tw, (nx1, ny1))
+
+        # créer une figure
+        fig = Figure(size=(600,500))
+        ax = Axis(fig[1,1],
+                  title="Temperature bulk, pas $i, t=$(round(timestep_history[i][1],digits=3))",
+                  xlabel="x", ylabel="y", aspect=DataAspect())
+        hm = heatmap!(ax, xi, yi, Tmat; colormap=:thermal)
+        Colorbar(fig[1,2], hm, label="T")
+
+        display(fig)
+        save(joinpath("simulation_results","temp_step_$(i).png"), fig)
+    end
+end
+
+# appel après la simulation
+plot_temperature_heatmaps(solver, mesh, timestep_history)

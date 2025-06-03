@@ -625,7 +625,7 @@ function compute_volume_jacobian(ft::FrontTracker, x_faces::AbstractVector{<:Rea
             
             # Store significant changes and track maximum value
             if abs(jacobian_value) > 1e-10
-                push!(volume_jacobian[(i, j)], (marker_idx, jacobian_value))
+                push!(volume_jacobian[(i, j)], (marker_idx-1, jacobian_value))
                 push!(markers_with_entries, marker_idx)
                 
                 if abs(jacobian_value) > abs(max_jac_value)
@@ -640,7 +640,7 @@ function compute_volume_jacobian(ft::FrontTracker, x_faces::AbstractVector{<:Rea
         
         # If this marker has no entries, add its maximum value entry
         if marker_idx ∉ markers_with_entries && max_jac_cell !== nothing
-            push!(volume_jacobian[max_jac_cell], (marker_idx, max_jac_value))
+            push!(volume_jacobian[max_jac_cell], (marker_idx-1, max_jac_value))
             push!(markers_with_entries, marker_idx)
         end
     end
@@ -654,10 +654,10 @@ function compute_volume_jacobian(ft::FrontTracker, x_faces::AbstractVector{<:Rea
         for ((i, j), entries) in volume_jacobian
             # Check if the first marker has an entry for this cell
             for (marker_idx, jacobian_value) in entries
-                if marker_idx == 1
+                if marker_idx == 0
                     # Copy the first marker's entry to the last marker
                     push!(volume_jacobian[(i, j)], (last_marker_idx, jacobian_value))
-                    push!(markers_with_entries, last_marker_idx)
+                    push!(markers_with_entries, last_marker_idx+1)
                     break
                 end
             end
@@ -1329,1042 +1329,882 @@ function compute_capacities(mesh::Mesh{2}, front::FrontTracker)
     )
 end
 
-
-# Space-Time Capacities
+# Compute Space-Time Capacities
 """
-    compute_spacetime_volumes(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker, dt::Float64)
+    compute_spacetime_capacities(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker, dt::Float64)
 
-Calcule les capacités de volume spatio-temporelles en intégrant les capacités 2D dans le temps.
+Computes space-time capacities by integrating area capacities over time.
+Returns capacities dictionary with space-time Ax, Ay values.
 
-# Arguments
-- `mesh::Mesh{2}`: Le maillage spatial
-- `front_n::FrontTracker`: La position de l'interface au temps t^n
-- `front_np1::FrontTracker`: La position de l'interface au temps t^{n+1}
-- `dt::Float64`: Le pas de temps Δt
-
-# Retourne
-- `V_st::Matrix{Float64}`: Les volumes spatio-temporels
+Parameters:
+- mesh: The spatial mesh
+- front_n: FrontTracker at time t_n
+- front_np1: FrontTracker at time t_{n+1}
+- dt: Time step size
 """
-function compute_spacetime_volumes(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker, dt::Float64)
-    # Extraction des coordonnées des noeuds
+function compute_spacetime_capacities(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker, dt::Float64)
+    # Get mesh dimensions
     x_nodes = mesh.nodes[1]
     y_nodes = mesh.nodes[2]
     nx = length(x_nodes) - 1
     ny = length(y_nodes) - 1
     
-    # Initialisation des matrices de résultats
-    V_st = zeros(nx+1, ny+1)  # Volumes spatio-temporels
+    # Initialize space-time capacities
+    Ax_st = zeros(nx+1, ny+1)  # Space-time vertical face capacities
+    Ay_st = zeros(nx+1, ny+1)  # Space-time horizontal face capacities
     
-    # Calculer les propriétés des cellules aux deux instants
-    fractions_n, volumes_n, _, _, cell_types_n = fluid_cell_properties(mesh, front_n)
-    fractions_np1, volumes_np1, _, _, cell_types_np1 = fluid_cell_properties(mesh, front_np1)
-    
-    # Pour chaque cellule
-    for i in 1:nx
+    # Compute space-time capacities for vertical faces (Ax)
+    for i in 1:nx+1
         for j in 1:ny
-            # Récupérer les types de cellules et volumes aux deux instants
-            cell_type_n = cell_types_n[i, j]
-            cell_type_np1 = cell_types_np1[i, j]
-            vol_n = volumes_n[i, j]
-            vol_np1 = volumes_np1[i, j]
-            
-            # Utiliser le tableau pour déterminer la méthode de calcul
-            if cell_type_n == 0 && cell_type_np1 == 0
-                # empty → empty
-                V_st[i, j] = 0.0
-            elseif cell_type_n == 1 && cell_type_np1 == 1
-                # full → full
-                dx = x_nodes[i+1] - x_nodes[i]
-                dy = y_nodes[j+1] - y_nodes[j]
-                V_st[i, j] = dt * dx * dy
-            elseif (cell_type_n == -1 && cell_type_np1 == -1) || 
-                  (cell_type_n == -1 && cell_type_np1 == 1) || 
-                  (cell_type_n == 1 && cell_type_np1 == -1)
-                # cut → cut, cut → full, full → cut
-                V_st[i, j] = (dt / 2.0) * (vol_n + vol_np1)
-            elseif cell_type_n == 0 && cell_type_np1 == -1
-                # empty → cut : V_{ec}
-                V_st[i, j] = compute_special_spacetime_volume(mesh, front_n, front_np1, i, j, dt, "ec")
-            elseif cell_type_n == -1 && cell_type_np1 == 0
-                # cut → empty : V_{ce}
-                V_st[i, j] = compute_special_spacetime_volume(mesh, front_n, front_np1, i, j, dt, "ce")
-            elseif cell_type_n == 0 && cell_type_np1 == 1
-                # empty → full : V_{ef}
-                V_st[i, j] = compute_special_spacetime_volume(mesh, front_n, front_np1, i, j, dt, "ef")
-            elseif cell_type_n == 1 && cell_type_np1 == 0
-                # full → empty : V_{fe}
-                V_st[i, j] = compute_special_spacetime_volume(mesh, front_n, front_np1, i, j, dt, "fe")
+            Ax_st[i,j] = compute_spacetime_Ax(mesh, front_n, front_np1, i, j, dt)
+        end
+    end
+    
+    # Compute space-time capacities for horizontal faces (Ay)
+    for i in 1:nx
+        for j in 1:ny+1
+            Ay_st[i,j] = compute_spacetime_Ay(mesh, front_n, front_np1, i, j, dt)
+        end
+    end
+    
+    return Dict(
+        :Ax_st => Ax_st,
+        :Ay_st => Ay_st
+    )
+end
+
+"""
+    compute_spacetime_Ax(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker, i::Int, j::Int, dt::Float64)
+
+Computes space-time capacity for a vertical face:
+Ax = ∫(t_n to t_n+1) ∫(y_j to y_j+1) H_f(x_i,y,t) dy dt
+
+Where H_f is the Heaviside function (1 in fluid, 0 in solid)
+"""
+function compute_spacetime_Ax(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker, i::Int, j::Int, dt::Float64)
+    x_nodes = mesh.nodes[1]
+    y_nodes = mesh.nodes[2]
+    
+    # Face coordinates
+    x_face = x_nodes[i]
+    y_min = y_nodes[j]
+    y_max = y_nodes[j+1]
+    
+    # Determine vertex states (0=dry, 1=wet) at time t_n and t_n+1
+    # Bottom vertices (j) at times n and n+1
+    v1_state_n = is_point_inside(front_n, x_face, y_min) ? 1 : 0
+    v1_state_np1 = is_point_inside(front_np1, x_face, y_min) ? 1 : 0
+    
+    # Top vertices (j+1) at times n and n+1
+    v2_state_n = is_point_inside(front_n, x_face, y_max) ? 1 : 0
+    v2_state_np1 = is_point_inside(front_np1, x_face, y_max) ? 1 : 0
+    
+    # Classify edges
+    bottom_edge = classify_edge(v1_state_n, v1_state_np1)  # Bottom edge (t_n to t_n+1 at y_j)
+    top_edge = classify_edge(v2_state_n, v2_state_np1)     # Top edge (t_n to t_n+1 at y_j+1)
+    left_edge = classify_edge(v1_state_n, v2_state_n)      # Left edge (y_j to y_j+1 at t_n)
+    right_edge = classify_edge(v1_state_np1, v2_state_np1) # Right edge (y_j to y_j+1 at t_n+1)
+    
+    # Determine the marching squares case
+    case_index = determine_marching_squares_case(bottom_edge, right_edge, top_edge, left_edge)
+    
+    # Calculate space-time area based on the case
+    return calculate_spacetime_area_Ax(case_index, x_face, y_min, y_max, dt, front_n, front_np1)
+end
+
+"""
+    compute_spacetime_Ay(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker, i::Int, j::Int, dt::Float64)
+
+Computes space-time capacity for a horizontal face:
+Ay = ∫(t_n to t_n+1) ∫(x_i to x_i+1) H_f(x,y_j,t) dx dt
+"""
+function compute_spacetime_Ay(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker, i::Int, j::Int, dt::Float64)
+    x_nodes = mesh.nodes[1]
+    y_nodes = mesh.nodes[2]
+    
+    # Face coordinates
+    x_min = x_nodes[i]
+    x_max = x_nodes[i+1]
+    y_face = y_nodes[j]
+    
+    # Determine vertex states (0=dry, 1=wet) at time t_n and t_n+1
+    # Left vertices (i) at times n and n+1
+    v1_state_n = is_point_inside(front_n, x_min, y_face) ? 1 : 0
+    v1_state_np1 = is_point_inside(front_np1, x_min, y_face) ? 1 : 0
+    
+    # Right vertices (i+1) at times n and n+1
+    v2_state_n = is_point_inside(front_n, x_max, y_face) ? 1 : 0
+    v2_state_np1 = is_point_inside(front_np1, x_max, y_face) ? 1 : 0
+    
+    # Classify edges
+    left_edge = classify_edge(v1_state_n, v1_state_np1)    # Left edge (t_n to t_n+1 at x_i)
+    right_edge = classify_edge(v2_state_n, v2_state_np1)   # Right edge (t_n to t_n+1 at x_i+1)
+    bottom_edge = classify_edge(v1_state_n, v2_state_n)    # Bottom edge (x_i to x_i+1 at t_n)
+    top_edge = classify_edge(v1_state_np1, v2_state_np1)   # Top edge (x_i to x_i+1 at t_n+1)
+    
+    # Determine the marching squares case
+    case_index = determine_marching_squares_case(bottom_edge, right_edge, top_edge, left_edge)
+    
+    # Calculate space-time area based on the case
+    return calculate_spacetime_area_Ay(case_index, x_min, x_max, y_face, dt, front_n, front_np1)
+end
+
+"""
+    classify_edge(v1_state::Int, v2_state::Int)
+
+Classifies an edge based on its vertex states:
+- 0: Empty (both vertices dry)
+- 1: Dead (v1 wet, v2 dry)
+- 2: Fresh (v1 dry, v2 wet)
+- 3: Full (both vertices wet)
+"""
+function classify_edge(v1_state::Int, v2_state::Int)
+    if v1_state == 0 && v2_state == 0
+        return 0  # Empty
+    elseif v1_state == 1 && v2_state == 0
+        return 1  # Dead
+    elseif v1_state == 0 && v2_state == 1
+        return 2  # Fresh
+    else  # v1_state == 1 && v2_state == 1
+        return 3  # Full
+    end
+end
+
+"""
+    determine_marching_squares_case(bottom::Int, right::Int, top::Int, left::Int)
+
+Determines the marching squares case index (0-15) based on edge types:
+- bottom: Edge at the bottom (t_n, y range or x range)
+- right: Edge at the right (t_n+1, y range or x range) 
+- top: Edge at the top (y_max or x_max, t range)
+- left: Edge at the left (y_min or x_min, t range)
+
+Edge types: 0=Empty, 1=Dead, 2=Fresh, 3=Full
+"""
+function determine_marching_squares_case(bottom::Int, right::Int, top::Int, left::Int)
+    # Convert edge types to case index (0-15)
+    return bottom + (right << 2) + (top << 4) + (left << 6)
+end
+
+"""
+    calculate_spacetime_area_Ax(case_index::Int, x::Float64, y_min::Float64, y_max::Float64, 
+                             dt::Float64, front_n::FrontTracker, front_np1::FrontTracker)
+
+Calculates the space-time area for a vertical face based on the marching squares case.
+"""
+function calculate_spacetime_area_Ax(case_index::Int, x::Float64, y_min::Float64, y_max::Float64, 
+                                  dt::Float64, front_n::FrontTracker, front_np1::FrontTracker)
+    # Extract case details
+    bottom = case_index & 0x3
+    right = (case_index >> 2) & 0x3
+    top = (case_index >> 4) & 0x3
+    left = (case_index >> 6) & 0x3
+    
+    # Height of the face
+    dy = y_max - y_min
+    
+    # Based on the case, calculate the area
+    # Case 0: All edges empty - no fluid
+    if bottom == 0 && right == 0 && top == 0 && left == 0
+        return 0.0
+    end
+    
+    # Case 15: All edges full - completely fluid
+    if bottom == 3 && right == 3 && top == 3 && left == 3
+        return dt * dy
+    end
+    
+    # Complex cases: Need to construct polygon and calculate its area
+    # First, find all intersection points
+    points = []
+    
+    # Estimate intersection times on vertical edges (if interface crosses them)
+    # For the left edge (t=0)
+    if left == 1 || left == 2  # Partial edge (one vertex wet, one dry)
+        # Find intersection point on left edge
+        for t in range(0, dt, length=10)
+            # Interpolate front position at intermediate time
+            α = t / dt
+            # Linear interpolation between front_n and front_np1
+            if has_interface_at_point(front_n, front_np1, x, y_min, y_max, α)
+                y_intersect = find_interface_y(front_n, front_np1, x, y_min, y_max, α)
+                push!(points, [0.0, y_intersect - y_min])  # Normalize to face coordinates
             end
         end
     end
     
-    return V_st
+    # For the right edge (t=dt)
+    if right == 1 || right == 2  # Partial edge
+        for t in range(0, dt, length=10)
+            α = t / dt
+            if has_interface_at_point(front_n, front_np1, x, y_min, y_max, α)
+                y_intersect = find_interface_y(front_n, front_np1, x, y_min, y_max, α)
+                push!(points, [dt, y_intersect - y_min])  # Normalize to face coordinates
+            end
+        end
+    end
+    
+    # Estimate intersection points on horizontal edges
+    # For the bottom edge (y=y_min)
+    if bottom == 1 || bottom == 2
+        t_intersect = find_crossing_time(front_n, front_np1, x, y_min, dt)
+        if 0 <= t_intersect <= dt
+            push!(points, [t_intersect, 0.0])
+        end
+    end
+    
+    # For the top edge (y=y_max)
+    if top == 1 || top == 2
+        t_intersect = find_crossing_time(front_n, front_np1, x, y_max, dt)
+        if 0 <= t_intersect <= dt
+            push!(points, [t_intersect, dy])
+        end
+    end
+    
+    # Now add vertex points based on their state
+    # Bottom-left vertex (t=0, y=y_min)
+    if is_point_inside(front_n, x, y_min)
+        push!(points, [0.0, 0.0])
+    end
+    
+    # Bottom-right vertex (t=dt, y=y_min)
+    if is_point_inside(front_np1, x, y_min)
+        push!(points, [dt, 0.0])
+    end
+    
+    # Top-left vertex (t=0, y=y_max)
+    if is_point_inside(front_n, x, y_max)
+        push!(points, [0.0, dy])
+    end
+    
+    # Top-right vertex (t=dt, y=y_max)
+    if is_point_inside(front_np1, x, y_max)
+        push!(points, [dt, dy])
+    end
+    
+    # If we have enough points, create a polygon and calculate its area
+    if length(points) >= 3
+        # Sort points to form a proper polygon (convex hull)
+        # This is a simplification - more sophisticated polygon construction may be needed
+        sorted_points = sort_points_clockwise(points)
+        
+        # Close the polygon
+        if sorted_points[1] != sorted_points[end]
+            push!(sorted_points, sorted_points[1])
+        end
+        
+        # Create a LibGEOS polygon
+        geos_points = [[p[1], p[2]] for p in sorted_points]
+        poly = LibGEOS.Polygon([geos_points])
+        
+        # Calculate and return the area
+        return LibGEOS.area(poly)
+    end
+    
+    # Default: estimate based on average state
+    v1_state_n = is_point_inside(front_n, x, y_min) ? 1 : 0
+    v1_state_np1 = is_point_inside(front_np1, x, y_min) ? 1 : 0
+    v2_state_n = is_point_inside(front_n, x, y_max) ? 1 : 0
+    v2_state_np1 = is_point_inside(front_np1, x, y_max) ? 1 : 0
+    
+    avg_fluid_fraction = (v1_state_n + v1_state_np1 + v2_state_n + v2_state_np1) / 4.0
+    return avg_fluid_fraction * dt * dy
 end
 
 """
-    compute_special_spacetime_volume(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker, 
-                                   i::Int, j::Int, dt::Float64, transition_type::String)
+    calculate_spacetime_area_Ay(case_index::Int, x_min::Float64, x_max::Float64, y::Float64, 
+                             dt::Float64, front_n::FrontTracker, front_np1::FrontTracker)
 
-Calcule le volume spatio-temporel pour les cas spéciaux où la cellule change de type.
-
-# Arguments
-- `mesh::Mesh{2}`: Le maillage spatial
-- `front_n::FrontTracker`: La position de l'interface au temps t^n
-- `front_np1::FrontTracker`: La position de l'interface au temps t^{n+1}
-- `i::Int`, `j::Int`: Les indices de la cellule
-- `dt::Float64`: Le pas de temps
-- `transition_type::String`: Type de transition ("ec", "ce", "ef", "fe")
-
-# Retourne
-- `volume::Float64`: Le volume spatio-temporel
+Calculates the space-time area for a horizontal face based on the marching squares case.
 """
-function compute_special_spacetime_volume(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker, 
-                                         i::Int, j::Int, dt::Float64, transition_type::String)
-    # Extraction des coordonnées des noeuds
-    x_nodes = mesh.nodes[1]
-    y_nodes = mesh.nodes[2]
+function calculate_spacetime_area_Ay(case_index::Int, x_min::Float64, x_max::Float64, y::Float64, 
+                                  dt::Float64, front_n::FrontTracker, front_np1::FrontTracker)
+    # Extract case details
+    bottom = case_index & 0x3
+    right = (case_index >> 2) & 0x3
+    top = (case_index >> 4) & 0x3
+    left = (case_index >> 6) & 0x3
     
-    # Coordonnées des sommets de la cellule
-    x_min, x_max = x_nodes[i], x_nodes[i+1]
-    y_min, y_max = y_nodes[j], y_nodes[j+1]
+    # Width of the face
+    dx = x_max - x_min
     
-    # Créer une représentation temporelle interpolée de l'interface
-    # Déterminer les instants τₖ où l'interface traverse les sommets de la cellule
-    tau = find_crossing_times(mesh, front_n, front_np1, i, j, dt)
-    
-    # Si aucun temps de croisement n'est trouvé, utiliser la méthode trapézoïdale standard
-    if length(tau) <= 2  # Seulement t^n et t^{n+1}
-        vol_n = compute_volume_at_time(mesh, front_n, front_np1, i, j, 0.0, dt)
-        vol_np1 = compute_volume_at_time(mesh, front_n, front_np1, i, j, dt, dt)
-        return (dt / 2.0) * (vol_n + vol_np1)
+    # Based on the case, calculate the area
+    # Case 0: All edges empty - no fluid
+    if bottom == 0 && right == 0 && top == 0 && left == 0
+        return 0.0
     end
     
-    # Sinon, intégrer sur chaque sous-intervalle [τₖ, τₖ₊₁]
-    volume = 0.0
-    for k in 1:(length(tau)-1)
-        t_k = tau[k]
-        t_kp1 = tau[k+1]
-        
-        # Calculer le volume aux extrémités de l'intervalle
-        vol_k = compute_volume_at_time(mesh, front_n, front_np1, i, j, t_k, dt)
-        vol_kp1 = compute_volume_at_time(mesh, front_n, front_np1, i, j, t_kp1, dt)
-        
-        # Utiliser la règle trapézoïdale pour ce sous-intervalle
-        volume += ((t_kp1 - t_k) / 2.0) * (vol_k + vol_kp1)
+    # Case 15: All edges full - completely fluid
+    if bottom == 3 && right == 3 && top == 3 && left == 3
+        return dt * dx
     end
     
-    return volume
+    # Complex cases: Need to construct polygon and calculate its area
+    # First, find all intersection points
+    points = []
+    
+    # Estimate intersection times on horizontal edges (if interface crosses them)
+    # For the bottom edge (t=0)
+    if bottom == 1 || bottom == 2  # Partial edge (one vertex wet, one dry)
+        # Find intersection point on bottom edge
+        for t in range(0, dt, length=10)
+            # Interpolate front position at intermediate time
+            α = t / dt
+            # Check if interface crosses the horizontal line at this time
+            if has_interface_at_point_horizontal(front_n, front_np1, x_min, x_max, y, α)
+                x_intersect = find_interface_x(front_n, front_np1, x_min, x_max, y, α)
+                push!(points, [t, x_intersect - x_min])  # Normalize to face coordinates
+            end
+        end
+    end
+    
+    # For the top edge (t=dt)
+    if top == 1 || top == 2  # Partial edge
+        for t in range(0, dt, length=10)
+            α = t / dt
+            if has_interface_at_point_horizontal(front_n, front_np1, x_min, x_max, y, α)
+                x_intersect = find_interface_x(front_n, front_np1, x_min, x_max, y, α)
+                push!(points, [dt, x_intersect - x_min])  # Normalize to face coordinates
+            end
+        end
+    end
+    
+    # Estimate intersection points on vertical edges
+    # For the left edge (x=x_min)
+    if left == 1 || left == 2
+        t_intersect = find_crossing_time(front_n, front_np1, x_min, y, dt)
+        if 0 <= t_intersect <= dt
+            push!(points, [t_intersect, 0.0])
+        end
+    end
+    
+    # For the right edge (x=x_max)
+    if right == 1 || right == 2
+        t_intersect = find_crossing_time(front_n, front_np1, x_max, y, dt)
+        if 0 <= t_intersect <= dt
+            push!(points, [t_intersect, dx])
+        end
+    end
+    
+    # Now add vertex points based on their state
+    # Bottom-left vertex (t=0, x=x_min)
+    if is_point_inside(front_n, x_min, y)
+        push!(points, [0.0, 0.0])
+    end
+    
+    # Bottom-right vertex (t=0, x=x_max)
+    if is_point_inside(front_n, x_max, y)
+        push!(points, [0.0, dx])
+    end
+    
+    # Top-left vertex (t=dt, x=x_min)
+    if is_point_inside(front_np1, x_min, y)
+        push!(points, [dt, 0.0])
+    end
+    
+    # Top-right vertex (t=dt, x=x_max)
+    if is_point_inside(front_np1, x_max, y)
+        push!(points, [dt, dx])
+    end
+    
+    # If we have enough points, create a polygon and calculate its area
+    if length(points) >= 3
+        # Sort points to form a proper polygon
+        sorted_points = sort_points_clockwise(points)
+        
+        # Close the polygon
+        if sorted_points[1] != sorted_points[end]
+            push!(sorted_points, sorted_points[1])
+        end
+        
+        # Create a LibGEOS polygon
+        geos_points = [[p[1], p[2]] for p in sorted_points]
+        poly = LibGEOS.Polygon([geos_points])
+        
+        # Calculate and return the area
+        return LibGEOS.area(poly)
+    end
+    
+    # Default: estimate based on average state
+    v1_state_n = is_point_inside(front_n, x_min, y) ? 1 : 0
+    v1_state_np1 = is_point_inside(front_np1, x_min, y) ? 1 : 0
+    v2_state_n = is_point_inside(front_n, x_max, y) ? 1 : 0
+    v2_state_np1 = is_point_inside(front_np1, x_max, y) ? 1 : 0
+    
+    avg_fluid_fraction = (v1_state_n + v1_state_np1 + v2_state_n + v2_state_np1) / 4.0
+    return avg_fluid_fraction * dt * dx
 end
 
 """
-    find_crossing_times(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker, 
-                      i::Int, j::Int, dt::Float64)
+    has_interface_at_point(front_n::FrontTracker, front_np1::FrontTracker, 
+                         x::Float64, y_min::Float64, y_max::Float64, α::Float64)
 
-Détermine les instants τₖ où l'interface traverse les sommets de la cellule.
-
-# Retourne
-- `tau::Vector{Float64}`: Temps de croisement, incluant t^n et t^{n+1}
+Checks if the interface crosses a vertical line segment at an interpolated time point.
 """
-function find_crossing_times(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker, 
-                           i::Int, j::Int, dt::Float64)
-    # Commencer avec les temps aux extrémités de l'intervalle
-    tau = [0.0, dt]
+function has_interface_at_point(front_n::FrontTracker, front_np1::FrontTracker, 
+                              x::Float64, y_min::Float64, y_max::Float64, α::Float64)
+    # Create a line segment
+    line = LibGEOS.LineString([[x, y_min], [x, y_max]])
     
-    # Extraction des coordonnées des noeuds
-    x_nodes = mesh.nodes[1]
-    y_nodes = mesh.nodes[2]
-    
-    # Coordonnées des sommets de la cellule
-    vertices = [
-        (x_nodes[i], y_nodes[j]),      # Coin inférieur gauche
-        (x_nodes[i+1], y_nodes[j]),    # Coin inférieur droit
-        (x_nodes[i+1], y_nodes[j+1]),  # Coin supérieur droit
-        (x_nodes[i], y_nodes[j+1])     # Coin supérieur gauche
-    ]
-    
-    # Pour chaque sommet, trouver s'il y a un changement de statut (dedans/dehors)
-    for vertex in vertices
-        x, y = vertex
-        # Vérifier le statut au temps initial
-        inside_n = is_point_inside(front_n, x, y)
-        # Vérifier le statut au temps final
-        inside_np1 = is_point_inside(front_np1, x, y)
+    # Check multiple points along the segment
+    for y in range(y_min, y_max, length=10)
+        sdf_n = sdf(front_n, x, y)
+        sdf_np1 = sdf(front_np1, x, y)
         
-        # Si le statut change, trouver le temps de croisement
-        if inside_n != inside_np1
-            # On recherche par dichotomie le temps où le point traverse l'interface
-            t_low, t_high = 0.0, dt
-            crossing_time = dt / 2.0  # Valeur initiale
+        # Interpolate SDF at time α
+        sdf_α = (1-α) * sdf_n + α * sdf_np1
+        
+        # If SDF is close to zero, interface crosses the point
+        if abs(sdf_α) < 1e-6
+            return true
+        end
+    end
+    
+    return false
+end
+
+"""
+    has_interface_at_point_horizontal(front_n::FrontTracker, front_np1::FrontTracker, 
+                                     x_min::Float64, x_max::Float64, y::Float64, α::Float64)
+
+Checks if the interface crosses a horizontal line segment at an interpolated time point.
+"""
+function has_interface_at_point_horizontal(front_n::FrontTracker, front_np1::FrontTracker, 
+                                         x_min::Float64, x_max::Float64, y::Float64, α::Float64)
+    # Create a line segment
+    line = LibGEOS.LineString([[x_min, y], [x_max, y]])
+    
+    # Check multiple points along the segment
+    for x in range(x_min, x_max, length=10)
+        sdf_n = sdf(front_n, x, y)
+        sdf_np1 = sdf(front_np1, x, y)
+        
+        # Interpolate SDF at time α
+        sdf_α = (1-α) * sdf_n + α * sdf_np1
+        
+        # If SDF is close to zero, interface crosses the point
+        if abs(sdf_α) < 1e-6
+            return true
+        end
+    end
+    
+    return false
+end
+
+"""
+    find_interface_x(front_n::FrontTracker, front_np1::FrontTracker, 
+                   x_min::Float64, x_max::Float64, y::Float64, α::Float64)
+
+Finds the x-coordinate where the interface crosses a horizontal line at time α between t_n and t_n+1.
+"""
+function find_interface_x(front_n::FrontTracker, front_np1::FrontTracker, 
+                        x_min::Float64, x_max::Float64, y::Float64, α::Float64)
+    # Binary search to find intersection
+    x_low = x_min
+    x_high = x_max
+    
+    for _ in 1:20  # Limit iterations
+        x_mid = (x_low + x_high) / 2
+        
+        sdf_n = sdf(front_n, x_mid, y)
+        sdf_np1 = sdf(front_np1, x_mid, y)
+        
+        # Interpolate SDF at time α
+        sdf_α = (1-α) * sdf_n + α * sdf_np1
+        
+        if abs(sdf_α) < 1e-6
+            return x_mid
+        elseif sdf_α < 0
+            x_low = x_mid
+        else
+            x_high = x_mid
+        end
+    end
+    
+    return (x_low + x_high) / 2
+end
+
+"""
+    find_interface_y(front_n::FrontTracker, front_np1::FrontTracker, x::Float64, y_min::Float64, y_max::Float64, α::Float64)
+
+Finds the y-coordinate where the interface crosses a vertical line at time α between t_n and t_n+1.
+"""
+function find_interface_y(front_n::FrontTracker, front_np1::FrontTracker, x::Float64, y_min::Float64, y_max::Float64, α::Float64)
+    # Binary search to find intersection
+    y_low = y_min
+    y_high = y_max
+    
+    for _ in 1:20  # Limit iterations
+        y_mid = (y_low + y_high) / 2
+        
+        sdf_n = sdf(front_n, x, y_mid)
+        sdf_np1 = sdf(front_np1, x, y_mid)
+        
+        # Interpolate SDF at time α
+        sdf_α = (1-α) * sdf_n + α * sdf_np1
+        
+        if abs(sdf_α) < 1e-6
+            return y_mid
+        elseif sdf_α < 0
+            y_low = y_mid
+        else
+            y_high = y_mid
+        end
+    end
+    
+    return (y_low + y_high) / 2
+end
+
+"""
+    find_crossing_time(front_n::FrontTracker, front_np1::FrontTracker, x::Float64, y::Float64, dt::Float64)
+
+Finds the time when the interface crosses point (x,y) between t_n and t_n+1.
+"""
+function find_crossing_time(front_n::FrontTracker, front_np1::FrontTracker, x::Float64, y::Float64, dt::Float64)
+    # Get SDF at t_n and t_n+1
+    sdf_n = sdf(front_n, x, y)
+    sdf_np1 = sdf(front_np1, x, y)
+    
+    # Check if SDF changes sign (interface crosses this point)
+    if sdf_n * sdf_np1 <= 0 && abs(sdf_n - sdf_np1) > 1e-10
+        # Linear interpolation to find crossing time
+        α = abs(sdf_n) / abs(sdf_n - sdf_np1)
+        return α * dt
+    end
+    
+    # No crossing
+    return -1.0
+end
+
+"""
+    sort_points_clockwise(points::Vector)
+
+Sorts a set of points in clockwise order around their centroid.
+Used for constructing polygons from intersection points.
+"""
+function sort_points_clockwise(points::Vector)
+    if length(points) < 3
+        return points
+    end
+    
+    # Calculate centroid
+    cx = sum(p[1] for p in points) / length(points)
+    cy = sum(p[2] for p in points) / length(points)
+    
+    # Sort by angle around centroid
+    return sort(points, by = p -> atan(p[2] - cy, p[1] - cx))
+end
+
+
+
+
+"""
+    compute_segment_parameters(ft::FrontTracker)
+
+Calcule les paramètres de chaque segment de l'interface:
+- n_I: vecteur normal unitaire du segment
+- α_I: intercept du segment (distance signée à l'origine)
+- length_I: longueur du segment
+- midpoint_I: point milieu du segment
+
+L'équation d'un segment est: n_I ⋅ x = α_I
+
+Retourne (segments, segment_normals, segment_intercepts, segment_lengths, segment_midpoints)
+"""
+function compute_segment_parameters(ft::FrontTracker)
+    markers = ft.markers
+    n_markers = length(markers)
+    
+    if n_markers < 2
+        return [], [], [], [], []
+    end
+    
+    # Nombre de segments (n_markers pour un contour fermé, n_markers-1 pour un contour ouvert)
+    n_segments = if ft.is_closed
+        if n_markers > 0 && markers[1] == markers[end]
+            n_markers - 1
+        else
+            n_markers
+        end
+    else
+        n_markers - 1
+    end
+    
+    # Initialiser les tableaux de résultats
+    segments = Vector{Tuple{Int, Int}}(undef, n_segments)
+    segment_normals = Vector{Tuple{Float64, Float64}}(undef, n_segments)
+    segment_intercepts = Vector{Float64}(undef, n_segments)
+    segment_lengths = Vector{Float64}(undef, n_segments)
+    segment_midpoints = Vector{Tuple{Float64, Float64}}(undef, n_segments)
+    
+    # Parcourir tous les segments
+    for i in 1:n_segments
+        # Indice du marqueur suivant (avec gestion de la boucle pour contour fermé)
+        next_i = i < n_markers ? i + 1 : 1
+        
+        # Points de début et de fin du segment
+        p1 = markers[i]
+        p2 = markers[next_i]
+        
+        # Vecteur du segment (de p1 à p2)
+        segment_vector = (p2[1] - p1[1], p2[2] - p1[2])
+        
+        # Longueur du segment
+        segment_length = sqrt(segment_vector[1]^2 + segment_vector[2]^2)
+        
+        if segment_length < 1e-15
+            # Éviter la division par zéro pour les segments très courts
+            segment_normals[i] = (0.0, 1.0)  # Normal arbitraire
+            segment_intercepts[i] = p1[1] * 0.0 + p1[2] * 1.0  # α_I = n_I ⋅ p1
+            segment_lengths[i] = 0.0
+            segment_midpoints[i] = p1  # Point de milieu = point de début pour segments courts
+        else
+            # Normale unitaire (rotation de 90° dans le sens trigonométrique)
+            normal = (-segment_vector[2] / segment_length, segment_vector[1] / segment_length)
             
-            # Précision souhaitée
-            tolerance = 1e-8 * dt
-            
-            # Recherche dichotomique
-            while t_high - t_low > tolerance
-                crossing_time = (t_low + t_high) / 2.0
-                
-                # Créer une interface interpolée à cet instant
-                front_t = interpolate_front(front_n, front_np1, crossing_time / dt)
-                
-                # Vérifier le statut à cet instant
-                is_inside = is_point_inside(front_t, x, y)
-                
-                # Ajuster les bornes de recherche
-                if is_inside == inside_n
-                    t_low = crossing_time
-                else
-                    t_high = crossing_time
+            # Vérifier l'orientation de la normale (doit pointer à l'extérieur)
+            if ft.is_closed
+                # Pour un contour fermé, vérifier si la normale pointe vers l'extérieur
+                test_point = (p1[1] + 1e-3 * normal[1], p1[2] + 1e-3 * normal[2])
+                if is_point_inside(ft, test_point[1], test_point[2])
+                    # Si le point test est à l'intérieur, inverser la normale
+                    normal = (-normal[1], -normal[2])
                 end
             end
             
-            # Ajouter ce temps de croisement
-            push!(tau, crossing_time)
+            # Calcul de l'intercept α_I = n_I ⋅ p1
+            intercept = normal[1] * p1[1] + normal[2] * p1[2]
+            
+            # Stockage des résultats
+            segments[i] = (i, next_i)
+            segment_normals[i] = normal
+            segment_intercepts[i] = intercept
+            segment_lengths[i] = segment_length
+            segment_midpoints[i] = ((p1[1] + p2[1]) / 2, (p1[2] + p2[2]) / 2)
         end
     end
     
-    # Trier les temps de croisement
-    sort!(tau)
-    
-    return tau
+    return segments, segment_normals, segment_intercepts, segment_lengths, segment_midpoints
 end
 
 """
-    interpolate_front(front_n::FrontTracker, front_np1::FrontTracker, t_ratio::Float64)
+    create_segment_line(ft::FrontTracker, segment_idx::Int)
 
-Interpolation linéaire de l'interface à un instant t = t_n + t_ratio * (t_{n+1} - t_n).
-
-# Arguments
-- `front_n::FrontTracker`: La position de l'interface au temps t^n
-- `front_np1::FrontTracker`: La position de l'interface au temps t^{n+1}
-- `t_ratio::Float64`: Ratio temporel entre 0 et 1 (0 = t^n, 1 = t^{n+1})
-
-# Retourne
-- `front_t::FrontTracker`: L'interface interpolée au temps t
+Crée une LineString représentant un segment de l'interface à partir des marqueurs.
 """
-function interpolate_front(front_n::FrontTracker, front_np1::FrontTracker, t_ratio::Float64)
-    # Recupérer les marqueurs aux deux instants
-    markers_n = get_markers(front_n)
-    markers_np1 = get_markers(front_np1)
+function create_segment_line(ft::FrontTracker, segment_idx::Int)
+    markers = ft.markers
+    n_markers = length(markers)
     
-    # Vérifier que les deux interfaces ont le même nombre de marqueurs
-    if length(markers_n) != length(markers_np1)
-        error("Les deux interfaces doivent avoir le même nombre de marqueurs pour l'interpolation.")
+    if segment_idx < 1 || segment_idx > (ft.is_closed ? n_markers : n_markers - 1)
+        error("Indice de segment invalide: $segment_idx")
     end
     
-    # Interpoler chaque marqueur
-    markers_t = Vector{Tuple{Float64, Float64}}(undef, length(markers_n))
-    for i in 1:length(markers_n)
-        x_n, y_n = markers_n[i]
-        x_np1, y_np1 = markers_np1[i]
-        
-        # Interpolation linéaire
-        x_t = x_n + t_ratio * (x_np1 - x_n)
-        y_t = y_n + t_ratio * (y_np1 - y_n)
-        
-        markers_t[i] = (x_t, y_t)
-    end
+    # Récupérer les indices des marqueurs qui définissent le segment
+    next_idx = segment_idx < n_markers ? segment_idx + 1 : 1
     
-    # Créer une nouvelle interface avec les marqueurs interpolés
-    front_t = FrontTracker(markers_t, front_n.is_closed)
+    # Récupérer les coordonnées des marqueurs
+    start_point = markers[segment_idx]
+    end_point = markers[next_idx]
     
-    return front_t
+    # Créer la LineString
+    return LibGEOS.LineString([[start_point[1], start_point[2]], [end_point[1], end_point[2]]])
 end
 
 """
-    compute_volume_at_time(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker,
-                         i::Int, j::Int, t::Float64, dt::Float64)
+    compute_segment_cell_intersections(mesh::Mesh{2}, ft::FrontTracker)
 
-Calcule le volume fluide dans la cellule (i,j) à l'instant t = t_n + t.
-
-# Arguments
-- `mesh::Mesh{2}`: Le maillage spatial
-- `front_n::FrontTracker`: La position de l'interface au temps t^n
-- `front_np1::FrontTracker`: La position de l'interface au temps t^{n+1}
-- `i::Int`, `j::Int`: Les indices de la cellule
-- `t::Float64`: L'instant auquel calculer le volume (relatif à t^n)
-- `dt::Float64`: Le pas de temps total
-
-# Retourne
-- `volume::Float64`: Le volume fluide à l'instant t
+Calcule les intersections entre les segments de l'interface et les cellules du maillage.
+Retourne un dictionnaire où les clés sont les indices de cellules (i,j) et les valeurs
+sont des listes de tuples (segment_idx, intersection_length).
 """
-function compute_volume_at_time(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker,
-                              i::Int, j::Int, t::Float64, dt::Float64)
-    # Si t est exactement t^n ou t^{n+1}, utiliser directement les volumes calculés
-    if isapprox(t, 0.0, atol=1e-10)
-        fractions_n, volumes_n, _, _, _ = fluid_cell_properties(mesh, front_n)
-        return volumes_n[i, j]
-    elseif isapprox(t, dt, atol=1e-10)
-        fractions_np1, volumes_np1, _, _, _ = fluid_cell_properties(mesh, front_np1)
-        return volumes_np1[i, j]
-    end
+function compute_segment_cell_intersections(mesh::Mesh{2}, ft::FrontTracker)
+    # Calculer les paramètres des segments
+    segments, segment_normals, segment_intercepts, segment_lengths, segment_midpoints = 
+        compute_segment_parameters(ft)
     
-    # Sinon, interpoler l'interface et calculer le volume
-    t_ratio = t / dt
-    front_t = interpolate_front(front_n, front_np1, t_ratio)
-    
-    # Calculer les propriétés de la cellule à cet instant
-    fractions_t, volumes_t, _, _, _ = fluid_cell_properties(mesh, front_t)
-    
-    return volumes_t[i, j]
-end
-
-"""
-    compute_spacetime_centroid(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker, dt::Float64)
-
-Calcule les centroïdes des volumes spatio-temporels pour chaque cellule.
-
-# Arguments
-- `mesh::Mesh{2}`: Le maillage spatial
-- `front_n::FrontTracker`: La position de l'interface au temps t^n
-- `front_np1::FrontTracker`: La position de l'interface au temps t^{n+1}
-- `dt::Float64`: Le pas de temps Δt
-
-# Retourne
-- `centroids_st::Vector{Dict{Tuple{Int,Int}, Tuple{Float64,Float64,Float64}}}`: 
-    Les centroïdes spatio-temporels sous forme (x,y,t) pour chaque cellule
-"""
-function compute_spacetime_centroid(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker, dt::Float64)
-    # Extraction des coordonnées des noeuds
     x_nodes = mesh.nodes[1]
     y_nodes = mesh.nodes[2]
     nx = length(x_nodes) - 1
     ny = length(y_nodes) - 1
     
-    # Calculer les volumes spatio-temporels d'abord
-    V_st = compute_spacetime_volumes(mesh, front_n, front_np1, dt)
+    # Dictionnaire pour stocker les intersections segment-cellule
+    cell_segment_intersections = Dict{Tuple{Int, Int}, Vector{Tuple{Int, Float64}}}()
     
-    # Initialisation des matrices pour les moments
-    xV_st = zeros(nx+1, ny+1)  # Moment en x
-    yV_st = zeros(nx+1, ny+1)  # Moment en y
-    tV_st = zeros(nx+1, ny+1)  # Moment en t
-    
-    # Calculer les propriétés des cellules aux deux instants
-    _, volumes_n, centroids_x_n, centroids_y_n, cell_types_n = fluid_cell_properties(mesh, front_n)
-    _, volumes_np1, centroids_x_np1, centroids_y_np1, cell_types_np1 = fluid_cell_properties(mesh, front_np1)
-    
-    # Pour chaque cellule
+    # Initialiser le dictionnaire pour toutes les cellules
     for i in 1:nx
         for j in 1:ny
-            # Récupérer le volume spatio-temporel calculé précédemment
-            volume_st = V_st[i, j]
-            
-            # Si le volume est négligeable, passer à la cellule suivante
-            if volume_st < 1e-10
-                continue
-            end
-            
-            # Récupérer les types de cellules et volumes aux deux instants
-            cell_type_n = cell_types_n[i, j]
-            cell_type_np1 = cell_types_np1[i, j]
-            vol_n = volumes_n[i, j]
-            vol_np1 = volumes_np1[i, j]
-            
-            # Cas simple: cellule complètement fluide aux deux instants
-            if cell_type_n == 1 && cell_type_np1 == 1
-                # Le centroïde spatial est au centre de la cellule
-                x_center = (x_nodes[i] + x_nodes[i+1]) / 2
-                y_center = (y_nodes[j] + y_nodes[j+1]) / 2
-                # Le centroïde temporel est au milieu du pas de temps
-                t_center = dt / 2
+            cell_segment_intersections[(i,j)] = []
+        end
+    end
+    
+    # Pour chaque segment, calculer les intersections avec les cellules
+    n_segments = length(segments)
+    for segment_idx in 1:n_segments
+        # Créer une ligne représentant le segment
+        segment_line = create_segment_line(ft, segment_idx)
+        
+        # Calculer les intersections avec toutes les cellules
+        for i in 1:nx
+            for j in 1:ny
+                # Créer le polygone de la cellule
+                cell_coords = [
+                    [x_nodes[i], y_nodes[j]],
+                    [x_nodes[i+1], y_nodes[j]],
+                    [x_nodes[i+1], y_nodes[j+1]],
+                    [x_nodes[i], y_nodes[j+1]],
+                    [x_nodes[i], y_nodes[j]]
+                ]
+                cell_poly = LibGEOS.Polygon([cell_coords])
                 
-                xV_st[i, j] = volume_st * x_center
-                yV_st[i, j] = volume_st * y_center
-                tV_st[i, j] = volume_st * t_center
-                
-            # Cas avec changements de type ou cellules coupées
-            else
-                # Déterminer les temps de croisement pour une intégration précise
-                tau = find_crossing_times(mesh, front_n, front_np1, i, j, dt)
-                
-                # Si aucun temps de croisement intermédiaire n'est trouvé,
-                # utiliser simplement la règle trapézoïdale
-                if length(tau) <= 2  # Seulement t^n et t^{n+1}
-                    # Calculer les centroïdes aux instants extrêmes
-                    cx_n = centroids_x_n[i, j]
-                    cy_n = centroids_y_n[i, j]
-                    cx_np1 = centroids_x_np1[i, j]
-                    cy_np1 = centroids_y_np1[i, j]
+                # Vérifier l'intersection
+                if LibGEOS.intersects(cell_poly, segment_line)
+                    intersection = LibGEOS.intersection(cell_poly, segment_line)
                     
-                    # Le centroïde est la moyenne pondérée par le volume à chaque instant
-                    # Pour x et y, pondérée par les deux volumes aux extrémités
-                    if vol_n + vol_np1 > 0
-                        xV_st[i, j] = volume_st * (vol_n * cx_n + vol_np1 * cx_np1) / (vol_n + vol_np1)
-                        yV_st[i, j] = volume_st * (vol_n * cy_n + vol_np1 * cy_np1) / (vol_n + vol_np1)
-                    end
-                    
-                    # Pour t, la pondération dépend de la variation de volume
-                    if vol_n == 0 && vol_np1 > 0
-                        # Remplissage progressif, centroïde temporel plus proche de t^{n+1}
-                        tV_st[i, j] = volume_st * (2*dt/3)
-                    elseif vol_n > 0 && vol_np1 == 0
-                        # Vidage progressif, centroïde temporel plus proche de t^n
-                        tV_st[i, j] = volume_st * (dt/3)
-                    else
-                        # Cas général, centroïde temporel au milieu
-                        tV_st[i, j] = volume_st * (dt/2)
-                    end
-                    
-                # Avec des temps de croisement intermédiaires, intégrer sur chaque sous-intervalle
-                else
-                    xV_interval = 0.0
-                    yV_interval = 0.0
-                    tV_interval = 0.0
-                    
-                    for k in 1:(length(tau)-1)
-                        t_k = tau[k]
-                        t_kp1 = tau[k+1]
-                        
-                        # Calculer le volume et les centroïdes aux extrémités de l'intervalle
-                        t_ratio_k = t_k / dt
-                        t_ratio_kp1 = t_kp1 / dt
-                        
-                        # Interpoler les interfaces à ces instants
-                        front_k = interpolate_front(front_n, front_np1, t_ratio_k)
-                        front_kp1 = interpolate_front(front_n, front_np1, t_ratio_kp1)
-                        
-                        # Calculer les propriétés à ces instants
-                        _, vol_k, cx_k, cy_k, _ = fluid_cell_properties(mesh, front_k)
-                        _, vol_kp1, cx_kp1, cy_kp1, _ = fluid_cell_properties(mesh, front_kp1)
-                        
-                        # Volume de ce sous-intervalle (méthode trapézoïdale)
-                        sub_volume = ((t_kp1 - t_k) / 2.0) * (vol_k[i, j] + vol_kp1[i, j])
-                        
-                        # Contribution au moment x
-                        if vol_k[i, j] + vol_kp1[i, j] > 0
-                            xV_sub = sub_volume * (vol_k[i, j] * cx_k[i, j] + vol_kp1[i, j] * cx_kp1[i, j]) / (vol_k[i, j] + vol_kp1[i, j])
-                            yV_sub = sub_volume * (vol_k[i, j] * cy_k[i, j] + vol_kp1[i, j] * cy_kp1[i, j]) / (vol_k[i, j] + vol_kp1[i, j])
-                        else
-                            xV_sub = 0.0
-                            yV_sub = 0.0
+                    # Calculer la longueur d'intersection
+                    if isa(intersection, LibGEOS.LineString)
+                        intersection_length = LibGEOS.geomLength(intersection)
+                        if intersection_length > 1e-10
+                            push!(cell_segment_intersections[(i,j)], (segment_idx, intersection_length))
                         end
-                        
-                        # Contribution au moment temporel (milieu de l'intervalle)
-                        t_mid = (t_k + t_kp1) / 2.0
-                        tV_sub = sub_volume * t_mid
-                        
-                        # Accumuler les contributions
-                        xV_interval += xV_sub
-                        yV_interval += yV_sub
-                        tV_interval += tV_sub
+                    elseif isa(intersection, LibGEOS.MultiLineString)
+                        total_length = 0.0
+                        for k in 1:LibGEOS.getNumGeometries(intersection)
+                            line = LibGEOS.getGeometry(intersection, k-1)
+                            total_length += LibGEOS.geomLength(line)
+                        end
+                        if total_length > 1e-10
+                            push!(cell_segment_intersections[(i,j)], (segment_idx, total_length))
+                        end
                     end
-                    
-                    # Stocker les moments pour cette cellule
-                    xV_st[i, j] = xV_interval
-                    yV_st[i, j] = yV_interval
-                    tV_st[i, j] = tV_interval
                 end
             end
         end
     end
     
-    # Construire le dictionnaire des centroïdes
-    centroids_st = Dict{Tuple{Int,Int}, Tuple{Float64,Float64,Float64}}()
-    
-    for i in 1:nx
-        for j in 1:ny
-            if V_st[i, j] > 1e-10
-                # Calculer le centroïde en divisant les moments par le volume
-                cx = xV_st[i, j] / V_st[i, j]
-                cy = yV_st[i, j] / V_st[i, j]
-                ct = tV_st[i, j] / V_st[i, j]
-                
-                centroids_st[(i, j)] = (cx, cy, ct)
-            else
-                # Cellule vide, centroïde au centre géométrique par défaut
-                cx = (x_nodes[i] + x_nodes[i+1]) / 2
-                cy = (y_nodes[j] + y_nodes[j+1]) / 2
-                ct = dt / 2
-                
-                centroids_st[(i, j)] = (cx, cy, ct)
-            end
-        end
-    end
-    
-    return centroids_st
+    return cell_segment_intersections, segments, segment_normals, segment_intercepts, segment_lengths
 end
 
 """
-    compute_spacetime_surfaces(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker, dt::Float64)
+    compute_intercept_jacobian(mesh::Mesh{2}, ft::FrontTracker; density::Float64=1.0)
 
-Calcule les capacités de surface spatio-temporelles en intégrant les capacités de surface (Ax, Ay) dans le temps.
-Classification selon les types de cellules adjacentes suivant le tableau de transitions.
+Calcule la jacobienne des volumes par rapport aux déplacements d'intercept.
+Pour chaque cellule k=(i,j) et chaque segment I, J[k,I] = ∂V_k/∂δ_I = ρL × A_k,I,
+où A_k,I est la longueur d'intersection du segment I avec la cellule k,
+et ρL est un facteur physique (densité × latent heat)
 
-# Arguments
-- `mesh::Mesh{2}`: Le maillage spatial
-- `front_n::FrontTracker`: La position de l'interface au temps t^n
-- `front_np1::FrontTracker`: La position de l'interface au temps t^{n+1}
-- `dt::Float64`: Le pas de temps Δt
-
-# Retourne
-- `Ax_st::Matrix{Float64}`: Les longueurs mouillées spatio-temporelles des faces verticales
-- `Ay_st::Matrix{Float64}`: Les longueurs mouillées spatio-temporelles des faces horizontales
+Retourne:
+- intercept_jacobian: Dict{Tuple{Int, Int}, Vector{Tuple{Int, Float64}}} - la jacobienne
+- segments: vecteur des segments (i, j) où i, j sont les indices des marqueurs
+- segment_normals: vecteur des normales unitaires pour chaque segment
+- segment_intercepts: vecteur des intercepts initiaux pour chaque segment
+- segment_lengths: vecteur des longueurs de chaque segment
 """
-function compute_spacetime_surfaces(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker, dt::Float64)
-    # Extraction des coordonnées des noeuds
+function compute_intercept_jacobian(mesh::Mesh{2}, ft::FrontTracker; density::Float64=1.0)
+    # Calculer les intersections segment-cellule
+    cell_segment_intersections, segments, segment_normals, segment_intercepts, segment_lengths = 
+        compute_segment_cell_intersections(mesh, ft)
+    
+    # Récupérer les dimensions du maillage
     x_nodes = mesh.nodes[1]
     y_nodes = mesh.nodes[2]
     nx = length(x_nodes) - 1
     ny = length(y_nodes) - 1
     
-    # Initialisation des matrices de résultats
-    Ax_st = zeros(nx+1, ny+1)  # Capacités de surface spatio-temporelles verticales
-    Ay_st = zeros(nx+1, ny+1)  # Capacités de surface spatio-temporelles horizontales
+    # Créer un dictionnaire pour stocker la jacobienne
+    # Format: Dict{Tuple{Int, Int}, Vector{Tuple{Int, Float64}}}
+    # Clé: (i,j) = indice de la cellule, Valeur: liste de (segment_idx, jacobian_value)
+    intercept_jacobian = Dict{Tuple{Int, Int}, Vector{Tuple{Int, Float64}}}()
     
-    # Calculer les capacités de surface aux deux instants
-    Ax_n, Ay_n = compute_surface_capacities(mesh, front_n)
-    Ax_np1, Ay_np1 = compute_surface_capacities(mesh, front_np1)
-    
-    # Calculer les types de cellules aux deux instants
-    _, _, _, _, cell_types_n = fluid_cell_properties(mesh, front_n)
-    _, _, _, _, cell_types_np1 = fluid_cell_properties(mesh, front_np1)
-    
-    # Pour chaque face verticale (Ax)
-    for i in 2:nx  # Faces verticales intérieures
-        for j in 1:ny
-            # Récupérer les types des cellules adjacentes à la face
-            left_type_n = cell_types_n[i-1, j]
-            right_type_n = cell_types_n[i, j]
-            left_type_np1 = cell_types_np1[i-1, j]
-            right_type_np1 = cell_types_np1[i, j]
-            
-            # Déterminer le type de face aux deux instants
-            # 0: face sèche (empty/empty), 1: face mouillée (full/full), -1: face coupée (autres cas)
-            face_type_n = (left_type_n == 1 && right_type_n == 1) ? 1 : 
-                         ((left_type_n == 0 && right_type_n == 0) ? 0 : -1)
-            face_type_np1 = (left_type_np1 == 1 && right_type_np1 == 1) ? 1 : 
-                           ((left_type_np1 == 0 && right_type_np1 == 0) ? 0 : -1)
-            
-            # Récupérer les valeurs des capacités aux deux instants
-            ax_n = Ax_n[i, j]
-            ax_np1 = Ax_np1[i, j]
-            
-            # Appliquer la logique du tableau
-            if face_type_n == 0 && face_type_np1 == 0
-                # empty → empty : surface toujours sèche
-                Ax_st[i, j] = 0.0
-            elseif face_type_n == 1 && face_type_np1 == 1
-                # full → full : surface toujours mouillée
-                Ax_st[i, j] = dt * (y_nodes[j+1] - y_nodes[j])
-            elseif face_type_n == 0 && face_type_np1 == -1
-                # empty → cut : A_ε,ec
-                Ax_st[i, j] = compute_special_face_spacetime(mesh, front_n, front_np1, i, j, dt, "x", "ec")
-            elseif face_type_n == -1 && face_type_np1 == 0
-                # cut → empty : A_ε,ce
-                Ax_st[i, j] = compute_special_face_spacetime(mesh, front_n, front_np1, i, j, dt, "x", "ce")
-            elseif face_type_n == 0 && face_type_np1 == 1
-                # empty → full : A_ε,ef
-                Ax_st[i, j] = compute_special_face_spacetime(mesh, front_n, front_np1, i, j, dt, "x", "ef")
-            elseif face_type_n == 1 && face_type_np1 == 0
-                # full → empty : A_ε,fe
-                Ax_st[i, j] = compute_special_face_spacetime(mesh, front_n, front_np1, i, j, dt, "x", "fe")
-            else
-                # Autres cas (cut → cut, cut → full, full → cut) : règle trapézoïdale
-                Ax_st[i, j] = (dt / 2.0) * (ax_n + ax_np1)
-            end
-        end
-    end
-    
-    # Traiter les faces verticales aux bords du domaine (i=1 ou i=nx+1)
-    for i in [1, nx+1]
-        for j in 1:ny
-            # Pour les faces aux bords, faire une détection simple basée sur les valeurs
-            ax_n = Ax_n[i, j]
-            ax_np1 = Ax_np1[i, j]
-            
-            if isapprox(ax_n, 0.0, atol=1e-10) && isapprox(ax_np1, 0.0, atol=1e-10)
-                # Face sèche aux deux instants
-                Ax_st[i, j] = 0.0
-            elseif isapprox(ax_n, y_nodes[j+1] - y_nodes[j], atol=1e-10) && 
-                   isapprox(ax_np1, y_nodes[j+1] - y_nodes[j], atol=1e-10)
-                # Face complètement mouillée aux deux instants
-                Ax_st[i, j] = dt * (y_nodes[j+1] - y_nodes[j])
-            elseif abs(ax_n - ax_np1) < 0.1 * max(ax_n, ax_np1)
-                # Variation faible, utiliser méthode trapézoïdale standard
-                Ax_st[i, j] = (dt / 2.0) * (ax_n + ax_np1)
-            else
-                # Variation importante, utiliser l'approche des temps de croisement
-                Ax_st[i, j] = compute_special_face_spacetime(mesh, front_n, front_np1, i, j, dt, "x", "general")
-            end
-        end
-    end
-    
-    # Pour chaque face horizontale (Ay)
-    for i in 1:nx
-        for j in 2:ny  # Faces horizontales intérieures
-            # Récupérer les types des cellules adjacentes à la face
-            bottom_type_n = cell_types_n[i, j-1]
-            top_type_n = cell_types_n[i, j]
-            bottom_type_np1 = cell_types_np1[i, j-1]
-            top_type_np1 = cell_types_np1[i, j]
-            
-            # Déterminer le type de face aux deux instants
-            face_type_n = (bottom_type_n == 1 && top_type_n == 1) ? 1 : 
-                         ((bottom_type_n == 0 && top_type_n == 0) ? 0 : -1)
-            face_type_np1 = (bottom_type_np1 == 1 && top_type_np1 == 1) ? 1 : 
-                           ((bottom_type_np1 == 0 && top_type_np1 == 0) ? 0 : -1)
-            
-            # Récupérer les valeurs des capacités aux deux instants
-            ay_n = Ay_n[i, j]
-            ay_np1 = Ay_np1[i, j]
-            
-            # Appliquer la logique du tableau
-            if face_type_n == 0 && face_type_np1 == 0
-                # empty → empty : surface toujours sèche
-                Ay_st[i, j] = 0.0
-            elseif face_type_n == 1 && face_type_np1 == 1
-                # full → full : surface toujours mouillée
-                Ay_st[i, j] = dt * (x_nodes[i+1] - x_nodes[i])
-            elseif face_type_n == 0 && face_type_np1 == -1
-                # empty → cut : A_ε,ec
-                Ay_st[i, j] = compute_special_face_spacetime(mesh, front_n, front_np1, i, j, dt, "y", "ec")
-            elseif face_type_n == -1 && face_type_np1 == 0
-                # cut → empty : A_ε,ce
-                Ay_st[i, j] = compute_special_face_spacetime(mesh, front_n, front_np1, i, j, dt, "y", "ce")
-            elseif face_type_n == 0 && face_type_np1 == 1
-                # empty → full : A_ε,ef
-                Ay_st[i, j] = compute_special_face_spacetime(mesh, front_n, front_np1, i, j, dt, "y", "ef")
-            elseif face_type_n == 1 && face_type_np1 == 0
-                # full → empty : A_ε,fe
-                Ay_st[i, j] = compute_special_face_spacetime(mesh, front_n, front_np1, i, j, dt, "y", "fe")
-            else
-                # Autres cas (cut → cut, cut → full, full → cut) : règle trapézoïdale
-                Ay_st[i, j] = (dt / 2.0) * (ay_n + ay_np1)
-            end
-        end
-    end
-    
-    # Traiter les faces horizontales aux bords du domaine (j=1 ou j=ny+1)
-    for i in 1:nx
-        for j in [1, ny+1]
-            # Pour les faces aux bords, faire une détection simple basée sur les valeurs
-            ay_n = Ay_n[i, j]
-            ay_np1 = Ay_np1[i, j]
-            
-            if isapprox(ay_n, 0.0, atol=1e-10) && isapprox(ay_np1, 0.0, atol=1e-10)
-                # Face sèche aux deux instants
-                Ay_st[i, j] = 0.0
-            elseif isapprox(ay_n, x_nodes[i+1] - x_nodes[i], atol=1e-10) && 
-                   isapprox(ay_np1, x_nodes[i+1] - x_nodes[i], atol=1e-10)
-                # Face complètement mouillée aux deux instants
-                Ay_st[i, j] = dt * (x_nodes[i+1] - x_nodes[i])
-            elseif abs(ay_n - ay_np1) < 0.1 * max(ay_n, ay_np1)
-                # Variation faible, utiliser méthode trapézoïdale standard
-                Ay_st[i, j] = (dt / 2.0) * (ay_n + ay_np1)
-            else
-                # Variation importante, utiliser l'approche des temps de croisement
-                Ay_st[i, j] = compute_special_face_spacetime(mesh, front_n, front_np1, i, j, dt, "y", "general")
-            end
-        end
-    end
-    
-    return Ax_st, Ay_st
-end
-
-"""
-    compute_special_face_spacetime(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker,
-                                  i::Int, j::Int, dt::Float64, direction::String, transition_type::String)
-
-Calcule la capacité de surface spatio-temporelle pour les cas spéciaux de transition.
-
-# Arguments
-- `mesh::Mesh{2}`: Le maillage spatial
-- `front_n::FrontTracker`: La position de l'interface au temps t^n
-- `front_np1::FrontTracker`: La position de l'interface au temps t^{n+1}
-- `i::Int`, `j::Int`: Les indices de la face
-- `dt::Float64`: Le pas de temps
-- `direction::String`: "x" pour les faces verticales (Ax), "y" pour les faces horizontales (Ay)
-- `transition_type::String`: Type de transition ("ec", "ce", "ef", "fe", "general")
-
-# Retourne
-- `surface::Float64`: La capacité de surface spatio-temporelle
-"""
-function compute_special_face_spacetime(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker,
-                                       i::Int, j::Int, dt::Float64, direction::String, transition_type::String)
-    # Extraction des coordonnées des noeuds
-    x_nodes = mesh.nodes[1]
-    y_nodes = mesh.nodes[2]
-    
-    # Déterminer les points qui définissent la face
-    if direction == "x"
-        # Face verticale: points haut et bas
-        p1 = (x_nodes[i], y_nodes[j])     # Bas
-        p2 = (x_nodes[i], y_nodes[j+1])   # Haut
-    else  # direction == "y"
-        # Face horizontale: points gauche et droite
-        p1 = (x_nodes[i], y_nodes[j])     # Gauche
-        p2 = (x_nodes[i+1], y_nodes[j])   # Droite
-    end
-    
-    # Déterminer les temps où l'interface traverse la face
-    tau = find_face_crossing_times(mesh, front_n, front_np1, i, j, dt, direction)
-    
-    # Si aucun temps de croisement intermédiaire n'est trouvé, 
-    # utiliser la méthode trapézoïdale standard
-    if length(tau) <= 2  # Seulement t^n et t^{n+1}
-        surf_n = compute_surface_at_time(mesh, front_n, front_np1, i, j, 0.0, dt, direction)
-        surf_np1 = compute_surface_at_time(mesh, front_n, front_np1, i, j, dt, dt, direction)
-        
-        # Ajuster pour les transitions spécifiques
-        if transition_type == "ec" || transition_type == "ef"  # empty → cut/full
-            # La valeur initiale est 0, donc l'intégrale devrait donner plus de poids au temps final
-            return (dt / 3.0) * surf_np1
-        elseif transition_type == "ce" || transition_type == "fe"  # cut/full → empty
-            # La valeur finale est 0, donc l'intégrale devrait donner plus de poids au temps initial
-            return (dt / 3.0) * surf_n
-        else
-            # Cas général
-            return (dt / 2.0) * (surf_n + surf_np1)
-        end
-    end
-    
-    # Sinon, intégrer sur chaque sous-intervalle [τₖ, τₖ₊₁]
-    surface = 0.0
-    for k in 1:(length(tau)-1)
-        t_k = tau[k]
-        t_kp1 = tau[k+1]
-        
-        # Calculer la capacité de surface aux extrémités de l'intervalle
-        surf_k = compute_surface_at_time(mesh, front_n, front_np1, i, j, t_k, dt, direction)
-        surf_kp1 = compute_surface_at_time(mesh, front_n, front_np1, i, j, t_kp1, dt, direction)
-        
-        # Utiliser la règle trapézoïdale pour ce sous-intervalle
-        surface += ((t_kp1 - t_k) / 2.0) * (surf_k + surf_kp1)
-    end
-    
-    return surface
-end
-
-"""
-    find_face_crossing_times(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker,
-                           i::Int, j::Int, dt::Float64, direction::String)
-
-Détermine les instants où l'interface traverse une face donnée.
-
-# Arguments
-- `mesh::Mesh{2}`: Le maillage spatial
-- `front_n::FrontTracker`: La position de l'interface au temps t^n
-- `front_np1::FrontTracker`: La position de l'interface au temps t^{n+1}
-- `i::Int`, `j::Int`: Les indices de la face
-- `dt::Float64`: Le pas de temps
-- `direction::String`: "x" pour les faces verticales (Ax), "y" pour les faces horizontales (Ay)
-
-# Retourne
-- `tau::Vector{Float64}`: Temps de croisement, incluant t^n et t^{n+1}
-"""
-function find_face_crossing_times(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker,
-                                i::Int, j::Int, dt::Float64, direction::String)
-    # Commencer avec les temps aux extrémités de l'intervalle
-    tau = [0.0, dt]
-    
-    # Extraction des coordonnées des noeuds
-    x_nodes = mesh.nodes[1]
-    y_nodes = mesh.nodes[2]
-    
-    # Déterminer les points qui définissent la face
-    if direction == "x"
-        # Face verticale: points haut et bas
-        p1 = (x_nodes[i], y_nodes[j])     # Bas
-        p2 = (x_nodes[i], y_nodes[j+1])   # Haut
-        # Points additionnels le long de la face pour mieux détecter les croisements
-        additional_points = [(x_nodes[i], y_nodes[j] + k*(y_nodes[j+1]-y_nodes[j])/6) 
-                             for k in 1:5]
-    else  # direction == "y"
-        # Face horizontale: points gauche et droite
-        p1 = (x_nodes[i], y_nodes[j])     # Gauche
-        p2 = (x_nodes[i+1], y_nodes[j])   # Droite
-        # Points additionnels le long de la face pour mieux détecter les croisements
-        additional_points = [(x_nodes[i] + k*(x_nodes[i+1]-x_nodes[i])/6, y_nodes[j]) 
-                             for k in 1:5]
-    end
-    
-    # Points à tester, incluant les extrémités et les points additionnels
-    test_points = [p1, p2, additional_points...]
-    
-    # Pour chaque point, trouver le temps de croisement
-    for p in test_points
-        x, y = p
-        
-        # Vérifier le statut au temps initial et final
-        inside_n = is_point_inside(front_n, x, y)
-        inside_np1 = is_point_inside(front_np1, x, y)
-        
-        # Si le statut change, trouver le temps de croisement
-        if inside_n != inside_np1
-            # Recherche par dichotomie
-            t_low, t_high = 0.0, dt
-            crossing_time = dt / 2.0  # Valeur initiale
-            tolerance = 1e-8 * dt
-            
-            while t_high - t_low > tolerance
-                crossing_time = (t_low + t_high) / 2.0
-                
-                # Créer une interface interpolée à cet instant
-                front_t = interpolate_front(front_n, front_np1, crossing_time / dt)
-                
-                # Vérifier le statut à cet instant
-                is_inside = is_point_inside(front_t, x, y)
-                
-                # Ajuster les bornes de recherche
-                if is_inside == inside_n
-                    t_low = crossing_time
-                else
-                    t_high = crossing_time
-                end
-            end
-            
-            # Ajouter ce temps de croisement
-            push!(tau, crossing_time)
-        end
-    end
-    
-    # Éliminer les doublons et trier
-    tau = sort(unique(tau))
-    
-    return tau
-end
-
-"""
-    compute_surface_at_time(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker,
-                          i::Int, j::Int, t::Float64, dt::Float64, direction::String)
-
-Calcule la capacité de surface dans la face (i,j) à l'instant t = t_n + t.
-
-# Arguments
-- `mesh::Mesh{2}`: Le maillage spatial
-- `front_n::FrontTracker`: La position de l'interface au temps t^n
-- `front_np1::FrontTracker`: La position de l'interface au temps t^{n+1}
-- `i::Int`, `j::Int`: Les indices de la face
-- `t::Float64`: L'instant auquel calculer la capacité (relatif à t^n)
-- `dt::Float64`: Le pas de temps total
-- `direction::String`: "x" pour les faces verticales (Ax), "y" pour les faces horizontales (Ay)
-
-# Retourne
-- `surface::Float64`: La capacité de surface à l'instant t
-"""
-function compute_surface_at_time(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker,
-                               i::Int, j::Int, t::Float64, dt::Float64, direction::String)
-    # Si t est exactement t^n ou t^{n+1}, utiliser directement les capacités calculées
-    if isapprox(t, 0.0, atol=1e-10)
-        Ax_n, Ay_n = compute_surface_capacities(mesh, front_n)
-        return direction == "x" ? Ax_n[i, j] : Ay_n[i, j]
-    elseif isapprox(t, dt, atol=1e-10)
-        Ax_np1, Ay_np1 = compute_surface_capacities(mesh, front_np1)
-        return direction == "x" ? Ax_np1[i, j] : Ay_np1[i, j]
-    end
-    
-    # Sinon, interpoler l'interface et calculer les capacités
-    t_ratio = t / dt
-    front_t = interpolate_front(front_n, front_np1, t_ratio)
-    
-    # Calculer les capacités à cet instant
-    Ax_t, Ay_t = compute_surface_capacities(mesh, front_t)
-    
-    return direction == "x" ? Ax_t[i, j] : Ay_t[i, j]
-end
-
-"""
-    compute_spacetime_centerline_lengths(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker, dt::Float64)
-
-Calcule les capacités de lignes centrales spatio-temporelles en intégrant les capacités Bx et By dans le temps.
-
-# Arguments
-- `mesh::Mesh{2}`: Le maillage spatial
-- `front_n::FrontTracker`: La position de l'interface au temps t^n
-- `front_np1::FrontTracker`: La position de l'interface au temps t^{n+1}
-- `dt::Float64`: Le pas de temps Δt
-
-# Retourne
-- `Bx_st::Matrix{Float64}`: Les longueurs mouillées spatio-temporelles des lignes verticales passant par le centroïde
-- `By_st::Matrix{Float64}`: Les longueurs mouillées spatio-temporelles des lignes horizontales passant par le centroïde
-"""
-function compute_spacetime_centerline_lengths(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker, dt::Float64)
-    # Extraction des coordonnées des noeuds
-    x_nodes = mesh.nodes[1]
-    y_nodes = mesh.nodes[2]
-    nx = length(x_nodes) - 1
-    ny = length(y_nodes) - 1
-    
-    # Initialisation des matrices de résultats
-    Bx_st = zeros(nx+1, ny+1)  # Longueurs verticales spatio-temporelles
-    By_st = zeros(nx+1, ny+1)  # Longueurs horizontales spatio-temporelles
-    
-    # Calculer les propriétés des cellules aux deux instants
-    _, _, centroids_x_n, centroids_y_n, cell_types_n = fluid_cell_properties(mesh, front_n)
-    _, _, centroids_x_np1, centroids_y_np1, cell_types_np1 = fluid_cell_properties(mesh, front_np1)
-    
-    # Calculer les capacités Bx et By aux deux instants
-    Wx_n, Wy_n, Bx_n, By_n = compute_second_type_capacities(mesh, front_n, centroids_x_n, centroids_y_n)
-    Wx_np1, Wy_np1, Bx_np1, By_np1 = compute_second_type_capacities(mesh, front_np1, centroids_x_np1, centroids_y_np1)
-    
-    # Pour chaque cellule, calculer les capacités spatio-temporelles
+    # Pour chaque cellule, calculer sa contribution à la jacobienne
     for i in 1:nx
         for j in 1:ny
-            # Récupérer le type de cellule aux deux instants
-            cell_type_n = cell_types_n[i, j]
-            cell_type_np1 = cell_types_np1[i, j]
+            intercept_jacobian[(i,j)] = []
             
-            # Récupérer les valeurs aux deux instants
-            bx_n = Bx_n[i, j]
-            bx_np1 = Bx_np1[i, j]
-            by_n = By_n[i, j]
-            by_np1 = By_np1[i, j]
-            
-            # Appliquer une logique similaire à celle utilisée pour les surfaces
-            # Pour Bx (longueurs verticales)
-            if cell_type_n == 0 && cell_type_np1 == 0
-                # empty → empty : aucun fluide
-                Bx_st[i, j] = 0.0
-            elseif cell_type_n == 1 && cell_type_np1 == 1
-                # full → full : cellule toujours fluide
-                Bx_st[i, j] = dt * (y_nodes[j+1] - y_nodes[j])
-            elseif cell_type_n == 0 && cell_type_np1 == -1
-                # empty → cut : cas spécial
-                Bx_st[i, j] = compute_special_centerline_spacetime(mesh, front_n, front_np1, i, j, dt, "x", "ec")
-            elseif cell_type_n == -1 && cell_type_np1 == 0
-                # cut → empty : cas spécial
-                Bx_st[i, j] = compute_special_centerline_spacetime(mesh, front_n, front_np1, i, j, dt, "x", "ce")
-            elseif cell_type_n == 0 && cell_type_np1 == 1
-                # empty → full : cas spécial
-                Bx_st[i, j] = compute_special_centerline_spacetime(mesh, front_n, front_np1, i, j, dt, "x", "ef")
-            elseif cell_type_n == 1 && cell_type_np1 == 0
-                # full → empty : cas spécial
-                Bx_st[i, j] = compute_special_centerline_spacetime(mesh, front_n, front_np1, i, j, dt, "x", "fe")
-            else
-                # Autres cas (cut → cut, cut → full, full → cut) : règle trapézoïdale
-                Bx_st[i, j] = (dt / 2.0) * (bx_n + bx_np1)
-            end
-            
-            # Pour By (longueurs horizontales)
-            if cell_type_n == 0 && cell_type_np1 == 0
-                # empty → empty : aucun fluide
-                By_st[i, j] = 0.0
-            elseif cell_type_n == 1 && cell_type_np1 == 1
-                # full → full : cellule toujours fluide
-                By_st[i, j] = dt * (x_nodes[i+1] - x_nodes[i])
-            elseif cell_type_n == 0 && cell_type_np1 == -1
-                # empty → cut : cas spécial
-                By_st[i, j] = compute_special_centerline_spacetime(mesh, front_n, front_np1, i, j, dt, "y", "ec")
-            elseif cell_type_n == -1 && cell_type_np1 == 0
-                # cut → empty : cas spécial
-                By_st[i, j] = compute_special_centerline_spacetime(mesh, front_n, front_np1, i, j, dt, "y", "ce")
-            elseif cell_type_n == 0 && cell_type_np1 == 1
-                # empty → full : cas spécial
-                By_st[i, j] = compute_special_centerline_spacetime(mesh, front_n, front_np1, i, j, dt, "y", "ef")
-            elseif cell_type_n == 1 && cell_type_np1 == 0
-                # full → empty : cas spécial
-                By_st[i, j] = compute_special_centerline_spacetime(mesh, front_n, front_np1, i, j, dt, "y", "fe")
-            else
-                # Autres cas (cut → cut, cut → full, full → cut) : règle trapézoïdale
-                By_st[i, j] = (dt / 2.0) * (by_n + by_np1)
+            # Parcourir tous les segments qui intersectent cette cellule
+            for (segment_idx, intersection_length) in cell_segment_intersections[(i,j)]
+                # J[k,I] = ρL × A_k,I
+                jacobian_value = density * intersection_length
+                
+                # Stocker la valeur dans la jacobienne
+                push!(intercept_jacobian[(i,j)], (segment_idx, jacobian_value))
             end
         end
     end
     
-    return Bx_st, By_st
+    return intercept_jacobian, segments, segment_normals, segment_intercepts, segment_lengths
 end
 
 """
-    compute_special_centerline_spacetime(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker,
-                                        i::Int, j::Int, dt::Float64, direction::String, transition_type::String)
+    update_front_with_intercept_displacements!(ft::FrontTracker, displacements::AbstractVector{<:Real}, 
+                                            segment_normals::Vector{Tuple{Float64, Float64}},
+                                            segment_lengths::Vector{Float64})
 
-Calcule la capacité de ligne centrale spatio-temporelle pour les cas spéciaux de transition.
+Met à jour l'interface en déplaçant chaque segment selon ses déplacements d'intercept.
+Applique une pondération basée sur la longueur des segments pour distribuer les déplacements
+aux marqueurs partagés entre plusieurs segments.
 
-# Arguments
-- `mesh::Mesh{2}`: Le maillage spatial
-- `front_n::FrontTracker`: La position de l'interface au temps t^n
-- `front_np1::FrontTracker`: La position de l'interface au temps t^{n+1}
-- `i::Int`, `j::Int`: Les indices de la cellule
-- `dt::Float64`: Le pas de temps
-- `direction::String`: "x" pour les lignes verticales (Bx), "y" pour les lignes horizontales (By)
-- `transition_type::String`: Type de transition ("ec", "ce", "ef", "fe")
+Paramètres:
+- ft: l'objet FrontTracker à mettre à jour
+- displacements: vecteur des déplacements δ_I pour chaque segment
+- segment_normals: vecteur des normales unitaires pour chaque segment
+- segment_lengths: vecteur des longueurs de chaque segment
 
-# Retourne
-- `length::Float64`: La capacité de ligne centrale spatio-temporelle
+Retourne le FrontTracker mis à jour.
 """
-function compute_special_centerline_spacetime(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker,
-                                             i::Int, j::Int, dt::Float64, direction::String, transition_type::String)
-    # Extraction des coordonnées des noeuds
-    x_nodes = mesh.nodes[1]
-    y_nodes = mesh.nodes[2]
+function update_front_with_intercept_displacements!(ft::FrontTracker, displacements::AbstractVector{<:Real}, 
+                                                  segment_normals::Vector{Tuple{Float64, Float64}},
+                                                  segment_lengths::Vector{Float64})
+    markers = copy(ft.markers)
+    n_markers = length(markers)
+    n_segments = length(displacements)
     
-    # Déterminer les temps caractéristiques de changement
-    # Utiliser les mêmes temps de croisement que pour les volumes
-    tau = find_crossing_times(mesh, front_n, front_np1, i, j, dt)
+  
     
-    # Si aucun temps de croisement intermédiaire n'est trouvé, 
-    # utiliser la méthode trapézoïdale standard
-    if length(tau) <= 2  # Seulement t^n et t^{n+1}
-        centerline_n = compute_centerline_at_time(mesh, front_n, front_np1, i, j, 0.0, dt, direction)
-        centerline_np1 = compute_centerline_at_time(mesh, front_n, front_np1, i, j, dt, dt, direction)
+    # Structure pour stocker les contributions pondérées de chaque segment à chaque marqueur
+    segment_contributions = Dict{Int, Vector{Tuple{Float64, Tuple{Float64, Float64}}}}()
+    for i in 1:n_markers
+        segment_contributions[i] = []
+    end
+    
+    # Pour chaque segment, calculer sa contribution aux marqueurs
+    for (s_idx, displacement) in enumerate(displacements)
+        # Récupérer les indices des marqueurs aux extrémités du segment
+        start_idx = s_idx
+        end_idx = s_idx < n_markers ? s_idx + 1 : 1
         
-        # Ajuster pour les transitions spécifiques
-        if transition_type == "ec" || transition_type == "ef"  # empty → cut/full
-            # La valeur initiale est 0, favoriser la valeur finale
-            return (dt / 3.0) * centerline_np1
-        elseif transition_type == "ce" || transition_type == "fe"  # cut/full → empty
-            # La valeur finale est 0, favoriser la valeur initiale
-            return (dt / 3.0) * centerline_n
-        else
-            # Cas général
-            return (dt / 2.0) * (centerline_n + centerline_np1)
+        # Calculer le vecteur de déplacement
+        normal = segment_normals[s_idx]
+        vector_displacement = (displacement * normal[1], displacement * normal[2])
+        
+        # Utiliser la longueur du segment comme poids
+        segment_weight = max(segment_lengths[s_idx], 1e-10)  # Éviter division par zéro
+        
+        # Enregistrer la contribution pondérée de ce segment pour chaque marqueur
+        push!(segment_contributions[start_idx], (segment_weight, vector_displacement))
+        push!(segment_contributions[end_idx], (segment_weight, vector_displacement))
+    end
+    
+    # Calculer et appliquer le déplacement moyen pondéré pour chaque marqueur
+    for i in 1:n_markers
+        contributions = segment_contributions[i]
+        if !isempty(contributions)
+            # Calculer la somme des poids
+            total_weight = sum(contrib[1] for contrib in contributions)
+            
+            if total_weight > 0
+                # Calculer le déplacement moyen pondéré
+                avg_dx = sum(contrib[1] * contrib[2][1] for contrib in contributions) / total_weight
+                avg_dy = sum(contrib[1] * contrib[2][2] for contrib in contributions) / total_weight
+                
+                # Appliquer le déplacement
+                markers[i] = (markers[i][1] + avg_dx, markers[i][2] + avg_dy)
+            end
         end
     end
     
-    # Sinon, intégrer sur chaque sous-intervalle [τₖ, τₖ₊₁]
-    centerline_length = 0.0
-    for k in 1:(length(tau)-1)
-        t_k = tau[k]
-        t_kp1 = tau[k+1]
-        
-        # Calculer les longueurs aux extrémités de l'intervalle
-        length_k = compute_centerline_at_time(mesh, front_n, front_np1, i, j, t_k, dt, direction)
-        length_kp1 = compute_centerline_at_time(mesh, front_n, front_np1, i, j, t_kp1, dt, direction)
-        
-        # Utiliser la règle trapézoïdale pour ce sous-intervalle
-        centerline_length += ((t_kp1 - t_k) / 2.0) * (length_k + length_kp1)
-    end
+    # Mettre à jour l'interface avec les nouveaux marqueurs
+    set_markers!(ft, markers, ft.is_closed)
     
-    return centerline_length
-end
-
-"""
-    compute_centerline_at_time(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker,
-                              i::Int, j::Int, t::Float64, dt::Float64, direction::String)
-
-Calcule la longueur de ligne centrale pour la cellule (i,j) à l'instant t = t_n + t.
-
-# Arguments
-- `mesh::Mesh{2}`: Le maillage spatial
-- `front_n::FrontTracker`: La position de l'interface au temps t^n
-- `front_np1::FrontTracker`: La position de l'interface au temps t^{n+1}
-- `i::Int`, `j::Int`: Les indices de la cellule
-- `t::Float64`: L'instant auquel calculer la longueur (relatif à t^n)
-- `dt::Float64`: Le pas de temps total
-- `direction::String`: "x" pour les lignes verticales (Bx), "y" pour les lignes horizontales (By)
-
-# Retourne
-- `length::Float64`: La longueur de ligne centrale à l'instant t
-"""
-function compute_centerline_at_time(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker,
-                                   i::Int, j::Int, t::Float64, dt::Float64, direction::String)
-    # Si t est exactement t^n ou t^{n+1}, utiliser directement les valeurs calculées
-    if isapprox(t, 0.0, atol=1e-10)
-        _, _, centroids_x_n, centroids_y_n, _ = fluid_cell_properties(mesh, front_n)
-        _, _, Bx_n, By_n = compute_second_type_capacities(mesh, front_n, centroids_x_n, centroids_y_n)
-        return direction == "x" ? Bx_n[i, j] : By_n[i, j]
-    elseif isapprox(t, dt, atol=1e-10)
-        _, _, centroids_x_np1, centroids_y_np1, _ = fluid_cell_properties(mesh, front_np1)
-        _, _, Bx_np1, By_np1 = compute_second_type_capacities(mesh, front_np1, centroids_x_np1, centroids_y_np1)
-        return direction == "x" ? Bx_np1[i, j] : By_np1[i, j]
-    end
-    
-    # Sinon, interpoler l'interface et calculer les capacités
-    t_ratio = t / dt
-    front_t = interpolate_front(front_n, front_np1, t_ratio)
-    
-    # Calculer les propriétés à cet instant t
-    _, _, centroids_x_t, centroids_y_t, _ = fluid_cell_properties(mesh, front_t)
-    _, _, Bx_t, By_t = compute_second_type_capacities(mesh, front_t, centroids_x_t, centroids_y_t)
-    
-    return direction == "x" ? Bx_t[i, j] : By_t[i, j]
+    return ft
 end
