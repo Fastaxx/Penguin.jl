@@ -192,6 +192,91 @@ function FrontTrackingToCapacity(front::FrontTracker, mesh::AbstractMesh; comput
 end
 
 """
+    FrontTracker1DToCapacity(front::FrontTracker1D, mesh::AbstractMesh; compute_centroids::Bool = true)
+
+Convert 1D front tracking capacities to the format expected by the Capacity struct.
+"""
+function FrontTracker1DToCapacity(front::FrontTracker1D, mesh::AbstractMesh; compute_centroids::Bool = true)
+    if isa(mesh, Mesh{1})
+        # Compute all capacities using front tracking
+        ft_capacities = compute_capacities_1d(mesh, front)
+        
+        # Extract dimensions
+        x_nodes = mesh.nodes[1]
+        nx = length(x_nodes)
+        
+        # Convert volumes to the required sparse format
+        volumes = ft_capacities[:volumes][1:nx]
+        V = spdiagm(0 => volumes)
+        
+        # Create interface information
+        interface_lengths = zeros(nx)
+        for (i, pos) in ft_capacities[:interface_positions]
+            interface_lengths[i] = 1.0  # In 1D, interface "length" is 1
+        end
+        Γ = spdiagm(0 => interface_lengths)
+        
+        # Extract face capacities
+        Ax_vec = ft_capacities[:Ax][1:nx]
+        A = (spdiagm(0 => Ax_vec),)
+        
+        # Extract center line capacities
+        Bx_vec = ft_capacities[:Bx][1:nx]
+        B = (spdiagm(0 => Bx_vec),)
+        
+        # Extract staggered volumes
+        Wx_vec = ft_capacities[:Wx][1:nx]
+        W = (spdiagm(0 => Wx_vec),)
+        
+        # Create cell centroids
+        centroids_x = ft_capacities[:centroids_x][1:nx]
+        C_ω = [SVector{1, Float64}(centroids_x[i]) for i in 1:nx]
+        
+        # Get cell types
+        cell_types = ft_capacities[:cell_types][1:nx]
+        
+        # Create interface centroids if requested
+        if compute_centroids
+            C_γ = Vector{SVector{1, Float64}}(undef, nx)
+            
+            # Initialize with zeros
+            for i in 1:nx
+                C_γ[i] = SVector{1, Float64}(0.0)
+            end
+            
+            # Fill in known interface points
+            for (i, pos) in ft_capacities[:interface_positions]
+                if 1 <= i <= nx
+                    C_γ[i] = SVector{1, Float64}(pos)
+                end
+            end
+        else
+            C_γ = Vector{SVector{1, Float64}}(undef, 0)
+        end
+        
+        return (A, B, V, W, C_ω, C_γ, Γ, cell_types)
+    else
+        error("1D Front Tracking capacity computation is only supported for 1D meshes")
+    end
+end
+
+"""
+    Capacity(front::FrontTracker1D, mesh::AbstractMesh; compute_centroids::Bool = true)
+
+Compute the capacity directly from a 1D front tracker.
+"""
+function Capacity(front::FrontTracker1D, mesh::AbstractMesh; compute_centroids::Bool = true)
+    # Convert front tracking capacities to Capacity format
+    A, B, V, W, C_ω, C_γ, Γ, cell_types = FrontTracker1DToCapacity(front, mesh; compute_centroids=compute_centroids)
+    
+    # Create a dummy level set function based on the front tracker's SDF
+    dummy_body(x, y=0.0, z=0.0) = sdf(front, x)
+    
+    return Capacity{1}(A, B, V, W, C_ω, C_γ, Γ, cell_types, mesh, dummy_body)
+end
+
+
+"""
     VOFI(body::Function, mesh::CartesianMesh)
 
 Compute the Capacity quantities based on VOFI for a given body and mesh.

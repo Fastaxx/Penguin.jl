@@ -1,179 +1,216 @@
 using Penguin
 using CairoMakie
 using LibGEOS
-
+using SparseArrays
+using Statistics
 """
-Visualization of Space-Time Capacities (Ax_st and Ay_st)
-Shows how front movement between two time steps affects space-time capacities
+Simplified comparison of space-time capacities using Space-Time Mesh with VOFI
 """
 
 # 1. Define the mesh parameters
-nx, ny = 20, 20        # Number of cells (higher resolution for better visualization)
-lx, ly = 10.0, 10.0    # Domain size
-x0, y0 = -5.0, -5.0    # Domain origin
-dt = 0.1              # Time step size
+nx, ny = 40, 40
+lx, ly = 10.0, 10.0
+x0, y0 = -5.0, -5.0
+dt = 0.1
 
-# Create the mesh using ranges
-x_range = range(x0, x0 + lx, length=nx+1)
-y_range = range(y0, y0 + ly, length=ny+1)
+# Create the spatial mesh
 mesh = Penguin.Mesh((nx, ny), (lx, ly), (x0, y0))
 
-# 2. Create front trackers at two different time steps
-# Time n: Circle at the center
+# 2. Create front trackers at two different time steps (expanding circle)
+# Time n: Circle at center
 front_n = FrontTracker()
+nmarkers = 100  # Number of markers for the circle
 radius_n = 2.5
-center_x_n, center_y_n = 0.0, 0.0
-create_circle!(front_n, center_x_n, center_y_n, radius_n, 60)  # More markers for smoother interface
+center_x, center_y = 0.1, 0.0
+create_circle!(front_n, center_x, center_y, radius_n, nmarkers)
 
-# Time n+1: Circle slightly larger and shifted
+# Time n+1: Circle slightly larger
 front_np1 = FrontTracker()
 radius_np1 = 3.0
-center_x_np1, center_y_np1 = 0.0, 0.0
-create_circle!(front_np1, center_x_np1, center_y_np1, radius_np1, 60)
+create_circle!(front_np1, center_x, center_y, radius_np1, nmarkers)
 
-# 3. Compute space-time capacities
-spacetime_capacities = compute_spacetime_capacities(mesh, front_n, front_np1, dt)
-Ax_st = spacetime_capacities[:Ax_st]
-Ay_st = spacetime_capacities[:Ay_st]
+# 3. Compute space-time capacities using Front Tracking
+ft_spacetime_capacities = compute_spacetime_capacities(mesh, front_n, front_np1, dt)
+Ax_st_ft = ft_spacetime_capacities[:Ax_spacetime]
+Ay_st_ft = ft_spacetime_capacities[:Ay_spacetime]
 
-# 4. Create the visualization
-fig = Figure(size=(1200, 1000))
-
-# Plot the interfaces and mesh
-ax1 = Axis(fig[1, 1:2], title="Front Movement over Time",
-          xlabel="x", ylabel="y", aspect=DataAspect())
-
-# Plot mesh grid lines
-for x in x_range
-    lines!(ax1, [x, x], [y_range[1], y_range[end]], 
-          color=:lightgray, linestyle=:dash, linewidth=0.5)
+# 4. Create a space-time level set function
+function spacetime_ls(x, y, t)
+    # Linear interpolation between circles
+    α = t / dt
+    radius_t = (1-α) * radius_n + α * radius_np1
+    return sqrt((x - center_x)^2 + (y - center_y)^2) - radius_t
 end
 
-for y in y_range
-    lines!(ax1, [x_range[1], x_range[end]], [y, y], 
-          color=:lightgray, linestyle=:dash, linewidth=0.5)
-end
+# 5. Create a SpaceTimeMesh and compute VOFI capacities directly
+# Create time interval [0, dt]
+times = [0.0, dt]
+st_mesh = Penguin.SpaceTimeMesh(mesh, times)
 
-# Plot the front tracking interfaces
-markers_n = get_markers(front_n)
-marker_x_n = [m[1] for m in markers_n]
-marker_y_n = [m[2] for m in markers_n]
+# Get VOFI capacity on the space-time mesh
+vofi_st_capacity = Capacity(spacetime_ls, st_mesh, method="VOFI")
 
-markers_np1 = get_markers(front_np1)
-marker_x_np1 = [m[1] for m in markers_np1]
-marker_y_np1 = [m[2] for m in markers_np1]
+# Extract Ax and Ay components (these should be space-time integrated)
+Ax_st_vofi = Array(SparseArrays.diag(vofi_st_capacity.A[1]))
+Ax_st_vofi = reshape(Ax_st_vofi, (nx+1, ny+1,2))
+Ay_st_vofi = Array(SparseArrays.diag(vofi_st_capacity.A[2]))
+Ay_st_vofi = reshape(Ay_st_vofi, (nx+1, ny+1,2))
 
-# Draw the interface lines
-lines!(ax1, marker_x_n, marker_y_n, color=:blue, linewidth=2,
-      label="Interface at t_n")
-lines!(ax1, marker_x_np1, marker_y_np1, color=:red, linewidth=2,
-      label="Interface at t_n+1")
+Ax_st_vofi = Ax_st_vofi[:, :, 1]  # Extract Ax component
+Ay_st_vofi = Ay_st_vofi[:, :, 1]  # Extract Ay component
 
-# Add arrows to show movement direction
-n_arrows = 10
-for i in 1:n_arrows
-    idx = div(length(markers_n), n_arrows) * i
-    if idx > 0 && idx <= length(markers_n) && idx <= length(markers_np1)
-        arrows!([marker_x_n[idx]], [marker_y_n[idx]], 
-               [marker_x_np1[idx] - marker_x_n[idx]], [marker_y_np1[idx] - marker_y_n[idx]], 
-               arrowsize=10, linewidth=1.5, color=:purple)
+# Helper function for safe relative error calculation
+function safe_relative_error(ft_val, vofi_val; epsilon=1e-10)
+    if abs(vofi_val) < epsilon
+        # For near-zero vofi values
+        return abs(ft_val) < epsilon ? 0.0 : 1.0  # 0% or 100% error
+    else
+        return abs(ft_val - vofi_val) / abs(vofi_val)
     end
 end
 
+# Apply this function element-wise
+function relative_error_matrix(ft_mat, vofi_mat; epsilon=1e-10)
+    result = zeros(size(ft_mat))
+    for i in eachindex(ft_mat)
+        result[i] = safe_relative_error(ft_mat[i], vofi_mat[i], epsilon=epsilon)
+    end
+    return result
+end
+
+# Calculate relative differences between methods
+Ax_rel_diff = relative_error_matrix(Ax_st_ft, Ax_st_vofi)
+Ay_rel_diff = relative_error_matrix(Ay_st_ft, Ay_st_vofi)
+
+# 6. Create visualization for comparison
+fig = Figure(size=(1500, 800))  # Wider figure to accommodate difference plots
+
+# 6.1 Row 1: Show interfaces at both time steps
+ax1 = Axis(fig[1, 1:3], title="Interface Movement", 
+          xlabel="x", ylabel="y", aspect=DataAspect())
+
+# Plot the interfaces
+markers_n = get_markers(front_n)
+markers_np1 = get_markers(front_np1)
+
+lines!(ax1, first.(markers_n), last.(markers_n), color=:blue, linewidth=2,
+      label="Interface at t=0")
+lines!(ax1, first.(markers_np1), last.(markers_np1), color=:red, linewidth=2,
+      label="Interface at t=dt")
+
 axislegend(ax1, position=:rt)
 
-# Create heatmap for space-time Ax capacity
-ax2 = Axis(fig[2, 1], title="Space-Time Ax Capacity",
+# 6.2 Row 2: Compare Ax capacities
+ax2 = Axis(fig[2, 1], title="Front Tracking Ax_st",
+          xlabel="x", ylabel="y", aspect=DataAspect())
+ax3 = Axis(fig[2, 2], title="VOFI Space-Time Ax_st",
+          xlabel="x", ylabel="y", aspect=DataAspect())
+ax_diff_x = Axis(fig[2, 3], title="Relative Difference (Ax)",
           xlabel="x", ylabel="y", aspect=DataAspect())
 
 # Get mesh node positions for plotting
 x_nodes = mesh.nodes[1]
 y_nodes = mesh.nodes[2]
 
-# Plot Ax_st as a heatmap (vertically centered at cell faces)
-Ax_st_clipped = copy(Ax_st)
-max_val = maximum(abs.(Ax_st)) * 0.9  # Clip for better color scale
-Ax_st_clipped = clamp.(Ax_st, 0.0, max_val)
+# Set consistent color range for Ax
+max_Ax = maximum([maximum(Ax_st_ft), maximum(Ax_st_vofi)])
 
-# For vertically-aligned heatmap (Ax is on vertical faces)
-hm_ax = heatmap!(ax2, x_nodes, y_nodes[1:end-1] .+ diff(y_nodes)/2, 
-                Ax_st_clipped', colormap=:viridis)
-Colorbar(fig[2, 2], hm_ax, label="Ax_st (Space-Time Capacity)")
+# Plot Ax capacities
+hm_Ax_ft = heatmap!(ax2, x_nodes, y_nodes[1:end-1] .+ diff(y_nodes)/2, 
+                  Ax_st_ft', colormap=:viridis, colorrange=(0, max_Ax))
+Colorbar(fig[2, 4], hm_Ax_ft, label="Ax_st (Front Tracking)")
 
-# Plot the interfaces on the Ax map too
-lines!(ax2, marker_x_n, marker_y_n, color=:blue, linewidth=1.5)
-lines!(ax2, marker_x_np1, marker_y_np1, color=:red, linewidth=1.5)
+hm_Ax_vofi = heatmap!(ax3, x_nodes, y_nodes[1:end-1] .+ diff(y_nodes)/2, 
+                     Ax_st_vofi', colormap=:viridis, colorrange=(0, max_Ax))
+Colorbar(fig[2, 5], hm_Ax_vofi, label="Ax_st (VOFI)")
 
-# Create heatmap for space-time Ay capacity
-ax3 = Axis(fig[3, 1], title="Space-Time Ay Capacity",
+# Plot relative difference for Ax (capped at 0.2 or 20%)
+max_rel_diff_x = min(maximum(filter(isfinite, Ax_rel_diff)), 0.2)  # Cap at 20% for better visualization
+hm_Ax_diff = heatmap!(ax_diff_x, x_nodes, y_nodes[1:end-1] .+ diff(y_nodes)/2, 
+                     Ax_rel_diff', colormap=:plasma, colorrange=(0, max_rel_diff_x))
+Colorbar(fig[2, 6], hm_Ax_diff, label="Relative Difference (0-20%)")
+
+# Add interfaces to the Ax plots
+lines!(ax2, first.(markers_n), last.(markers_n), color=:blue, linewidth=1)
+lines!(ax2, first.(markers_np1), last.(markers_np1), color=:red, linewidth=1)
+
+lines!(ax3, first.(markers_n), last.(markers_n), color=:blue, linewidth=1)
+lines!(ax3, first.(markers_np1), last.(markers_np1), color=:red, linewidth=1)
+
+lines!(ax_diff_x, first.(markers_n), last.(markers_n), color=:blue, linewidth=1)
+lines!(ax_diff_x, first.(markers_np1), last.(markers_np1), color=:red, linewidth=1)
+
+# 6.3 Row 3: Compare Ay capacities
+ax4 = Axis(fig[3, 1], title="Front Tracking Ay_st",
+          xlabel="x", ylabel="y", aspect=DataAspect())
+ax5 = Axis(fig[3, 2], title="VOFI Space-Time Ay_st",
+          xlabel="x", ylabel="y", aspect=DataAspect())
+ax_diff_y = Axis(fig[3, 3], title="Relative Difference (Ay)",
           xlabel="x", ylabel="y", aspect=DataAspect())
 
-# Plot Ay_st as a heatmap (horizontally centered at cell faces)
-Ay_st_clipped = copy(Ay_st)
-max_val = maximum(abs.(Ay_st)) * 0.9  # Clip for better color scale
-Ay_st_clipped = clamp.(Ay_st, 0.0, max_val)
+# Set consistent color range for Ay
+max_Ay = maximum([maximum(Ay_st_ft), maximum(Ay_st_vofi)])
 
-# For horizontally-aligned heatmap (Ay is on horizontal faces)
-hm_ay = heatmap!(ax3, x_nodes[1:end-1] .+ diff(x_nodes)/2, y_nodes, 
-                Ay_st_clipped, colormap=:plasma)
-Colorbar(fig[3, 2], hm_ay, label="Ay_st (Space-Time Capacity)")
+# Plot Ay capacities
+hm_Ay_ft = heatmap!(ax4, x_nodes[1:end-1] .+ diff(x_nodes)/2, y_nodes, 
+                  Ay_st_ft, colormap=:viridis, colorrange=(0, max_Ay))
+Colorbar(fig[3, 4], hm_Ay_ft, label="Ay_st (Front Tracking)")
 
-# Plot the interfaces on the Ay map too
-lines!(ax3, marker_x_n, marker_y_n, color=:blue, linewidth=1.5)
-lines!(ax3, marker_x_np1, marker_y_np1, color=:red, linewidth=1.5)
+hm_Ay_vofi = heatmap!(ax5, x_nodes[1:end-1] .+ diff(x_nodes)/2, y_nodes, 
+                     Ay_st_vofi, colormap=:viridis, colorrange=(0, max_Ay))
+Colorbar(fig[3, 5], hm_Ay_vofi, label="Ay_st (VOFI)")
 
-# Add a combined view with cell marching squares classification
-ax4 = Axis(fig[2:3, 3:4], title="Marching Squares Classification",
-          xlabel="x", ylabel="y", aspect=DataAspect())
+# Plot relative difference for Ay (capped at 0.2 or 20%)
+max_rel_diff_y = min(maximum(filter(isfinite, Ay_rel_diff)), 0.2)  # Cap at 20% for better visualization
+hm_Ay_diff = heatmap!(ax_diff_y, x_nodes[1:end-1] .+ diff(x_nodes)/2, y_nodes, 
+                     Ay_rel_diff, colormap=:plasma, colorrange=(0, max_rel_diff_y))
+Colorbar(fig[3, 6], hm_Ay_diff, label="Relative Difference (0-20%)")
 
-# Plot mesh grid
-for x in x_range
-    lines!(ax4, [x, x], [y_range[1], y_range[end]], 
-          color=:lightgray, linestyle=:dash, linewidth=0.5)
-end
+# Add interfaces to the Ay plots
+lines!(ax4, first.(markers_n), last.(markers_n), color=:blue, linewidth=1)
+lines!(ax4, first.(markers_np1), last.(markers_np1), color=:red, linewidth=1)
 
-for y in y_range
-    lines!(ax4, [x_range[1], x_range[end]], [y, y], 
-          color=:lightgray, linestyle=:dash, linewidth=0.5)
-end
+lines!(ax5, first.(markers_n), last.(markers_n), color=:blue, linewidth=1)
+lines!(ax5, first.(markers_np1), last.(markers_np1), color=:red, linewidth=1)
 
-# Draw interfaces
-lines!(ax4, marker_x_n, marker_y_n, color=:blue, linewidth=2, label="t_n")
-lines!(ax4, marker_x_np1, marker_y_np1, color=:red, linewidth=2, label="t_n+1")
+lines!(ax_diff_y, first.(markers_n), last.(markers_n), color=:blue, linewidth=1)
+lines!(ax_diff_y, first.(markers_np1), last.(markers_np1), color=:red, linewidth=1)
 
-# Color cells based on marching squares case
-# (This is a simplified visualization - for each vertical face, check if it has non-zero capacity)
-for i in 1:nx+1
-    for j in 1:ny
-        # For vertical faces (Ax)
-        if Ax_st[i,j] > 0.01
-            scatter!(ax4, [x_nodes[i]], [y_nodes[j] + diff(y_nodes)[1]/2], 
-                    color=:green, marker='∣', markersize=20, alpha=0.7)
-        end
-    end
-end
+# Add row for statistics of differences
+ax_stats = Axis(fig[4, 1:3], title="Relative Error Statistics", 
+               xlabel="Relative Error", ylabel="Frequency")
 
-# For horizontal faces (Ay)
-for i in 1:nx
-    for j in 1:ny+1
-        if Ay_st[i,j] > 0.01
-            scatter!(ax4, [x_nodes[i] + diff(x_nodes)[1]/2], [y_nodes[j]], 
-                    color=:orange, marker='—', markersize=20, alpha=0.7)
-        end
-    end
-end
+# Create histograms of difference values
+hist!(ax_stats, filter(x -> x > 0 && x < 0.5, vec(Ax_rel_diff)), bins=20, color=:blue, label="Ax Relative Error")
+hist!(ax_stats, filter(x -> x > 0 && x < 0.5, vec(Ay_rel_diff)), bins=20, color=:red, label="Ay Relative Error")
+axislegend(ax_stats, position=:rt)
 
-axislegend(ax4, position=:rt)
+# Add statistical summary text
+# Using valid_values to filter out potential NaN or Inf values
+valid_ax = filter(isfinite, vec(Ax_rel_diff))
+valid_ay = filter(isfinite, vec(Ay_rel_diff))
 
-# Adjust layout
-fig[1, 1:2] = ax1
-fig[2, 1:2] = ax2
-fig[3, 1:2] = ax3
-fig[2:3, 3:4] = ax4
+stats_text = """
+Statistical Summary:
+Max Relative Error Ax: $(round(maximum(valid_ax)*100, digits=2))%
+Max Relative Error Ay: $(round(maximum(valid_ay)*100, digits=2))%
+Mean Relative Error Ax: $(round(mean(valid_ax)*100, digits=2))%
+Mean Relative Error Ay: $(round(mean(valid_ay)*100, digits=2))%
+Median Relative Error Ax: $(round(median(valid_ax)*100, digits=2))%
+Median Relative Error Ay: $(round(median(valid_ay)*100, digits=2))%
+"""
 
-# Display the figure
+Label(fig[4, 4:6], stats_text, tellwidth=false)
+
+# Save and display the figure
+save("spacetime_capacities_with_relative_differences.png", fig)
 display(fig)
 
-# Save the figure
-save("spacetime_capacities_visualization.png", fig)
-println("Visualization saved as 'spacetime_capacities_visualization.png'")
+# Print total capacities for comparison
+println("Total Ax (Front Tracking): $(sum(Ax_st_ft))")
+println("Total Ax (VOFI): $(sum(Ax_st_vofi))")
+println("Relative Error: $(round((sum(Ax_st_ft) - sum(Ax_st_vofi))/sum(Ax_st_vofi)*100, digits=2))%")
+println()
+println("Total Ay (Front Tracking): $(sum(Ay_st_ft))")
+println("Total Ay (VOFI): $(sum(Ay_st_vofi))")
+println("Relative Error: $(round((sum(Ay_st_ft) - sum(Ay_st_vofi))/sum(Ay_st_vofi)*100, digits=2))%")

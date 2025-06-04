@@ -32,6 +32,10 @@ export compute_capacities, fluid_cell_properties, compute_surface_capacities, co
 export compute_intercept_jacobian, compute_segment_cell_intersections, create_segment_line, compute_segment_parameters, update_front_with_intercept_displacements!
 export compute_spacetime_capacities
 
+include("front_tracking1D.jl")
+export FrontTracker1D, compute_capacities_1d, sdf, is_point_inside
+export compute_spacetime_capacities_1d
+
 include("capacity.jl")
 export Capacity
 
