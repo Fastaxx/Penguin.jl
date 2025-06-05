@@ -62,4 +62,4 @@ solver, residuals, xf_log = solve_MovingLiquidDiffusionUnsteadyMono!(solver, Flu
 animate_solution(solver, mesh, body)
 ```
 
-![](assests/liquidmoving1D/interface_pos_comp2.png)
+![](assets/liquidmoving1D/interface_pos_comp2.png)

@@ -58,5 +58,5 @@ solver = DiffusionUnsteadyMono(Fluide, bc_b, bc, Δt, Tend, u0, "BE")
 solve_DiffusionUnsteadyMono!(solver, Fluide, u0, Δt, Tend, bc_b, bc, "BE"; method=Base.:\)
 ```
 
-![](assests/heat_2D_1ph/comp_numan.png)
-![](assests/heat_2D_1ph/log_error.png)
+![](assets/heat_2D_1ph/comp_numan.png)
+![](assets/heat_2D_1ph/log_error.png)
