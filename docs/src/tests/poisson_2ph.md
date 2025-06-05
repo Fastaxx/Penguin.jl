@@ -51,4 +51,4 @@ solver = DiffusionSteadyDiph(Fluide_1, Fluide_2, bc_b, ic)
 solve_DiffusionSteadyDiph!(solver; method=method=Base.:\)
 ```
 
-![](assests/poisson_2D_2ph/poisson_2d_2phases_plot.png)
+![](assets/poisson_2D_2ph/poisson_2d_2phases_plot.png)

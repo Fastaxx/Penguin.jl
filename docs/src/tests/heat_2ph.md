@@ -71,5 +71,5 @@ plot_solution(solver, mesh, circle, capacity, state_i=101)
 
 This example can be adapted for other 2D setups by changing the geometry, boundary conditions, or time integration settings. For further exploration, uncomment the lines that write the solution to a VTK file or visualize intermediate states.
 
-![](assests/heat_2D_2ph/heat_2d_2ph_henry_end.png)
-![](assests/heat_2D_2ph/Sherwood.png)
+![](assets/heat_2D_2ph/heat_2d_2ph_henry_end.png)
+![](assets/heat_2D_2ph/Sherwood.png)

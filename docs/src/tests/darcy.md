@@ -63,4 +63,4 @@ display(fig)
 4. Create a Darcy solver, solve for pressure, and compute the velocity field.  
 5. (Optional) Visualize the velocity field using Makie.
 
-![](assests/darcy/velocity_arrow.png)
+![](assets/darcy/velocity_arrow.png)

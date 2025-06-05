@@ -61,4 +61,4 @@ animate_solution(solver, mesh, body)
 3. The solution vector is split into bulk values and boundary values.  
 4. Both boundary conditions and diffusion operators are updated as the body moves, ensuring a consistent time evolution.
 
-![](assests/solidmoving1D/comp_analytical_stef_1d.png)
+![](assets/solidmoving1D/comp_analytical_stef_1d.png)
