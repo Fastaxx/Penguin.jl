@@ -20,8 +20,8 @@ dt = 0.1
 
 # 3. Create front trackers at two different time steps (moving interface)
 # Linear motion of the interface from x=0.5 to x=1.0
-interface_pos_n = 0.5
-interface_pos_np1 = 1.0
+interface_pos_n = 0.51
+interface_pos_np1 = 1.01
 
 front_n = FrontTracker1D([interface_pos_n])
 front_np1 = FrontTracker1D([interface_pos_np1])
@@ -305,3 +305,309 @@ lines!(ax, [interface_pos_n, interface_pos_np1], [0.0, dt], color=:red, linestyl
 # Save and display the third figure
 save("spacetime_fluid_regions.png", fig3)
 display(fig3)
+
+# 15. Visualize the space-time centroids
+fig4 = Figure(size=(800, 400), fontsize=12)
+ax = Axis(fig4[1, 1], 
+          title="Space-Time Centroids",
+          xlabel="Position (x)",
+          ylabel="Time (t)")
+
+# Draw cell boundaries
+for i in 1:nx+1
+    lines!(ax, [x_nodes[i], x_nodes[i]], [0, dt], color=:gray, alpha=0.3)
+end
+lines!(ax, [x_nodes[1], x_nodes[end]], [0, 0], color=:gray, alpha=0.3)
+lines!(ax, [x_nodes[1], x_nodes[end]], [dt, dt], color=:gray, alpha=0.3)
+
+# Extract centroid coordinates
+centroids = st_capacities[:ST_centroids]
+
+# Draw fluid areas with color intensity proportional to the normalized volume
+for i in 1:nx
+    x_min, x_max = x_nodes[i], x_nodes[i+1]
+    cell_width = x_max - x_min
+    rect = Rect(x_min, 0, cell_width, dt)
+    
+    # Normalize the volume by the maximum possible volume (cell_width * dt)
+    normalized_volume = V_spacetime_ft[i] / (cell_width * dt)
+    
+    # Draw the rectangle with opacity based on fluid volume
+    poly!(ax, rect, color=(:blue, normalized_volume))
+    
+    # Draw the centroid if the cell has fluid
+    if normalized_volume > 0.01
+        scatter!(ax, [centroids[i][1]], [centroids[i][2]], color=:red, markersize=6)
+        
+        # Draw a line connecting the cell center to the centroid
+        cell_center_x = (x_min + x_max) / 2
+        cell_center_t = dt / 2
+        lines!(ax, [cell_center_x, centroids[i][1]], [cell_center_t, centroids[i][2]], 
+               color=:black, linewidth=1, alpha=0.5)
+    end
+end
+
+# Show interface positions
+lines!(ax, [interface_pos_n, interface_pos_np1], [0.0, dt], color=:red, linestyle=:dash)
+scatter!(ax, [interface_pos_n], [0.0], color=:red, markersize=10)
+scatter!(ax, [interface_pos_np1], [dt], color=:red, markersize=10)
+
+# Add legend elements
+scatter!(ax, [NaN], [NaN], color=:red, markersize=6, label="Centroid")
+lines!(ax, [NaN, NaN], [NaN, NaN], color=:black,  linewidth=1, label="Shift from center")
+axislegend(ax, position=:lt)
+
+# Save and display
+save("spacetime_centroids.png", fig4)
+display(fig4)
+
+# After the existing Ax comparison (around line 121), add:
+
+# Extract the Bx component from VOFI (integrated over time)
+# VOFI stores B differently depending on dimension
+Bx_vofi = Array(SparseArrays.diag(vofi_capacity.B[1]))
+# Reshape to match the mesh structure - extract first time step values
+Bx_vofi = reshape(Bx_vofi, (nx+1, 2))[:, 1]
+
+# Create a new figure for Bx comparison
+fig_bx = Figure(size=(1000, 800), fontsize=12)
+
+# Plot the space-time Bx capacities from both methods
+ax_bx1 = Axis(fig_bx[1, 1:2], 
+          title="Space-Time Centerline Capacities: Bx",
+          xlabel="Position (x)",
+          ylabel="Capacity Value")
+
+# Calculate cell centers for plotting
+cell_centers = mesh_1d.nodes[1]
+
+# Plot both methods
+scatter!(ax_bx1, cell_centers, st_capacities[:Bx_spacetime], color=:blue, 
+        markersize=8, label="Front Tracking")
+scatter!(ax_bx1, cell_centers, Bx_vofi, color=:red, 
+        markersize=4, label="VOFI")
+
+# Connect points with lines
+lines!(ax_bx1, cell_centers, st_capacities[:Bx_spacetime], 
+      color=:blue, alpha=0.5)
+lines!(ax_bx1, cell_centers, Bx_vofi, 
+      color=:red, alpha=0.3, linestyle=:dash)
+
+# Add vertical markers at interface positions
+vlines!(ax_bx1, [interface_pos_n], color=:blue, linestyle=:dash, alpha=0.5, 
+       label="Interface t=0")
+vlines!(ax_bx1, [interface_pos_np1], color=:red, linestyle=:dash, alpha=0.5, 
+       label="Interface t=dt")
+
+# Add legend
+axislegend(ax_bx1, position=:lt)
+
+# Plot the difference between methods
+ax_bx2 = Axis(fig_bx[2, 1:2], 
+          title="Absolute Difference: |Front Tracking - VOFI| for Bx",
+          xlabel="Position (x)",
+          ylabel="Difference")
+
+# Calculate absolute difference
+abs_diff_bx = abs.(st_capacities[:Bx_spacetime] - Bx_vofi)
+scatter!(ax_bx2, cell_centers, abs_diff_bx, color=:purple, markersize=8)
+lines!(ax_bx2, cell_centers, abs_diff_bx, color=:purple, alpha=0.5)
+
+# Add vertical markers at interface positions
+vlines!(ax_bx2, [interface_pos_n], color=:blue, linestyle=:dash, alpha=0.5)
+vlines!(ax_bx2, [interface_pos_np1], color=:red, linestyle=:dash, alpha=0.5)
+
+# Print statistics
+mean_diff_bx = mean(abs_diff_bx)
+max_diff_bx = maximum(abs_diff_bx)
+total_ft_bx = sum(st_capacities[:Bx_spacetime])
+total_vofi_bx = sum(Bx_vofi)
+rel_total_diff_bx = abs(total_ft_bx - total_vofi_bx) / (total_vofi_bx + 1e-10) * 100
+
+bx_stats_text = """
+Bx Comparison Statistics:
+Mean Absolute Difference: $(round(mean_diff_bx, digits=6))
+Maximum Absolute Difference: $(round(max_diff_bx, digits=6))
+Total Front Tracking Bx: $(round(total_ft_bx, digits=6))
+Total VOFI Bx: $(round(total_vofi_bx, digits=6))
+Relative Difference in Total: $(round(rel_total_diff_bx, digits=2))%
+"""
+
+# Add stats text to the figure
+Label(fig_bx[3, 1:2], bx_stats_text, tellwidth=false)
+
+# Save and display the Bx comparison figure
+save("spacetime_bx_comparison.png", fig_bx)
+display(fig_bx)
+
+# Print detailed Bx statistics
+println("\nSpace-Time Bx Capacities Comparison (Front Tracking vs VOFI)")
+println("=" ^ 50)
+println("Mean Absolute Difference: $(mean_diff_bx)")
+println("Max Absolute Difference: $(max_diff_bx)")
+println("Total Front Tracking Bx: $(total_ft_bx)")
+println("Total VOFI Bx: $(total_vofi_bx)")
+println("Relative Difference in Total: $(rel_total_diff_bx)%")
+
+# Print table of Bx values at key positions
+println("\nBx Values at key positions:")
+println("=" ^ 40)
+println("x (cell center)\tFront Tracking\tVOFI\tDiff")
+println("-" ^ 40)
+
+for i in 1:nx
+    cell_center = (x_nodes[i] + x_nodes[i+1])/2
+    if abs(cell_center - interface_pos_n) < 0.1 || abs(cell_center - interface_pos_np1) < 0.1
+        println("$(round(cell_center, digits=3))\t$(round(st_capacities[:Bx_spacetime][i], digits=6))\t$(round(Bx_vofi[i], digits=6))\t$(round(abs_diff_bx[i], digits=6))")
+    end
+end
+
+# Extract the Wx component from VOFI (integrated over time)
+Wx_vofi = Array(SparseArrays.diag(vofi_capacity.W[1]))
+# Reshape to match the mesh structure - extract first time step values
+Wx_vofi = reshape(Wx_vofi, (nx+1, 2))[:, 1]
+
+# Create a new figure for Wx comparison
+fig_wx = Figure(size=(1000, 800), fontsize=12)
+
+# Plot the space-time Wx capacities from both methods
+ax_wx1 = Axis(fig_wx[1, 1:2], 
+          title="Space-Time Connection Capacities: Wx",
+          xlabel="Position (x)",
+          ylabel="Capacity Value")
+
+# Plot both methods
+scatter!(ax_wx1, x_nodes, st_capacities[:Wx_spacetime], color=:blue, 
+        markersize=8, label="Front Tracking")
+scatter!(ax_wx1, x_nodes, Wx_vofi, color=:red, 
+        markersize=4, label="VOFI")
+
+# Connect points with lines
+lines!(ax_wx1, x_nodes, st_capacities[:Wx_spacetime], 
+      color=:blue, alpha=0.5)
+lines!(ax_wx1, x_nodes, Wx_vofi, 
+      color=:red, alpha=0.3, linestyle=:dash)
+
+# Add vertical markers at interface positions
+vlines!(ax_wx1, [interface_pos_n], color=:blue, linestyle=:dash, alpha=0.5, 
+       label="Interface t=0")
+vlines!(ax_wx1, [interface_pos_np1], color=:red, linestyle=:dash, alpha=0.5, 
+       label="Interface t=dt")
+
+# Add legend
+axislegend(ax_wx1, position=:lt)
+
+# Plot the difference between methods
+ax_wx2 = Axis(fig_wx[2, 1:2], 
+          title="Absolute Difference: |Front Tracking - VOFI| for Wx",
+          xlabel="Position (x)",
+          ylabel="Difference")
+
+# Calculate absolute difference
+abs_diff_wx = abs.(st_capacities[:Wx_spacetime] - Wx_vofi)
+scatter!(ax_wx2, x_nodes, abs_diff_wx, color=:purple, markersize=8)
+lines!(ax_wx2, x_nodes, abs_diff_wx, color=:purple, alpha=0.5)
+
+# Add vertical markers at interface positions
+vlines!(ax_wx2, [interface_pos_n], color=:blue, linestyle=:dash, alpha=0.5)
+vlines!(ax_wx2, [interface_pos_np1], color=:red, linestyle=:dash, alpha=0.5)
+
+# Print statistics
+mean_diff_wx = mean(abs_diff_wx)
+max_diff_wx = maximum(abs_diff_wx)
+total_ft_wx = sum(st_capacities[:Wx_spacetime])
+total_vofi_wx = sum(Wx_vofi)
+rel_total_diff_wx = abs(total_ft_wx - total_vofi_wx) / (total_vofi_wx + 1e-10) * 100
+
+wx_stats_text = """
+Wx Comparison Statistics:
+Mean Absolute Difference: $(round(mean_diff_wx, digits=6))
+Maximum Absolute Difference: $(round(max_diff_wx, digits=6))
+Total Front Tracking Wx: $(round(total_ft_wx, digits=6))
+Total VOFI Wx: $(round(total_vofi_wx, digits=6))
+Relative Difference in Total: $(round(rel_total_diff_wx, digits=2))%
+"""
+
+# Add stats text to the figure
+Label(fig_wx[3, 1:2], wx_stats_text, tellwidth=false)
+
+# Save and display the Wx comparison figure
+save("spacetime_wx_comparison.png", fig_wx)
+display(fig_wx)
+
+# Print detailed Wx statistics
+println("\nSpace-Time Wx Capacities Comparison (Front Tracking vs VOFI)")
+println("=" ^ 50)
+println("Mean Absolute Difference: $(mean_diff_wx)")
+println("Max Absolute Difference: $(max_diff_wx)")
+println("Total Front Tracking Wx: $(total_ft_wx)")
+println("Total VOFI Wx: $(total_vofi_wx)")
+println("Relative Difference in Total: $(rel_total_diff_wx)%")
+
+# Print table of Wx values at key positions
+println("\nWx Values at key positions:")
+println("=" ^ 40)
+println("x (face position)\tFront Tracking\tVOFI\tDiff")
+println("-" ^ 40)
+
+# Create a visualization of the Wx connection strengths
+fig_wx_viz = Figure(size=(800, 400), fontsize=12)
+ax_viz = Axis(fig_wx_viz[1, 1], 
+          title="Space-Time Wx Connections",
+          xlabel="Position (x)",
+          ylabel="Time (t)")
+
+# Draw cell boundaries
+for i in 1:nx+1
+    lines!(ax_viz, [x_nodes[i], x_nodes[i]], [0, dt], color=:gray, alpha=0.3)
+end
+lines!(ax_viz, [x_nodes[1], x_nodes[end]], [0, 0], color=:gray, alpha=0.3)
+lines!(ax_viz, [x_nodes[1], x_nodes[end]], [dt, dt], color=:gray, alpha=0.3)
+
+# Get the centroids
+centroids = st_capacities[:ST_centroids]
+
+# Draw connections between adjacent cells
+for i in 2:nx
+    # Skip connections with zero capacity
+    if st_capacities[:Wx_spacetime][i] <= 0.0
+        continue
+    end
+    
+    # Extract centroid coordinates
+    x_left = centroids[i-1][1]
+    x_right = centroids[i][1]
+    t_left = centroids[i-1][2]
+    t_right = centroids[i][2]
+    
+    # Normalize connection strength for visualization
+    max_possible_wx = dx * dt
+    connection_strength = st_capacities[:Wx_spacetime][i] / max_possible_wx
+    
+    # Draw line with thickness proportional to connection strength
+    lines!(ax_viz, [x_left, x_right], [t_left, t_right], 
+           color=:blue, linewidth=3*connection_strength + 1, alpha=0.7)
+    
+    # Add points at the centroids
+    scatter!(ax_viz, [x_left], [t_left], color=:red, markersize=4)
+    scatter!(ax_viz, [x_right], [t_right], color=:red, markersize=4)
+end
+
+# Show interface positions
+lines!(ax_viz, [interface_pos_n, interface_pos_np1], [0.0, dt], color=:red, linestyle=:dash)
+scatter!(ax_viz, [interface_pos_n], [0.0], color=:red, markersize=10)
+scatter!(ax_viz, [interface_pos_np1], [dt], color=:red, markersize=10)
+
+# Save and display
+save("spacetime_wx_connections.png", fig_wx_viz)
+display(fig_wx_viz)
+
+# Find positions with largest differences
+for i in 1:nx+1
+    # Print values near the interfaces or where differences are significant
+    if abs(x_nodes[i] - interface_pos_n) < 0.1 || 
+       abs(x_nodes[i] - interface_pos_np1) < 0.1 ||
+       abs_diff_wx[i] > 0.5 * max_diff_wx
+        println("$(round(x_nodes[i], digits=3))\t$(round(st_capacities[:Wx_spacetime][i], digits=6))\t$(round(Wx_vofi[i], digits=6))\t$(round(abs_diff_wx[i], digits=6))")
+    end
+end
