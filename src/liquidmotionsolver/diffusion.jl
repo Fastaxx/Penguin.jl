@@ -105,13 +105,13 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
         Hₙ₊₁ = sum(diag(Vn_1))
 
         # Compute flux
-        W! = phase.operator.Wꜝ[1:n, 1:n]
-        G = phase.operator.G[1:n, 1:n]
-        H = phase.operator.H[1:n, 1:n]
-        V = phase.operator.V[1:n, 1:n]
+        W! = phase.operator.Wꜝ[1:end÷2, 1:end÷2]
+        G = phase.operator.G[1:end÷2, 1:end÷2]
+        H = phase.operator.H[1:end÷2, 1:end÷2]
+        V = phase.operator.V[1:end÷2, 1:end÷2]
         Id   = build_I_D(phase.operator, phase.Diffusion_coeff, phase.capacity)
-        Id  = Id[1:n, 1:n]
-        Tₒ, Tᵧ = Tᵢ[1:n], Tᵢ[n+1:end]
+        Id  = Id[1:end÷2, 1:end÷2]
+        Tₒ, Tᵧ = Tᵢ[1:end÷2], Tᵢ[end÷2+1:end]
         Interface_term = Id * H' * W! * G * Tₒ + Id * H' * W! * H * Tᵧ
         Interface_term = 1/(ρL) * sum(Interface_term)
 
@@ -168,13 +168,13 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
     k=2
     while t < Tₑ
         # Calcul de la vitesse d'interface à partir des flux
-        W! = phase.operator.Wꜝ[1:n, 1:n]  # n = nx*ny (full 2D system)
-        G  = phase.operator.G[1:n, 1:n]
-        H  = phase.operator.H[1:n, 1:n]
-        V  = phase.operator.V[1:n, 1:n]
+        W! = phase.operator.Wꜝ[1:end÷2, 1:end÷2]
+        G  = phase.operator.G[1:end÷2, 1:end÷2]
+        H  = phase.operator.H[1:end÷2, 1:end÷2]
+        V  = phase.operator.V[1:end÷2, 1:end÷2]
         Id = build_I_D(phase.operator, phase.Diffusion_coeff, phase.capacity)
-        Id = Id[1:n, 1:n]
-        Tₒ, Tᵧ = Tᵢ[1:n], Tᵢ[n+1:end]
+        Id = Id[1:end÷2, 1:end÷2]
+        Tₒ, Tᵧ = Tᵢ[1:end÷2], Tᵢ[end÷2+1:end]
         Interface_term = Id * H' * W! * G * Tₒ + Id * H' * W! * H * Tᵧ
         velocity_field = 1/(ρL) * abs.(Interface_term)
         
@@ -230,13 +230,13 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
             Hₙ₊₁ = sum(diag(Vn_1))
             
             # Compute flux
-            W! = phase.operator.Wꜝ[1:n, 1:n]
-            G = phase.operator.G[1:n, 1:n]
-            H = phase.operator.H[1:n, 1:n]
-            V = phase.operator.V[1:n, 1:n]
+            W! = phase.operator.Wꜝ[1:end÷2, 1:end÷2]
+            G = phase.operator.G[1:end÷2, 1:end÷2]
+            H = phase.operator.H[1:end÷2, 1:end÷2]
+            V = phase.operator.V[1:end÷2, 1:end÷2]
             Id   = build_I_D(phase.operator, phase.Diffusion_coeff, phase.capacity)
-            Id  = Id[1:n, 1:n]
-            Tₒ, Tᵧ = Tᵢ[1:n], Tᵢ[n+1:end]
+            Id  = Id[1:end÷2, 1:end÷2]
+            Tₒ, Tᵧ = Tᵢ[1:end÷2], Tᵢ[end÷2+1:end]
             Interface_term = Id * H' * W! * G * Tₒ + Id * H' * W! * H * Tᵧ
             Interface_term = 1/(ρL) * sum(Interface_term)
 
@@ -331,8 +331,6 @@ function A_diph_unstead_diff_moving_stef(operator1::DiffusionOps, operator2::Dif
     # Retrieve jump & flux from the interface conditions
     jump, flux = ic.scalar, ic.flux
 
-    Iₐ1, Iₐ2 = jump.α₁ * I(n), jump.α₂ * I(n)
-    Iᵦ1, Iᵦ2 = flux.β₁ * I(n), flux.β₂ * I(n)
 
     # Build diffusion operators
     Id1 = build_I_D(operator1, D1, capacite1)
@@ -358,19 +356,22 @@ function A_diph_unstead_diff_moving_stef(operator1::DiffusionOps, operator2::Dif
     Ψn1 = Diagonal(psip.(Vn1, Vn1_1))
     Ψn2 = Diagonal(psip.(Vn2, Vn2_1))
 
+    Iₐ1, Iₐ2 = jump.α₁ * I(size(Ψn1)[1]), jump.α₂ * I(size(Ψn2)[1])
+    Iᵦ1, Iᵦ2 = flux.β₁ * I(size(Ψn1)[1]), flux.β₂ * I(size(Ψn2)[1])
+
     # Operator sub-blocks for each phase
-    W!1 = operator1.Wꜝ[1:n, 1:n]
-    G1  = operator1.G[1:n, 1:n]
-    H1  = operator1.H[1:n, 1:n]
+    W!1 = operator1.Wꜝ[1:end÷2, 1:end÷2]
+    G1  = operator1.G[1:end÷2, 1:end÷2]
+    H1  = operator1.H[1:end÷2, 1:end÷2]
 
-    W!2 = operator2.Wꜝ[1:n, 1:n]
-    G2  = operator2.G[1:n, 1:n]
-    H2  = operator2.H[1:n, 1:n]
+    W!2 = operator2.Wꜝ[1:end÷2, 1:end÷2]
+    G2  = operator2.G[1:end÷2, 1:end÷2]
+    H2  = operator2.H[1:end÷2, 1:end÷2]
 
-    Iᵦ1 = Iᵦ1[1:n, 1:n]
-    Iᵦ2 = Iᵦ2[1:n, 1:n]
-    Iₐ1 = Iₐ1[1:n, 1:n]
-    Iₐ2 = Iₐ2[1:n, 1:n]
+    Iᵦ1 = Iᵦ1
+    Iᵦ2 = Iᵦ2
+    Iₐ1 = Iₐ1
+    Iₐ2 = Iₐ2
     Id1  = Id1[1:n, 1:n]
     Id2  = Id2[1:n, 1:n]
 
@@ -389,25 +390,17 @@ function A_diph_unstead_diff_moving_stef(operator1::DiffusionOps, operator2::Dif
     A = spzeros(Float64, 4n, 4n)
 
     # Assign sub-blocks
-    A[1:n, 1:n]         = block1
-    A[1:n, n+1:2n]      = block2
-    A[1:n, 2n+1:3n]     = spzeros(n, n)
-    A[1:n, 3n+1:4n]     = spzeros(n, n)
 
-    A[n+1:2n, 1:n]      = spzeros(n, n)
-    A[n+1:2n, n+1:2n]   = Iₐ1
-    A[n+1:2n, 2n+1:3n]  = spzeros(n, n)
-    A[n+1:2n, 3n+1:4n]  = spzeros(n, n) #-Iₐ2
+    A1 = [block1 block2 spzeros(size(block2)) spzeros(size(block2))]
 
-    A[2n+1:3n, 1:n]     = spzeros(n, n)
-    A[2n+1:3n, n+1:2n]  = spzeros(n, n)
-    A[2n+1:3n, 2n+1:3n] = block3
-    A[2n+1:3n, 3n+1:4n] = block4
+    A2 = [spzeros(size(block1)) Iₐ1 spzeros(size(block2)) -Iₐ2]
 
-    A[3n+1:4n, 1:n]     = spzeros(n, n)
-    A[3n+1:4n, n+1:2n]  = spzeros(n, n)
-    A[3n+1:4n, 2n+1:3n] = spzeros(n, n)
-    A[3n+1:4n, 3n+1:4n] = Iₐ2
+
+    A3 = [spzeros(size(block1)) spzeros(size(block2)) block3 block4]
+
+    A4 = [spzeros(size(block1)) spzeros(size(block2)) spzeros(size(block3)) Iₐ2]
+
+    A = [A1; A2; A3; A4]
 
     return A
 end
@@ -470,33 +463,33 @@ function b_diph_unstead_diff_moving_stef(operator1::DiffusionOps, operator2::Dif
     end
 
     # 8) Build the bulk terms for each phase
-    Tₒ1 = Tᵢ[1:n1]
-    Tᵧ1 = Tᵢ[n1+1:2n1]
+    Tₒ1 = Tᵢ[1:end÷4]
+    Tᵧ1 = Tᵢ[end÷4 + 1 : end÷2]
 
-    Tₒ2 = Tᵢ[2n1 + 1 : 2n1 + n2]
-    Tᵧ2 = Tᵢ[2n1 + n2 + 1 : end]
+    Tₒ2 = Tᵢ[end÷2 + 1 : 3end÷4]
+    Tᵧ2 = Tᵢ[3end÷4 + 1 : end]
 
-    f1ₒn  = f1ₒn[1:n1]
-    f1ₒn1 = f1ₒn1[1:n1]
-    f2ₒn  = f2ₒn[1:n2]
-    f2ₒn1 = f2ₒn1[1:n2]
+    f1ₒn  = f1ₒn[1:end÷2]
+    f1ₒn1 = f1ₒn1[1:end÷2]
+    f2ₒn  = f2ₒn[1:end÷2]
+    f2ₒn1 = f2ₒn1[1:end÷2]
 
-    gᵧ = gᵧ[1:n1]
-    hᵧ = hᵧ[1:n2]
-    Iᵧ1 = Iᵧ1[1:n1, 1:n1]
-    Iᵧ2 = Iᵧ2[1:n2, 1:n2]
-    Id1 = Id1[1:n1, 1:n1]
-    Id2 = Id2[1:n2, 1:n2]
+    gᵧ = gᵧ[1:end÷2]
+    hᵧ = hᵧ[1:end÷2]
+    Iᵧ1 = Iᵧ1[1:end÷2, 1:end÷2]
+    Iᵧ2 = Iᵧ2[1:end÷2, 1:end÷2]
+    Id1 = Id1[1:end÷2, 1:end÷2]
+    Id2 = Id2[1:end÷2, 1:end÷2]
 
-    W!1 = operator1.Wꜝ[1:n1, 1:n1]
-    G1  = operator1.G[1:n1, 1:n1]
-    H1  = operator1.H[1:n1, 1:n1]
-    V1  = operator1.V[1:n1, 1:n1]
+    W!1 = operator1.Wꜝ[1:end÷2, 1:end÷2]
+    G1  = operator1.G[1:end÷2, 1:end÷2]
+    H1  = operator1.H[1:end÷2, 1:end÷2]
+    V1  = operator1.V[1:end÷2, 1:end÷2]
 
-    W!2 = operator2.Wꜝ[1:n2, 1:n2]
-    G2  = operator2.G[1:n2, 1:n2]
-    H2  = operator2.H[1:n2, 1:n2]
-    V2  = operator2.V[1:n2, 1:n2]
+    W!2 = operator2.Wꜝ[1:end÷2, 1:end÷2]
+    G2  = operator2.G[1:end÷2, 1:end÷2]
+    H2  = operator2.H[1:end÷2, 1:end÷2]
+    V2  = operator2.V[1:end÷2, 1:end÷2]
 
     # 9) Build the right-hand side
     if scheme == "CN"
@@ -603,24 +596,24 @@ function solve_MovingLiquidDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phas
         Hₙ₊₁ = sum(diag(Vn_1))
 
         # Compute flux for phase 1
-        W!1 = phase1.operator.Wꜝ[1:n, 1:n]
-        G1 = phase1.operator.G[1:n, 1:n]
-        H1 = phase1.operator.H[1:n, 1:n]
-        V1 = phase1.operator.V[1:n, 1:n]
+        W!1 = phase1.operator.Wꜝ[1:end÷2, 1:end÷2]
+        G1 = phase1.operator.G[1:end÷2, 1:end÷2]
+        H1 = phase1.operator.H[1:end÷2, 1:end÷2]
+        V1 = phase1.operator.V[1:end÷2, 1:end÷2]
         Id1   = build_I_D(phase1.operator, phase1.Diffusion_coeff, phase1.capacity)
-        Id1  = Id1[1:n, 1:n]
-        Tₒ1, Tᵧ1 = Tᵢ[1:n], Tᵢ[n+1:2n]
+        Id1  = Id1[1:end÷2, 1:end÷2]
+        Tₒ1, Tᵧ1 = Tᵢ[1:end÷4], Tᵢ[end÷4 + 1 : end÷2]
         Interface_term_1 = Id1 * H1' * W!1 * G1 * Tₒ1 + Id1 * H1' * W!1 * H1 * Tᵧ1
         Interface_term_1 = 1/(ρL) * sum(Interface_term_1)
 
         # Compute flux for phase 2
-        W!2 = phase2.operator.Wꜝ[1:n, 1:n]
-        G2 = phase2.operator.G[1:n, 1:n]
-        H2 = phase2.operator.H[1:n, 1:n]
-        V2 = phase2.operator.V[1:n, 1:n]
+        W!2 = phase2.operator.Wꜝ[1:end÷2, 1:end÷2]
+        G2 = phase2.operator.G[1:end÷2, 1:end÷2]
+        H2 = phase2.operator.H[1:end÷2, 1:end÷2]
+        V2 = phase2.operator.V[1:end÷2, 1:end÷2]
         Id2   = build_I_D(phase2.operator, phase2.Diffusion_coeff, phase2.capacity)
-        Id2  = Id2[1:n, 1:n]
-        Tₒ2, Tᵧ2 = Tᵢ[2n+1:3n], Tᵢ[3n+1:end]
+        Id2  = Id2[1:end÷2, 1:end÷2]
+        Tₒ2, Tᵧ2 = Tᵢ[end÷2 + 1 : 3end÷4], Tᵢ[3end÷4 + 1 : end]
         Interface_term_2 = Id2 * H2' * W!2 * G2 * Tₒ2 + Id2 * H2' * W!2 * H2 * Tᵧ2
         Interface_term_2 = 1/(ρL) * sum(Interface_term_2)
 
@@ -720,24 +713,24 @@ function solve_MovingLiquidDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phas
             Hₙ₊₁ = sum(diag(Vn_1))
             
             # Compute flux for phase 1
-            W!1 = phase1.operator.Wꜝ[1:n, 1:n]
-            G1 = phase1.operator.G[1:n, 1:n]
-            H1 = phase1.operator.H[1:n, 1:n]
-            V1 = phase1.operator.V[1:n, 1:n]
+            W!1 = phase1.operator.Wꜝ[1:end÷2, 1:end÷2]
+            G1 = phase1.operator.G[1:end÷2, 1:end÷2]
+            H1 = phase1.operator.H[1:end÷2, 1:end÷2]
+            V1 = phase1.operator.V[1:end÷2, 1:end÷2]
             Id1= build_I_D(phase1.operator, phase1.Diffusion_coeff, phase1.capacity)
-            Id1  = Id1[1:n, 1:n]
-            Tₒ1, Tᵧ1 = Tᵢ[1:n], Tᵢ[n+1:2n]
+            Id1  = Id1[1:end÷2, 1:end÷2]
+            Tₒ1, Tᵧ1 = Tᵢ[1:end÷4], Tᵢ[end÷4 + 1 : end÷2]
             Interface_term_1 = Id1 * H1' * W!1 * G1 * Tₒ1 + Id1 * H1' * W!1 * H1 * Tᵧ1
             Interface_term_1 = 1/(ρL) * sum(Interface_term_1)
     
             # Compute flux for phase 2
-            W!2 = phase2.operator.Wꜝ[1:n, 1:n]
-            G2 = phase2.operator.G[1:n, 1:n]
-            H2 = phase2.operator.H[1:n, 1:n]
-            V2 = phase2.operator.V[1:n, 1:n]
+            W!2 = phase2.operator.Wꜝ[1:end÷2, 1:end÷2]
+            G2 = phase2.operator.G[1:end÷2, 1:end÷2]
+            H2 = phase2.operator.H[1:end÷2, 1:end÷2]
+            V2 = phase2.operator.V[1:end÷2, 1:end÷2]
             Id2   = build_I_D(phase2.operator, phase2.Diffusion_coeff, phase2.capacity)
-            Id2  = Id2[1:n, 1:n]
-            Tₒ2, Tᵧ2 = Tᵢ[2n+1:3n], Tᵢ[3n+1:end]
+            Id2  = Id2[1:end÷2, 1:end÷2]
+            Tₒ2, Tᵧ2 = Tᵢ[end÷2 + 1 : 3end÷4], Tᵢ[3end÷4 + 1 : end]
             Interface_term_2 = Id2 * H2' * W!2 * G2 * Tₒ2 + Id2 * H2' * W!2 * H2 * Tᵧ2
             Interface_term_2 = 1/(ρL) * sum(Interface_term_2)
     
