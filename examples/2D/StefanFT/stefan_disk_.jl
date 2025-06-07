@@ -35,8 +35,8 @@ println("Similarity parameter S = $S")
 
 # Set initial conditions as specified
 R0 = 1.56      # Initial radius
-t_init = 1.0   # Initial time
-t_final = 1.3   # Final time
+t_init = 1.0  # Initial time
+t_final = 1.1   # Final time
 
 # Analytical temperature function
 function analytical_temperature(r, t)
@@ -56,6 +56,10 @@ function interface_position(t)
     return S * sqrt(t)
 end
 
+function analytical_flux(t)
+    return - (k * Tinf / F(S)) * exp(-S^2) / sqrt(t)
+end
+
 # Print information about the simulation
 println("Initial radius at t=$t_init: R=$(interface_position(t_init))")
 
@@ -64,7 +68,7 @@ radii = [interface_position(t) for t in range(t_init, stop=t_final, length=100)]
 temperatures = [analytical_temperature(r, t_final) for r in radii]
 
 # Define the spatial mesh
-nx, ny = 64, 64
+nx, ny = 32, 32
 lx, ly = 16.0, 16.0
 x0, y0 = -8.0, -8.0
 Δx, Δy = lx/(nx), ly/(ny)
@@ -73,15 +77,16 @@ mesh = Penguin.Mesh((nx, ny), (lx, ly), (x0, y0))
 println("Mesh created with dimensions: $(nx) x $(ny), Δx=$(Δx), Δy=$(Δy), domain=[$x0, $(x0+lx)], [$y0, $(y0+ly)]")
 
 # Create the front-tracking body
-nmarkers = 120
+nmarkers = 100
 front = FrontTracker() 
-create_circle!(front, 0.0, 0.0, R0, nmarkers)
+create_circle!(front, 0.0, 0.0, interface_position(t_init), nmarkers)
 
 # Define the initial position of the front
 body = (x, y, t, _=0) -> -sdf(front, x, y)
 
 # Define the Space-Time mesh
-Δt = 0.05
+Δt = 0.5*(lx / nx)^2  # Time step size
+t_final = t_init + 5Δt
 println("Final radius at t=$(t_init + Δt): R=$(interface_position(t_init + Δt))")
 
 STmesh = Penguin.SpaceTimeMesh(mesh, [t_init, t_init + Δt], tag=mesh.tag)
@@ -95,7 +100,7 @@ operator = DiffusionOps(capacity)
 # Define the boundary conditions
 bc_b = Dirichlet(T∞)  # Far field temperature
 bc = Dirichlet(TM)  # Temperature at the interface
-bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:bottom => bc_b, :top => bc_b, :left => bc_b, :right => bc_b))
+bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:left => bc_b, :right => bc_b, :top => bc_b, :bottom => bc_b))
 
 # Stefan condition at the interface
 stef_cond = InterfaceConditions(nothing, FluxJump(1.0, 1.0, L))
@@ -108,40 +113,48 @@ Fluide = Phase(capacity, operator, f, K)
 
 # Set up initial condition
 u0ₒ = zeros((nx+1)*(ny+1))
-for i in 1:nx
-    for j in 1:ny
-        idx = i + (j - 1) * (nx + 1)
-        x = mesh.centers[1][i]
-        y = mesh.centers[2][j]
-        r = sqrt(x^2 + y^2)  # Distance from origin
-        u0ₒ[idx] = analytical_temperature(r, t_init)  # Initial temperature
-    end
+body_init = (x,y,_=0) -> -sdf(front, x, y)
+cap_init = Capacity(body_init, mesh; compute_centroids=false)
+centroids = cap_init.C_ω
+# Initialize the temperature at the interface
+for idx in 1:length(centroids)
+    # Fix: Access each centroid properly and extract its components
+    centroid = centroids[idx]
+    x, y = centroid[1], centroid[2]  # Access components of the centroid vector
+    r = sqrt(x^2 + y^2)
+    u0ₒ[idx] = analytical_temperature(r, t_init)  # Initial temperature at the interface
 end
 u0ᵧ = ones((nx+1)*(ny+1))*TM # Initial temperature at the interface
 u0 = vcat(u0ₒ, u0ᵧ)
 
-"""
-# Plot the initial temperature field
+# Visualize initial temperature field to verify
 fig_init = Figure(size=(800, 600))
 ax_init = Axis(fig_init[1, 1], 
                title="Initial Temperature Field", 
-               xlabel="x", 
-               ylabel="y",
+               xlabel="x", ylabel="y",
                aspect=DataAspect())
-hm = heatmap!(ax_init, mesh.centers[1], mesh.centers[2], reshape(u0ₒ, (nx+1, ny+1)),
-            colormap=:thermal)
+hm = heatmap!(ax_init, mesh.nodes[1], mesh.nodes[2], 
+              reshape(u0ₒ, (nx+1, ny+1)),
+              colormap=:thermal)
 Colorbar(fig_init[1, 2], hm, label="Temperature")
+
+# Add interface contour
+markers = get_markers(front)
+marker_x = [m[1] for m in markers]
+marker_y = [m[2] for m in markers]
+lines!(ax_init, marker_x, marker_y, color=:black, linewidth=2)
+
 display(fig_init)
-"""
+
 
 # Newton parameters
-Newton_params = (10000, 1e-6, 1e-6, 1.0) # max_iter, tol, reltol, α
+Newton_params = (10, 1e-6, 1e-6, 1.0) # max_iter, tol, reltol, α
 
 # Run the simulation
 solver = StefanMono2D(Fluide, bc_b, bc, Δt, u0, mesh, "BE")
 
 # Solve the problem
-solver, residuals, xf_log, timestep_history = solve_StefanMono2D!(solver, Fluide, front, Δt, t_init, t_final, bc_b, bc, stef_cond, mesh, "BE";
+solver, residuals, xf_log, timestep_history = solve_StefanMono2D!(solver, Fluide, front, Δt, t_init, t_final,bc_b, bc, stef_cond, mesh, "BE";
    Newton_params=Newton_params, adaptive_timestep=false, method=Base.:\)
 
 # Plot the results
@@ -261,22 +274,39 @@ function plot_simulation_results(residuals, xf_log, timestep_history, Ste=nothin
                     xlabel="Time", 
                     ylabel="Mean Radius")
     
-# Plot radius vs time
-    # The issue is that timestep_history is accessed incorrectly
-    # Create a mapping from timestep numbers to corresponding times
+    # Plot radius vs time - CORRECTION
     timestep_to_time = Dict{Int, Float64}()
-    for (i, hist) in enumerate(timestep_history)
-        timestep_to_time[i] = hist[1]  # Store time for each timestep
+    for (timestep, hist) in enumerate(timestep_history)
+        timestep_to_time[timestep] = hist[1]  # Store actual time for each timestep 
     end
-    
-    # Use the actual times vector that corresponds to our radii
-    times_for_plot = [timestep_to_time[min(ts, length(timestep_history))] for ts in all_timesteps]
-    
+
+    # Create correct time values for each radius
+    times_for_plot = Float64[]
+    for ts in all_timesteps
+        # Map each timestep to its actual simulation time
+        # The timestep number is ts, which starts at 1 (first timestep)
+        # xf_log keys correspond to original timestep numbers
+        if ts == 1
+            # Initial time
+            push!(times_for_plot, timestep_history[1][1])
+        else
+            # For subsequent timesteps
+            time_index = min(ts, length(timestep_history))
+            push!(times_for_plot, timestep_history[time_index][1])
+        end
+    end
+
+    # Add analytical solution for comparison
+    analytical_times = range(t_init, stop=t_final, length=100)
+    analytical_radii = [interface_position(t) for t in analytical_times]
+
+    # Plot simulation results
     scatter!(ax_radius, times_for_plot, radii, 
-            label="Simulation")
-    
-    Legend(fig_radius[1, 2], ax_radius)
-    save(joinpath(results_dir, "radius_evolution.png"), fig_radius)
+            label="Simulation", markersize=6)
+
+    # Plot analytical solution
+    lines!(ax_radius, analytical_times, analytical_radii,
+        label="Analytical", linewidth=2, color=:red, linestyle=:dash)
     
     # 4. Plot adaptive timestep history
     fig_dt = Figure(size=(800, 400))
@@ -315,7 +345,7 @@ function plot_temperature_heatmaps(solver, mesh, timestep_history)
         # créer une figure
         fig = Figure(size=(600,500))
         ax = Axis(fig[1,1],
-                  title="Temperature bulk, pas $i, t=$(round(timestep_history[i][1],digits=3))",
+                  title="Temperature bulk, pas de temps $(i)",
                   xlabel="x", ylabel="y", aspect=DataAspect())
         hm = heatmap!(ax, xi, yi, Tmat; colormap=:thermal)
         Colorbar(fig[1,2], hm, label="T")
@@ -327,3 +357,102 @@ end
 
 # appel après la simulation
 plot_temperature_heatmaps(solver, mesh, timestep_history)
+
+function create_temperature_interface_animation(solver, mesh, xf_log, timestep_history)
+    # Dimensions du maillage
+    xi = mesh.nodes[1]
+    yi = mesh.nodes[2]
+    nx1, ny1 = length(xi), length(yi)
+    npts = nx1 * ny1
+    
+    # Extraire les limites de température pour une échelle de couleur cohérente
+    all_temps = Float64[]
+    for Tstate in solver.states
+        Tw = Tstate[1:npts]
+        push!(all_temps, extrema(Tw)...)
+    end
+    temp_limits = (minimum(all_temps), maximum(all_temps))
+    
+    # Récupérer tous les pas de temps d'interface
+    all_timesteps = sort(collect(keys(xf_log)))
+    
+    # Créer l'animation directement avec record
+    fig = Figure(size=(800, 700))
+    ax = Axis(fig[1, 1], 
+            title="Temperature & Interface Evolution", 
+            xlabel="x", ylabel="y", aspect=DataAspect())
+    
+    # Créer le répertoire des résultats si nécessaire
+    results_dir = joinpath(pwd(), "simulation_results")
+    if !isdir(results_dir)
+        mkdir(results_dir)
+    end
+    
+    # Enregistrer l'animation
+    record(fig, joinpath(results_dir, "temperature_interface_animation.mp4"), 1:length(solver.states)) do i
+        empty!(ax)  # Effacer l'axe pour la nouvelle frame
+        
+        # Mettre à jour le titre avec le temps actuel
+        current_time = i
+        ax.title = "Temperature & Interface Evolution, t=$(round(current_time, digits=3))"
+        
+        # Extraire et reformater la température pour ce pas de temps
+        Tstate = solver.states[i]
+        Tw = Tstate[1:npts]
+        Tmat = reshape(Tw, (nx1, ny1))
+        
+        # Afficher le heatmap de température
+        hm = heatmap!(ax, xi, yi, Tmat, colormap=:thermal, colorrange=temp_limits)
+        Colorbar(fig[1, 2], hm, label="Temperature")
+        
+        # Superposer l'interface si disponible pour ce pas de temps
+        ts = i
+        if ts <= length(all_timesteps)
+            markers = xf_log[all_timesteps[ts]]
+            
+            # Extraire les coordonnées pour le tracé
+            marker_x = [m[1] for m in markers]
+            marker_y = [m[2] for m in markers]
+            
+            # Tracer l'interface comme une ligne fermée
+            lines!(ax, marker_x, marker_y, color=:white, linewidth=3)
+            scatter!(ax, marker_x, marker_y, color=:white, markersize=3, alpha=0.7)
+        end
+        
+        # Afficher la progression
+        println("Frame $i of $(length(solver.states))")
+    end
+    
+    println("\nAnimation saved to: $(joinpath(results_dir, "temperature_interface_animation.mp4"))")
+    
+    # Créer une version GIF également (plus compatible)
+    record(fig, joinpath(results_dir, "temperature_interface_animation.gif"), 1:length(solver.states)) do i
+        empty!(ax)
+        
+        current_time = i 
+        ax.title = "Temperature & Interface Evolution, t=$(round(current_time, digits=3))"
+        
+        Tstate = solver.states[i]
+        Tw = Tstate[1:npts]
+        Tmat = reshape(Tw, (nx1, ny1))
+        
+        hm = heatmap!(ax, xi, yi, Tmat, colormap=:thermal, colorrange=temp_limits)
+        Colorbar(fig[1, 2], hm, label="Temperature")
+        
+        ts = i
+        if ts <= length(all_timesteps)
+            markers = xf_log[all_timesteps[ts]]
+            marker_x = [m[1] for m in markers]
+            marker_y = [m[2] for m in markers]
+            lines!(ax, marker_x, marker_y, color=:white, linewidth=3)
+            scatter!(ax, marker_x, marker_y, color=:white, markersize=3, alpha=0.7)
+        end
+    end
+    
+    println("GIF animation saved to: $(joinpath(results_dir, "temperature_interface_animation.gif"))")
+    
+    return joinpath(results_dir, "temperature_interface_animation.mp4")
+end
+
+# Appeler la fonction après la simulation
+animation_file = create_temperature_interface_animation(solver, mesh, xf_log, timestep_history)

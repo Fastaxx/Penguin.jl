@@ -26,7 +26,7 @@ export Mesh, get_border_cells, nC
 export SpaceTimeMesh
 
 include("front_tracking.jl")
-export FrontTracker, create_circle!, create_rectangle!, create_ellipse!
+export FrontTracker, create_circle!, create_rectangle!, create_ellipse!, update_geometry!
 export set_markers!, get_markers, add_marker!, get_fluid_polygon, is_point_inside, get_intersection, get_markers, sdf, compute_marker_normals, compute_volume_jacobian
 export compute_capacities, fluid_cell_properties, compute_surface_capacities, compute_second_type_capacities
 export compute_intercept_jacobian, compute_segment_cell_intersections, create_segment_line, compute_segment_parameters, update_front_with_intercept_displacements!
@@ -87,6 +87,7 @@ export DarcyFlowUnsteady, solve_DarcyFlowUnsteady!
 include("prescribedmotionsolver/diffusion.jl")
 export MovingDiffusionUnsteadyMono, solve_MovingDiffusionUnsteadyMono!
 export MovingDiffusionUnsteadyDiph, solve_MovingDiffusionUnsteadyDiph!
+export A_mono_unstead_diff_moving, b_mono_unstead_diff_moving
 
 include("liquidmotionsolver/diffusion.jl")
 export MovingLiquidDiffusionUnsteadyMono, solve_MovingLiquidDiffusionUnsteadyMono!

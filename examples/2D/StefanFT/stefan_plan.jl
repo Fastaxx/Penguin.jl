@@ -26,25 +26,54 @@ t_init = 1.0  # Temps initial
 t_final = 2.0 # Temps final
 
 # Paramètre de similitude pour interface plane
-λ = 0.5      # À adapter selon votre problème spécifique
-
-# Fonction température analytique pour le problème plan
-function analytical_temperature(x, t)
-    # Solution de similitude pour problème plan
-    η = x / (2.0 * sqrt(t))
+# Résolution de l'équation de transcendance pour λ
+function find_lambda(Ste)
+    f(λ) = λ * erf(λ) * exp(λ^2) - Ste/sqrt(π)
     
-    if x < interface_position(t)
-        # Côté solide (gauche)
-        return T_hot + (TM - T_hot) * erf(η) / erf(λ)
-    else
-        # Côté liquide (droit)
-        return T_cold + (TM - T_cold) * erfc(η) / erfc(λ)
+    # Méthode de Newton pour trouver λ
+    λ = 0.5  # Valeur initiale
+    max_iter = 100
+    tol = 1e-10
+    
+    for i in 1:max_iter
+        # Calculer f(λ) et f'(λ)
+        fx = λ * erf(λ) * exp(λ^2) - Ste/sqrt(π)
+        dfx = erf(λ) * exp(λ^2) + λ * 2/sqrt(π) * exp(-λ^2) * exp(λ^2) + λ * erf(λ) * exp(λ^2) * 2*λ
+        
+        # Mettre à jour λ
+        λ_new = λ - fx/dfx
+        
+        if abs(λ_new - λ) < tol
+            return λ_new
+        end
+        λ = λ_new
     end
+    
+    return λ  # Retourner la meilleure approximation
 end
+
+# Calcul de la valeur de λ basée sur le nombre de Stefan
+λ = find_lambda(Ste)
+println("Paramètre λ calculé: $λ")
 
 # Position de l'interface au temps t
 function interface_position(t)
     return 2.0 * λ * sqrt(t)
+end
+
+# Fonction température analytique pour le problème monophasique
+function analytical_temperature(x, t)
+    # Solution de similitude pour problème monophasique
+    interface_pos = interface_position(t)
+    
+    if x < interface_pos
+        # Zone solide (seule phase modélisée)
+        η = x / (2.0 * sqrt(t))
+        return T_cold + (TM - T_cold) * erf(η) / erf(λ)
+    else
+        # Zone liquide (non modélisée dans le cas monophasique)
+        return TM
+    end
 end
 
 println("Position initiale de l'interface à t=$t_init: X=$(interface_position(t_init))")
@@ -63,7 +92,7 @@ println("Maillage créé avec dimensions: $(nx) x $(ny), Δx=$(Δx), Δy=$(Δy),
 nmarkers = 20
 front = FrontTracker()
 # Créer une ligne verticale à x = interface_position(t_init)
-interface_x = interface_position(t_init)
+interface_x = 0.0  # Position initiale de l'interface
 
 # Fonction pour créer une ligne verticale
 function create_vertical_line!(front, x_pos, y_min, y_max, n_points)
@@ -83,7 +112,7 @@ function plane_sdf(x, y, x_interface)
 end
 
 # Définir la fonction body pour l'interface
-body = (x, y, t, _=0) -> plane_sdf(x, y, interface_x)
+body = (x, y, t, _=0) -> -plane_sdf(x, y, interface_x)
 
 # Définir le maillage spatio-temporel
 Δt = 0.05
@@ -102,8 +131,7 @@ bc_right = Dirichlet(T_cold)
 # Conditions de Neumann sur les bords haut et bas (flux nul)
 
 bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(
-    :left => bc_left, 
-    :right => bc_right, 
+    :bottom => Dirichlet(1.0), 
 ))
 
 # Condition à l'interface (température de fusion)
@@ -126,7 +154,7 @@ for i in 1:nx+1
         idx = i + (j - 1) * (nx + 1)
         x = mesh.nodes[1][i]
         y = mesh.nodes[2][j]
-        u0ₒ[idx] = analytical_temperature(x, t_init)
+        #u0ₒ[idx] = analytical_temperature(x, t_init)
     end
 end
 u0ᵧ = ones((nx+1)*(ny+1))*TM  # Température à l'interface
