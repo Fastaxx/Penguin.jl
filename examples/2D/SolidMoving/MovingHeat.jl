@@ -5,7 +5,7 @@ using Roots
 
 ### 2D Test Case : Monophasic Unsteady Diffusion Equation inside a moving Disk
 # Define the mesh
-nx, ny = 80, 80
+nx, ny = 20, 20
 lx, ly = 4., 4.
 x0, y0 = 0., 0.
 domain = ((x0, lx), (y0, ly))
@@ -14,7 +14,7 @@ mesh = Penguin.Mesh((nx, ny), (lx, ly), (x0, y0))
 # Define the body
 radius, center = ly/4, (lx/2, ly/2) .+ (0.01, 0.01)
 c = 0.0
-body = (x,y,t)->(sqrt((x - center[1])^2 + (y - center[2])^2) - radius + c*t)
+body = (x,y,t)->-(sqrt((x - center[1])^2 + (y - center[2])^2) - radius + c*t)
 
 # Define the Space-Time mesh
 Δt = 0.01

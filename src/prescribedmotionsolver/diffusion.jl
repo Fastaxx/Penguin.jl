@@ -137,13 +137,13 @@ function A_mono_unstead_diff_moving(operator::DiffusionOps, capacity::Capacity, 
         error("A_mono_unstead_diff_moving_generic not supported for dimension $(len_dims).")
     end
 
-    W! = operator.Wꜝ[1:n, 1:n]
-    G  = operator.G[1:n, 1:n]
-    H  = operator.H[1:n, 1:n]
-    Iᵦ = Iᵦ[1:n, 1:n]
-    Iₐ = Iₐ[1:n, 1:n]
-    Iᵧ = Iᵧ[1:n, 1:n]
-    Id  = Id[1:n, 1:n]
+    W! = operator.Wꜝ[1:end÷2, 1:end÷2]
+    G  = operator.G[1:end÷2, 1:end÷2]
+    H  = operator.H[1:end÷2, 1:end÷2]
+    Iᵦ = Iᵦ[1:end÷2, 1:end÷2]
+    Iₐ = Iₐ[1:end÷2, 1:end÷2]
+    Iᵧ = Iᵧ[1:end÷2, 1:end÷2]
+    Id  = Id[1:end÷2, 1:end÷2]
 
     # Construct subblocks
     block1 = Vn_1 + Id * G' * W! * G * Ψn1
@@ -193,16 +193,16 @@ function b_mono_unstead_diff_moving(operator::DiffusionOps, capacity::Capacity, 
     end
 
     # Extract operator sub-blocks
-    W! = operator.Wꜝ[1:n, 1:n]
-    G  = operator.G[1:n, 1:n]
-    H  = operator.H[1:n, 1:n]
-    V  = operator.V[1:n, 1:n]
-    Iᵧ_mat = capacity.Γ[1:n, 1:n]
-    Tₒ = Tᵢ[1:n]
-    Tᵧ = Tᵢ[n+1:end]
-    fₒn, fₒn1 = fₒn[1:n], fₒn1[1:n]
-    gᵧ = gᵧ[1:n]
-    Id = Id[1:n, 1:n]
+    W! = operator.Wꜝ[1:end÷2, 1:end÷2]
+    G  = operator.G[1:end÷2, 1:end÷2]
+    H  = operator.H[1:end÷2, 1:end÷2]
+    V  = operator.V[1:end÷2, 1:end÷2]
+    Iᵧ_mat = capacity.Γ[1:end÷2, 1:end÷2]
+    Tₒ = Tᵢ[1:end÷2]
+    Tᵧ = Tᵢ[end÷2+1:end]
+    fₒn, fₒn1 = fₒn[1:end÷2], fₒn1[1:end÷2]
+    gᵧ = gᵧ[1:end÷2]
+    Id = Id[1:end÷2, 1:end÷2]
 
     # Construct the right-hand side
     if scheme == "CN"
@@ -310,8 +310,6 @@ function A_diph_unstead_diff_moving(operator1::DiffusionOps, operator2::Diffusio
     # Retrieve jump & flux from the interface conditions
     jump, flux = ic.scalar, ic.flux
 
-    Iₐ1, Iₐ2 = jump.α₁ * I(n), jump.α₂ * I(n)
-    Iᵦ1, Iᵦ2 = flux.β₁ * I(n), flux.β₂ * I(n)
 
     # Build diffusion operators
     Id1 = build_I_D(operator1, D1, capacite1)
@@ -327,6 +325,7 @@ function A_diph_unstead_diff_moving(operator1::DiffusionOps, operator2::Diffusio
     Vn2_1 = capacite2.A[cap_index2][1:end÷2, 1:end÷2]
     Vn2   = capacite2.A[cap_index2][end÷2+1:end, end÷2+1:end]
 
+
     # Time integration weighting
     if scheme == "CN"
         psip, psim = psip_cn, psim_cn
@@ -336,22 +335,26 @@ function A_diph_unstead_diff_moving(operator1::DiffusionOps, operator2::Diffusio
 
     Ψn1 = Diagonal(psip.(Vn1, Vn1_1))
     Ψn2 = Diagonal(psip.(Vn2, Vn2_1))
+    
+    Iₐ1, Iₐ2 = jump.α₁ * I(size(Ψn1)[1]), jump.α₂ * I(size(Ψn2)[1])
+    Iᵦ1, Iᵦ2 = flux.β₁ * I(size(Ψn1)[1]), flux.β₂ * I(size(Ψn2)[1])
+
 
     # Operator sub-blocks for each phase
-    W!1 = operator1.Wꜝ[1:n, 1:n]
-    G1  = operator1.G[1:n, 1:n]
-    H1  = operator1.H[1:n, 1:n]
+    W!1 = operator1.Wꜝ[1:end÷2, 1:end÷2]
+    G1  = operator1.G[1:end÷2, 1:end÷2]
+    H1  = operator1.H[1:end÷2, 1:end÷2]
 
-    W!2 = operator2.Wꜝ[1:n, 1:n]
-    G2  = operator2.G[1:n, 1:n]
-    H2  = operator2.H[1:n, 1:n]
+    W!2 = operator2.Wꜝ[1:end÷2, 1:end÷2]
+    G2  = operator2.G[1:end÷2, 1:end÷2]
+    H2  = operator2.H[1:end÷2, 1:end÷2]
 
-    Iᵦ1 = Iᵦ1[1:n, 1:n]
-    Iᵦ2 = Iᵦ2[1:n, 1:n]
-    Iₐ1 = Iₐ1[1:n, 1:n]
-    Iₐ2 = Iₐ2[1:n, 1:n]
-    Id1  = Id1[1:n, 1:n]
-    Id2  = Id2[1:n, 1:n]
+    Iᵦ1 = Iᵦ1
+    Iᵦ2 = Iᵦ2
+    Iₐ1 = Iₐ1
+    Iₐ2 = Iₐ2
+    Id1  = Id1[1:end÷2, 1:end÷2]
+    Id2  = Id2[1:end÷2, 1:end÷2]
 
     # Construct blocks
     block1 = Vn1_1 + Id1 * G1' * W!1 * G1 * Ψn1
@@ -368,26 +371,20 @@ function A_diph_unstead_diff_moving(operator1::DiffusionOps, operator2::Diffusio
     A = spzeros(Float64, 4n, 4n)
 
     # Assign sub-blocks
-    A[1:n, 1:n]         = block1
-    A[1:n, n+1:2n]      = block2
-    A[1:n, 2n+1:3n]     = spzeros(n, n)
-    A[1:n, 3n+1:4n]     = spzeros(n, n)
 
-    A[n+1:2n, 1:n]      = spzeros(n, n)
-    A[n+1:2n, n+1:2n]   = Iₐ1
-    A[n+1:2n, 2n+1:3n]  = spzeros(n, n)
-    A[n+1:2n, 3n+1:4n]  = -Iₐ2
+    A1 = [block1 block2 spzeros(size(block2)) spzeros(size(block2))]
 
-    A[2n+1:3n, 1:n]     = spzeros(n, n)
-    A[2n+1:3n, n+1:2n]  = spzeros(n, n)
-    A[2n+1:3n, 2n+1:3n] = block3
-    A[2n+1:3n, 3n+1:4n] = block4
 
-    A[3n+1:4n, 1:n]     = block5
-    A[3n+1:4n, n+1:2n]  = block6
-    A[3n+1:4n, 2n+1:3n] = block7
-    A[3n+1:4n, 3n+1:4n] = block8
+    A2 = [spzeros(size(block1)) Iₐ1 spzeros(size(block2)) -Iₐ2]
 
+
+    A3 = [spzeros(size(block1)) spzeros(size(block2)) block3 block4]
+
+
+    A4 = [block5 block6 block7 block8]
+
+    # Combine all blocks into the final matrix
+    A = [A1; A2; A3; A4]
     return A
 end
 
@@ -449,33 +446,33 @@ function b_diph_unstead_diff_moving(operator1::DiffusionOps, operator2::Diffusio
     end
 
     # 8) Build the bulk terms for each phase
-    Tₒ1 = Tᵢ[1:n1]
-    Tᵧ1 = Tᵢ[n1+1:2n1]
+    Tₒ1 = Tᵢ[1:end÷4]
+    Tᵧ1 = Tᵢ[end÷4 + 1 : end÷2]
 
-    Tₒ2 = Tᵢ[2n1 + 1 : 2n1 + n2]
-    Tᵧ2 = Tᵢ[2n1 + n2 + 1 : end]
+    Tₒ2 = Tᵢ[end÷2 + 1 : 3end÷4]
+    Tᵧ2 = Tᵢ[3end÷4 + 1 : end]
 
-    f1ₒn  = f1ₒn[1:n1]
-    f1ₒn1 = f1ₒn1[1:n1]
-    f2ₒn  = f2ₒn[1:n2]
-    f2ₒn1 = f2ₒn1[1:n2]
+    f1ₒn  = f1ₒn[1:end÷2]
+    f1ₒn1 = f1ₒn1[1:end÷2]
+    f2ₒn  = f2ₒn[1:end÷2]
+    f2ₒn1 = f2ₒn1[1:end÷2]
 
-    gᵧ = gᵧ[1:n1]
-    hᵧ = hᵧ[1:n2]
-    Iᵧ1 = Iᵧ1[1:n1, 1:n1]
-    Iᵧ2 = Iᵧ2[1:n2, 1:n2]
-    Id1 = Id1[1:n1, 1:n1]
-    Id2 = Id2[1:n2, 1:n2]
+    gᵧ = gᵧ[1:end÷2]
+    hᵧ = hᵧ[1:end÷2]
+    Iᵧ1 = Iᵧ1[1:end÷2, 1:end÷2]
+    Iᵧ2 = Iᵧ2[1:end÷2, 1:end÷2]
+    Id1 = Id1[1:end÷2, 1:end÷2]
+    Id2 = Id2[1:end÷2, 1:end÷2]
 
-    W!1 = operator1.Wꜝ[1:n1, 1:n1]
-    G1  = operator1.G[1:n1, 1:n1]
-    H1  = operator1.H[1:n1, 1:n1]
-    V1  = operator1.V[1:n1, 1:n1]
+    W!1 = operator1.Wꜝ[1:end÷2, 1:end÷2]
+    G1  = operator1.G[1:end÷2, 1:end÷2]
+    H1  = operator1.H[1:end÷2, 1:end÷2]
+    V1  = operator1.V[1:end÷2, 1:end÷2]
 
-    W!2 = operator2.Wꜝ[1:n2, 1:n2]
-    G2  = operator2.G[1:n2, 1:n2]
-    H2  = operator2.H[1:n2, 1:n2]
-    V2  = operator2.V[1:n2, 1:n2]
+    W!2 = operator2.Wꜝ[1:end÷2, 1:end÷2]
+    G2  = operator2.G[1:end÷2, 1:end÷2]
+    H2  = operator2.H[1:end÷2, 1:end÷2]
+    V2  = operator2.V[1:end÷2, 1:end÷2]
 
     # 9) Build the right-hand side
     if scheme == "CN"
