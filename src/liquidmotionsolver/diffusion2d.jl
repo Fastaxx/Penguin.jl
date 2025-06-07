@@ -105,13 +105,13 @@ function solve_MovingLiquidDiffusionUnsteadyMono2D!(s::Solver, phase::Phase, Int
         Hₙ₊₁ = collect(vec(sum(Vₙ₊₁, dims=1)))
 
         # 3) Compute the interface flux term
-        W! = phase.operator.Wꜝ[1:n, 1:n]  # n = nx*ny (full 2D system)
-        G  = phase.operator.G[1:n, 1:n]
-        H  = phase.operator.H[1:n, 1:n]
-        V  = phase.operator.V[1:n, 1:n]
+        W! = phase.operator.Wꜝ[1:end÷2, 1:end÷2]
+        G  = phase.operator.G[1:end÷2, 1:end÷2]
+        H  = phase.operator.H[1:end÷2, 1:end÷2]
+        V  = phase.operator.V[1:end÷2, 1:end÷2]
         Id = build_I_D(phase.operator, phase.Diffusion_coeff, phase.capacity)
-        Id = Id[1:n, 1:n]
-        Tₒ, Tᵧ = Tᵢ[1:n], Tᵢ[n+1:end]
+        Id = Id[1:end÷2, 1:end÷2]
+        Tₒ, Tᵧ = Tᵢ[1:end÷2], Tᵢ[end÷2+1:end]
         Interface_term = Id * H' * W! * G * Tₒ + Id * H' * W! * H * Tᵧ
         
         # Check if bc is a Gibbs-Thomson condition
@@ -227,13 +227,13 @@ function solve_MovingLiquidDiffusionUnsteadyMono2D!(s::Solver, phase::Phase, Int
     k=2
     while t<Tₑ
         # Calcul de la vitesse d'interface à partir des flux
-        W! = phase.operator.Wꜝ[1:n, 1:n]  # n = nx*ny (full 2D system)
-        G  = phase.operator.G[1:n, 1:n]
-        H  = phase.operator.H[1:n, 1:n]
-        V  = phase.operator.V[1:n, 1:n]
+        W! = phase.operator.Wꜝ[1:end÷2, 1:end÷2]
+        G  = phase.operator.G[1:end÷2, 1:end÷2]
+        H  = phase.operator.H[1:end÷2, 1:end÷2]
+        V  = phase.operator.V[1:end÷2, 1:end÷2]
         Id = build_I_D(phase.operator, phase.Diffusion_coeff, phase.capacity)
-        Id = Id[1:n, 1:n]
-        Tₒ, Tᵧ = Tᵢ[1:n], Tᵢ[n+1:end]
+        Id = Id[1:end÷2, 1:end÷2]
+        Tₒ, Tᵧ = Tᵢ[1:end÷2], Tᵢ[end÷2+1:end]
         Interface_term = Id * H' * W! * G * Tₒ + Id * H' * W! * H * Tᵧ
         velocity_field = 1/(ρL) * abs.(Interface_term)
         
@@ -344,13 +344,13 @@ function solve_MovingLiquidDiffusionUnsteadyMono2D!(s::Solver, phase::Phase, Int
             Hₙ₊₁ = collect(vec(sum(Vₙ₊₁, dims=1)))
 
             # 3) Compute the interface flux term
-            W! = phase.operator.Wꜝ[1:n, 1:n]  # n = nx*ny (full 2D system)
-            G  = phase.operator.G[1:n, 1:n]
-            H  = phase.operator.H[1:n, 1:n]
-            V  = phase.operator.V[1:n, 1:n]
+            W! = phase.operator.Wꜝ[1:end÷2, 1:end÷2]
+            G  = phase.operator.G[1:end÷2, 1:end÷2]
+            H  = phase.operator.H[1:end÷2, 1:end÷2]
+            V  = phase.operator.V[1:end÷2, 1:end÷2]
             Id = build_I_D(phase.operator, phase.Diffusion_coeff, phase.capacity)
-            Id = Id[1:n, 1:n]
-            Tₒ, Tᵧ = Tᵢ[1:n], Tᵢ[n+1:end]
+            Id = Id[1:end÷2, 1:end÷2]
+            Tₒ, Tᵧ = Tᵢ[1:end÷2], Tᵢ[end÷2+1:end]
             Interface_term = Id * H' * W! * G * Tₒ + Id * H' * W! * H * Tᵧ
                     
             # Check if bc is a Gibbs-Thomson condition
