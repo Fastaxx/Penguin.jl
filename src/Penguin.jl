@@ -18,6 +18,7 @@ using Colors
 using Statistics
 using LibGEOS
 using GeoInterface
+using NLsolve
 
 # Write your package code here.
 
@@ -95,10 +96,12 @@ export MovingLiquidDiffusionUnsteadyDiph, solve_MovingLiquidDiffusionUnsteadyDip
 
 include("liquidmotionsolver/diffusion2d.jl")
 export MovingLiquidDiffusionUnsteadyMono2D, solve_MovingLiquidDiffusionUnsteadyMono2D!
+export MovingLiquidDiffusionUnsteadyDiph2D, solve_MovingLiquidDiffusionUnsteadyDiph2D!
 
 include("liquidmotionsolver/stefan.jl")
-export StefanMono2D, solve_StefanMono2D!,  solve_StefanAdvection!
+export StefanMono2D, solve_StefanMono2D!
 export compute_volume_jacobian
+export solve_StefanMono2Dunclosed!
 
 include("concentrationsolver/species.jl")
 export DiffusionUnsteadyConcentration, solve_DiffusionUnsteadyConcentration!

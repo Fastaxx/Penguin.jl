@@ -215,7 +215,7 @@ function b_mono_unstead_diff_moving(operator::DiffusionOps, capacity::Capacity, 
     return [b1; b2]
 end
 
-function solve_MovingDiffusionUnsteadyMono!(s::Solver, phase::Phase, body::Function, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, bc::AbstractBoundary, mesh::AbstractMesh, scheme::String; method = IterativeSolvers.gmres, kwargs...)
+function solve_MovingDiffusionUnsteadyMono!(s::Solver, phase::Phase, body::Function, Δt::Float64, Tₛ::Float64, Tₑ::Float64, bc_b::BorderConditions, bc::AbstractBoundary, mesh::AbstractMesh, scheme::String; method = IterativeSolvers.gmres, kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
@@ -227,7 +227,7 @@ function solve_MovingDiffusionUnsteadyMono!(s::Solver, phase::Phase, body::Funct
     println("- Diffusion problem")
 
     # Solve system for the initial condition
-    t=0.0
+    t=Tₛ
     println("Time : $(t)")
     solve_system!(s; method, kwargs...)
 
@@ -240,7 +240,7 @@ function solve_MovingDiffusionUnsteadyMono!(s::Solver, phase::Phase, body::Funct
         t += Δt
         println("Time : $(t)")
         STmesh = Penguin.SpaceTimeMesh(mesh, [t, t+Δt], tag=mesh.tag)
-        capacity = Capacity(body, STmesh)
+        capacity = Capacity(body, STmesh; compute_centroids=false)
         operator = DiffusionOps(capacity)
 
         s.A = A_mono_unstead_diff_moving(operator, capacity, phase.Diffusion_coeff, bc, scheme)
