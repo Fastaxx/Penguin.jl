@@ -1331,14 +1331,10 @@ end
 
 # Compute Space-Time Capacities
 """
-    compute_spacetime_capacities_3d(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker, dt::Float64)
+    compute_spacetime_capacities(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker, dt::Float64)
 
-Computes space-time geometric capacities for a 2D mesh between two time steps.
-- front_n: Front tracker at time t_n
-- front_np1: Front tracker at time t_n+1
-- dt: Time step size
-
-Returns a dictionary with all space-time capacities.
+Calculates the space-time surface capacities for a 2D mesh between two time steps
+using a polygon-based approach similar to the 1D method.
 """
 function compute_spacetime_capacities(mesh::Mesh{2}, front_n::FrontTracker, front_np1::FrontTracker, dt::Float64)
     # Extract mesh information
@@ -1348,426 +1344,363 @@ function compute_spacetime_capacities(mesh::Mesh{2}, front_n::FrontTracker, fron
     ny = length(y_nodes) - 1
     
     # Initialize capacity arrays
-    Ax_spacetime = zeros(nx+1, ny+1)     # Space-time vertical face capacities (y-t surfaces)
-    Ay_spacetime = zeros(nx+1, ny+1)     # Space-time horizontal face capacities (x-t surfaces)
-    V_spacetime = zeros(nx, ny)        # Space-time volumes (x-y-t volumes)
+    Ax_spacetime = zeros(nx+1, ny+1)     # Space-time vertical face capacities
+    Ay_spacetime = zeros(nx+1, ny+1)     # Space-time horizontal face capacities
     
-    # Face classification storage
-    face_types_x = fill(:unknown, (nx+1, ny))  # Type of each vertical face
-    face_types_y = fill(:unknown, (nx, ny+1))  # Type of each horizontal face
-    crossing_times_x = zeros(nx+1, ny, 2)      # Crossing times for vertical faces (2 points per face)
-    crossing_times_y = zeros(nx, ny+1, 2)      # Crossing times for horizontal faces (2 points per face)
+    # Arrays to store face classifications
+    face_types_x = fill(:unknown, (nx+1, ny))
+    face_types_y = fill(:unknown, (nx, ny+1))
+    t_crosses_x = zeros(nx+1, ny)
+    t_crosses_y = zeros(nx, ny+1)
     
-    # 1. Classify vertical faces (Ax) in space-time
+    # 1. Calculate Ax capacities (vertical faces)
     for i in 1:nx+1
         for j in 1:ny
             x_face = x_nodes[i]
             y_min, y_max = y_nodes[j], y_nodes[j+1]
             
-            # Check vertex states at both time steps
-            # Bottom vertices (j) at times n and n+1
-            v1_state_n = is_point_inside(front_n, x_face, y_min)
-            v1_state_np1 = is_point_inside(front_np1, x_face, y_min)
+            # Check if vertices are inside fluid at time n and n+1
+            bottom_n = is_point_inside(front_n, x_face, y_min)
+            bottom_np1 = is_point_inside(front_np1, x_face, y_min)
+            top_n = is_point_inside(front_n, x_face, y_max)
+            top_np1 = is_point_inside(front_np1, x_face, y_max)
             
-            # Top vertices (j+1) at times n and n+1
-            v2_state_n = is_point_inside(front_n, x_face, y_max)
-            v2_state_np1 = is_point_inside(front_np1, x_face, y_max)
+            # Classify the bottom and top edges
+            bottom_edge_type = classify_edge_type(bottom_n, bottom_np1)
+            top_edge_type = classify_edge_type(top_n, top_np1)
             
-            # Determine face type based on all vertices
-            if !v1_state_n && !v1_state_np1 && !v2_state_n && !v2_state_np1
-                # Empty face - all vertices are outside fluid
-                face_types_x[i, j] = :empty
-                Ax_spacetime[i, j] = 0.0
-            elseif v1_state_n && v1_state_np1 && v2_state_n && v2_state_np1
-                # Full face - all vertices are inside fluid
-                face_types_x[i, j] = :full
-                Ax_spacetime[i, j] = (y_max - y_min) * dt
-            else
-                # Cut face - compute the space-time surface area
-                face_types_x[i, j] = :cut
-                
-                # Calculate face capacity using 3D marching cubes approach
-                vertexStates = [v1_state_n, v1_state_np1, v2_state_np1, v2_state_n]
-                cubeCaseId = sum(Int(vertexStates[v]) * 2^(v-1) for v in 1:4)
-                
-                # Find crossing times along edges if needed
-                if vertexStates[1] != vertexStates[2]  # Bottom edge crosses interface
-                    crossing_times_x[i, j, 1] = find_crossing_time(front_n, front_np1, x_face, y_min, dt)
-                end
-                if vertexStates[3] != vertexStates[4]  # Top edge crosses interface
-                    crossing_times_x[i, j, 2] = find_crossing_time(front_n, front_np1, x_face, y_max, dt)
-                end
-                
-                # Calculate space-time surface area for this face
-                Ax_spacetime[i, j] = calculate_spacetime_surface_Ax(
-                    cubeCaseId, x_face, y_min, y_max, dt, 
-                    front_n, front_np1, crossing_times_x[i, j, :]
-                )
+            # Calculate crossing times
+            t_cross_bottom = calculate_crossing_time(bottom_edge_type, front_n, front_np1, x_face, y_min, dt)
+            t_cross_top = calculate_crossing_time(top_edge_type, front_n, front_np1, x_face, y_max, dt)
+            
+            t_crosses_x[i, j] = (bottom_n != bottom_np1) ? t_cross_bottom : 
+                               (top_n != top_np1 ? t_cross_top : 0.5*dt)
+            
+            # Calculate case ID based on edge types (similar to 1D approach)
+            case_id = 0
+            
+            # Bottom edge contribution
+            if bottom_edge_type == :empty
+                case_id += 0      # 0
+            elseif bottom_edge_type == :dead
+                case_id += 1      # 1
+            elseif bottom_edge_type == :fresh
+                case_id += 2      # 2
+            elseif bottom_edge_type == :full
+                case_id += 3      # 3
             end
+            
+            # Top edge contribution
+            if top_edge_type == :empty
+                case_id += 0      # +0
+            elseif top_edge_type == :dead
+                case_id += 4      # +4
+            elseif top_edge_type == :fresh
+                case_id += 8      # +8
+            elseif top_edge_type == :full
+                case_id += 12     # +12
+            end
+            
+            # Calculate surface capacity using LibGEOS polygon approach
+            try
+                area, _ = calculate_spacetime_geometry_libgeos2(
+                    case_id, y_min, y_max, dt, t_cross_bottom, t_cross_top
+                )
+                Ax_spacetime[i, j] = area
+                face_types_x[i, j] = get_face_type(case_id)
+            catch e
+                # Fallback to a simple calculation if the polygon approach fails
+                println("Warning: Error calculating Ax at ($i,$j): ", e)
+                wet_fraction = (Int(bottom_n) + Int(bottom_np1) + Int(top_n) + Int(top_np1)) / 4.0
+                Ax_spacetime[i, j] = wet_fraction * (y_max - y_min) * dt
+            end
+            
+            # Safety bounds check
+            Ax_spacetime[i, j] = clamp(Ax_spacetime[i, j], 0.0, (y_max - y_min) * dt)
         end
     end
     
-    # 2. Classify horizontal faces (Ay) in space-time
+    # 2. Calculate Ay capacities (horizontal faces)
     for i in 1:nx
         for j in 1:ny+1
             y_face = y_nodes[j]
             x_min, x_max = x_nodes[i], x_nodes[i+1]
             
-            # Check vertex states at both time steps
-            # Left vertices at times n and n+1
-            v1_state_n = is_point_inside(front_n, x_min, y_face)
-            v1_state_np1 = is_point_inside(front_np1, x_min, y_face)
+            # Check if vertices are inside fluid at time n and n+1
+            left_n = is_point_inside(front_n, x_min, y_face)
+            left_np1 = is_point_inside(front_np1, x_min, y_face)
+            right_n = is_point_inside(front_n, x_max, y_face)
+            right_np1 = is_point_inside(front_np1, x_max, y_face)
             
-            # Right vertices at times n and n+1
-            v2_state_n = is_point_inside(front_n, x_max, y_face)
-            v2_state_np1 = is_point_inside(front_np1, x_max, y_face)
+            # Classify the left and right edges
+            left_edge_type = classify_edge_type(left_n, left_np1)
+            right_edge_type = classify_edge_type(right_n, right_np1)
             
-            # Determine face type based on all vertices
-            if !v1_state_n && !v1_state_np1 && !v2_state_n && !v2_state_np1
-                # Empty face - all vertices are outside fluid
-                face_types_y[i, j] = :empty
-                Ay_spacetime[i, j] = 0.0
-            elseif v1_state_n && v1_state_np1 && v2_state_n && v2_state_np1
-                # Full face - all vertices are inside fluid
-                face_types_y[i, j] = :full
-                Ay_spacetime[i, j] = (x_max - x_min) * dt
-            else
-                # Cut face - compute the space-time surface area
-                face_types_y[i, j] = :cut
-                
-                # Calculate face capacity using 3D marching cubes approach
-                vertexStates = [v1_state_n, v1_state_np1, v2_state_np1, v2_state_n]
-                cubeCaseId = sum(Int(vertexStates[v]) * 2^(v-1) for v in 1:4)
-                
-                # Find crossing times along edges if needed
-                if vertexStates[1] != vertexStates[2]  # Left edge crosses interface
-                    crossing_times_y[i, j, 1] = find_crossing_time(front_n, front_np1, x_min, y_face, dt)
-                end
-                if vertexStates[3] != vertexStates[4]  # Right edge crosses interface
-                    crossing_times_y[i, j, 2] = find_crossing_time(front_n, front_np1, x_max, y_face, dt)
-                end
-                
-                # Calculate space-time surface area for this face
-                Ay_spacetime[i, j] = calculate_spacetime_surface_Ay(
-                    cubeCaseId, x_min, x_max, y_face, dt, 
-                    front_n, front_np1, crossing_times_y[i, j, :]
-                )
+            # Calculate crossing times
+            t_cross_left = calculate_crossing_time(left_edge_type, front_n, front_np1, x_min, y_face, dt)
+            t_cross_right = calculate_crossing_time(right_edge_type, front_n, front_np1, x_max, y_face, dt)
+            
+            t_crosses_y[i, j] = (left_n != left_np1) ? t_cross_left : 
+                               (right_n != right_np1 ? t_cross_right : 0.5*dt)
+            
+            # Calculate case ID based on edge types
+            case_id = 0
+            
+            # Left edge contribution
+            if left_edge_type == :empty
+                case_id += 0      # 0
+            elseif left_edge_type == :dead
+                case_id += 1      # 1
+            elseif left_edge_type == :fresh
+                case_id += 2      # 2
+            elseif left_edge_type == :full
+                case_id += 3      # 3
             end
+
+            # Right edge contribution
+            if right_edge_type == :empty
+                case_id += 0      # +0
+            elseif right_edge_type == :dead
+                case_id += 4      # +4
+            elseif right_edge_type == :fresh
+                case_id += 8      # +8
+            elseif right_edge_type == :full
+                case_id += 12     # +12
+            end
+            
+            # Calculate surface capacity using LibGEOS polygon approach
+            try
+                area, _ = calculate_spacetime_geometry_libgeos2(
+                    case_id, x_min, x_max, dt, t_cross_left, t_cross_right
+                )
+                Ay_spacetime[i, j] = area
+                face_types_y[i, j] = get_face_type(case_id)
+            catch e
+                # Fallback to a simple calculation if the polygon approach fails
+                println("Warning: Error calculating Ay at ($i,$j): ", e)
+                wet_fraction = (Int(left_n) + Int(left_np1) + Int(right_n) + Int(right_np1)) / 4.0
+                Ay_spacetime[i, j] = wet_fraction * (x_max - x_min) * dt
+            end
+            
+            # Safety bounds check
+            Ay_spacetime[i, j] = clamp(Ay_spacetime[i, j], 0.0, (x_max - x_min) * dt)
         end
     end
     
-    # 3. Calculate space-time volumes for cells
-    for i in 1:nx
-        for j in 1:ny
-            # Get cell corners
-            x_min, x_max = x_nodes[i], x_nodes[i+1]
-            y_min, y_max = y_nodes[j], y_nodes[j+1]
-            
-            # Check vertex states at both time steps (all 8 vertices of space-time hexahedron)
-            # Bottom face at time n
-            v1_state_n = is_point_inside(front_n, x_min, y_min)
-            v2_state_n = is_point_inside(front_n, x_max, y_min)
-            v3_state_n = is_point_inside(front_n, x_max, y_max)
-            v4_state_n = is_point_inside(front_n, x_min, y_max)
-            
-            # Top face at time n+1
-            v1_state_np1 = is_point_inside(front_np1, x_min, y_min)
-            v2_state_np1 = is_point_inside(front_np1, x_max, y_min)
-            v3_state_np1 = is_point_inside(front_np1, x_max, y_max)
-            v4_state_np1 = is_point_inside(front_np1, x_min, y_max)
-            
-            # Determine cell type based on all vertices
-            if !any([v1_state_n, v2_state_n, v3_state_n, v4_state_n, 
-                     v1_state_np1, v2_state_np1, v3_state_np1, v4_state_np1])
-                # Empty cell - all vertices are outside fluid
-                V_spacetime[i, j] = 0.0
-            elseif all([v1_state_n, v2_state_n, v3_state_n, v4_state_n, 
-                        v1_state_np1, v2_state_np1, v3_state_np1, v4_state_np1])
-                # Full cell - all vertices are inside fluid
-                V_spacetime[i, j] = (x_max - x_min) * (y_max - y_min) * dt
-            else
-                # Cut cell - compute the space-time volume
-                vertexStates = [v1_state_n, v2_state_n, v3_state_n, v4_state_n,
-                                v1_state_np1, v2_state_np1, v3_state_np1, v4_state_np1]
-                cubeCaseId = sum(Int(vertexStates[v]) * 2^(v-1) for v in 1:8)
-                
-                # Calculate space-time volume using a 3D approach
-                V_spacetime[i, j] = calculate_spacetime_volume_3d(
-                    cubeCaseId, x_min, x_max, y_min, y_max, dt, 
-                    front_n, front_np1
-                )
-            end
-        end
-    end
-    
-    # Return all space-time capacities
     return Dict(
-        :Ax_spacetime => Ax_spacetime,     # Space-time vertical face capacities
-        :Ay_spacetime => Ay_spacetime,     # Space-time horizontal face capacities
-        :V_spacetime => V_spacetime,       # Space-time volumes
-        :face_types_x => face_types_x,     # Vertical face types
-        :face_types_y => face_types_y,     # Horizontal face types
-        :crossing_times_x => crossing_times_x, # Crossing times for vertical faces
-        :crossing_times_y => crossing_times_y  # Crossing times for horizontal faces
+        :Ax_spacetime => Ax_spacetime,
+        :Ay_spacetime => Ay_spacetime,
+        :face_types_x => face_types_x,
+        :face_types_y => face_types_y,
+        :t_crosses_x => t_crosses_x,
+        :t_crosses_y => t_crosses_y
     )
 end
 
 """
-    calculate_spacetime_surface_Ax(caseId::Int, x::Float64, y_min::Float64, y_max::Float64, 
-                                dt::Float64, front_n::FrontTracker, front_np1::FrontTracker, 
-                                crossing_times::Vector{Float64})
+    calculate_spacetime_geometry_libgeos(case_id::Int, p_min::Float64, p_max::Float64, 
+                                       dt::Float64, t_left::Float64, t_right::Float64)
 
-Calculates the space-time surface area for a vertical face (Ax) based on the marching cubes case.
+Calculate the space-time volume and centroid using LibGEOS library for 2D faces.
+Works for both Ax and Ay. This is adapted from the 1D implementation.
 """
-function calculate_spacetime_surface_Ax(caseId::Int, x::Float64, y_min::Float64, y_max::Float64, 
-                                     dt::Float64, front_n::FrontTracker, front_np1::FrontTracker, 
-                                     crossing_times::Vector{Float64})
-    # Full surface area
-    full_area = (y_max - y_min) * dt
+function calculate_spacetime_geometry_libgeos2(case_id::Int, p_min::Float64, p_max::Float64, 
+                                           dt::Float64, t_left::Float64, t_right::Float64)
+    # Full dimensions
+    dp = p_max - p_min
+    full_area = dp * dt
     
-    # Extract vertex states from case ID
-    vertexStates = [(caseId & (1 << i)) > 0 for i in 0:3]
-    
-    # Simple cases
-    if all(vertexStates)  # All vertices wet
-        return full_area
-    elseif !any(vertexStates)  # All vertices dry
-        return 0.0
+    # Cases with 0% fluid
+    if case_id == 0
+        # Default centroid for empty cells is cell center
+        return 0.0, [p_min + dp/2, dt/2]
     end
     
-    # Handle more complex cases using polygonal approximation
-    # Create a y-t space for this x-position
-    dy = y_max - y_min
-    
-    # Find points for the polygon that represents the wet area
-    points = []
-    
-    # Bottom edge (t=0)
-    if vertexStates[1] != vertexStates[4]
-        # Find y value where interface crosses the bottom edge
-        y_intersect = find_interface_y_at_time(front_n, x, y_min, y_max)
-        if y_min <= y_intersect <= y_max
-            push!(points, [0.0, y_intersect - y_min])
-        end
+    # Cases with 100% fluid
+    if case_id == 15
+        # For full cells, centroid is cell center
+        return full_area, [p_min + dp/2, dt/2]
     end
     
-    # Top edge (t=dt)
-    if vertexStates[2] != vertexStates[3]
-        # Find y value where interface crosses the top edge
-        y_intersect = find_interface_y_at_time(front_np1, x, y_min, y_max)
-        if y_min <= y_intersect <= y_max
-            push!(points, [dt, y_intersect - y_min])
-        end
-    end
+    # Get polygon coordinates for this case
+    coords = get_spacetime_polygon_coords2(case_id, p_min, p_max, dt, t_left, t_right)
     
-    # Left edge (y=y_min)
-    if vertexStates[1] != vertexStates[2]
-        # Time when interface crosses left edge
-        t_cross = crossing_times[1]
-        if 0 <= t_cross <= dt
-            push!(points, [t_cross, 0.0])
-        end
-    end
+    # Create LibGEOS polygon
+    polygon = LibGEOS.Polygon([coords])
     
-    # Right edge (y=y_max)
-    if vertexStates[4] != vertexStates[3]
-        # Time when interface crosses right edge
-        t_cross = crossing_times[2]
-        if 0 <= t_cross <= dt
-            push!(points, [t_cross, dy])
-        end
-    end
+    # Calculate area
+    area = LibGEOS.area(polygon)
     
-    # Add vertex points that are inside fluid
-    if vertexStates[1]  # Bottom-left (t=0, y=y_min) is wet
-        push!(points, [0.0, 0.0])
-    end
-    if vertexStates[2]  # Bottom-right (t=dt, y=y_min) is wet
-        push!(points, [dt, 0.0])
-    end
-    if vertexStates[3]  # Top-right (t=dt, y=y_max) is wet
-        push!(points, [dt, dy])
-    end
-    if vertexStates[4]  # Top-left (t=0, y=y_max) is wet
-        push!(points, [0.0, dy])
-    end
+    # Calculate centroid
+    centroid_geom = LibGEOS.centroid(polygon)
+    centroid_coords = [LibGEOS.getcoord(centroid_geom, i) for i in 1:2]
     
-    # If we have enough points, create a polygon and calculate its area
-    if length(points) >= 3
-        # Sort points to form a proper polygon (convex hull)
-        sorted_points = sort_points_clockwise(points)
-        
-        # Close the polygon
-        if sorted_points[1] != sorted_points[end]
-            push!(sorted_points, sorted_points[1])
-        end
-        
-        # Create a polygon and calculate the area
-        return calculate_polygon_area(sorted_points)
-    else
-        # Fallback: use average of vertex states
-        avg_state = sum(Int.(vertexStates)) / 4
-        return avg_state * full_area
+    # Return both results
+    return area, centroid_coords
+end
+
+"""
+    classify_edge_type(is_wet_n::Bool, is_wet_np1::Bool)
+
+Classify an edge based on its state at time n and n+1.
+Returns :empty, :full, :fresh, or :dead.
+"""
+function classify_edge_type(is_wet_n::Bool, is_wet_np1::Bool)
+    if !is_wet_n && !is_wet_np1
+        return :empty      # Dry at both times
+    elseif is_wet_n && is_wet_np1
+        return :full       # Wet at both times
+    elseif !is_wet_n && is_wet_np1
+        return :fresh      # Becomes wet (dry -> wet)
+    else  # is_wet_n && !is_wet_np1
+        return :dead       # Becomes dry (wet -> dry)
     end
 end
 
 """
-    calculate_spacetime_surface_Ay(caseId::Int, x_min::Float64, x_max::Float64, y::Float64, 
-                                dt::Float64, front_n::FrontTracker, front_np1::FrontTracker, 
-                                crossing_times::Vector{Float64})
+    calculate_crossing_time(edge_type::Symbol, front_n::FrontTracker, front_np1::FrontTracker, 
+                          x::Float64, y::Float64, dt::Float64)
 
-Calculates the space-time surface area for a horizontal face (Ay) based on the marching cubes case.
+Calculate the crossing time for an edge based on its type.
 """
-function calculate_spacetime_surface_Ay(caseId::Int, x_min::Float64, x_max::Float64, y::Float64, 
-                                     dt::Float64, front_n::FrontTracker, front_np1::FrontTracker, 
-                                     crossing_times::Vector{Float64})
-    # Full surface area
-    full_area = (x_max - x_min) * dt
-    
-    # Extract vertex states from case ID
-    vertexStates = [(caseId & (1 << i)) > 0 for i in 0:3]
-    
-    # Simple cases
-    if all(vertexStates)  # All vertices wet
-        return full_area
-    elseif !any(vertexStates)  # All vertices dry
-        return 0.0
-    end
-    
-    # Handle more complex cases using polygonal approximation
-    # Create an x-t space for this y-position
-    dx = x_max - x_min
-    
-    # Find points for the polygon that represents the wet area
-    points = []
-    
-    # Bottom edge (t=0)
-    if vertexStates[1] != vertexStates[4]
-        # Find x value where interface crosses the bottom edge
-        x_intersect = find_interface_x_at_time(front_n, x_min, x_max, y)
-        if x_min <= x_intersect <= x_max
-            push!(points, [0.0, x_intersect - x_min])
-        end
-    end
-    
-    # Top edge (t=dt)
-    if vertexStates[2] != vertexStates[3]
-        # Find x value where interface crosses the top edge
-        x_intersect = find_interface_x_at_time(front_np1, x_min, x_max, y)
-        if x_min <= x_intersect <= x_max
-            push!(points, [dt, x_intersect - x_min])
-        end
-    end
-    
-    # Left edge (x=x_min)
-    if vertexStates[1] != vertexStates[2]
-        # Time when interface crosses left edge
-        t_cross = crossing_times[1]
-        if 0 <= t_cross <= dt
-            push!(points, [t_cross, 0.0])
-        end
-    end
-    
-    # Right edge (x=x_max)
-    if vertexStates[4] != vertexStates[3]
-        # Time when interface crosses right edge
-        t_cross = crossing_times[2]
-        if 0 <= t_cross <= dt
-            push!(points, [t_cross, dx])
-        end
-    end
-    
-    # Add vertex points that are inside fluid
-    if vertexStates[1]  # Bottom-left (t=0, x=x_min) is wet
-        push!(points, [0.0, 0.0])
-    end
-    if vertexStates[2]  # Bottom-right (t=dt, x=x_min) is wet
-        push!(points, [dt, 0.0])
-    end
-    if vertexStates[3]  # Top-right (t=dt, x=x_max) is wet
-        push!(points, [dt, dx])
-    end
-    if vertexStates[4]  # Top-left (t=0, x=x_max) is wet
-        push!(points, [0.0, dx])
-    end
-    
-    # If we have enough points, create a polygon and calculate its area
-    if length(points) >= 3
-        # Sort points to form a proper polygon (convex hull)
-        sorted_points = sort_points_clockwise(points)
-        
-        # Close the polygon
-        if sorted_points[1] != sorted_points[end]
-            push!(sorted_points, sorted_points[1])
-        end
-        
-        # Create a polygon and calculate the area
-        return calculate_polygon_area(sorted_points)
+function calculate_crossing_time(edge_type::Symbol, front_n::FrontTracker, front_np1::FrontTracker, 
+                               x::Float64, y::Float64, dt::Float64)
+    if edge_type == :empty || edge_type == :full
+        return dt/2  # No crossing, placeholder value
     else
-        # Fallback: use average of vertex states
-        avg_state = sum(Int.(vertexStates)) / 4
-        return avg_state * full_area
+        # For fresh or dead edges, calculate the crossing time
+        return find_crossing_time(front_n, front_np1, x, y, dt)
     end
 end
 
 """
-    calculate_spacetime_volume_3d(caseId::Int, x_min::Float64, x_max::Float64, y_min::Float64, y_max::Float64,
-                               dt::Float64, front_n::FrontTracker, front_np1::FrontTracker)
+    get_face_type(case_id::Int)
 
-Calculates the space-time volume for a 3D hexahedral cell based on the marching cubes case.
-Uses an advanced marching cubes approach for complex interface configurations.
+Convert a numerical case ID to a symbolic face type.
 """
-function calculate_spacetime_volume_3d(caseId::Int, x_min::Float64, x_max::Float64, y_min::Float64, y_max::Float64,
-                                    dt::Float64, front_n::FrontTracker, front_np1::FrontTracker)
-    # Full volume
-    full_volume = (x_max - x_min) * (y_max - y_min) * dt
-    
-    # Extract vertex states from case ID (8 corners of the spacetime hexahedron)
-    vertexStates = [(caseId & (1 << i)) > 0 for i in 0:7]
-    
-    # Simple cases
-    if all(vertexStates)  # All vertices wet
-        return full_volume
-    elseif !any(vertexStates)  # All vertices dry
-        return 0.0
+function get_face_type(case_id::Int)
+    if case_id == 0
+        return :empty
+    elseif case_id == 15
+        return :full
+    elseif case_id in [2, 6, 8, 10]
+        return :fresh
+    elseif case_id in [1, 4, 5, 9]
+        return :dead
+    else
+        return :complex
+    end
+end
+
+"""
+    get_spacetime_polygon_coords(case_id::Int, p_min::Float64, p_max::Float64, 
+                               dt::Float64, t_left::Float64, t_right::Float64)
+
+Creates polygon coordinates for each space-time case.
+This function is adapted from the 1D implementation.
+"""
+function get_spacetime_polygon_coords2(case_id::Int, p_min::Float64, p_max::Float64, 
+                                    dt::Float64, t_left::Float64, t_right::Float64)
+    # Case 0: Empty-Empty (completely empty)
+    if case_id == 0
+        # Better degenerate polygon for empty case
+        return [[p_min, 0.0], [p_min+1e-6, 0.0], [p_min+1e-6, 1e-6], [p_min, 1e-6], [p_min, 0.0]]
     end
     
-    # For complex cases, use sampling approach for accuracy
-    # Subdivide the space-time cell and count fluid points
-    n_samples_x = 4
-    n_samples_y = 4
-    n_samples_t = 4
-    
-    dx = (x_max - x_min) / n_samples_x
-    dy = (y_max - y_min) / n_samples_y
-    dt_step = dt / n_samples_t
-    
-    fluid_count = 0
-    
-    for i in 1:n_samples_x
-        for j in 1:n_samples_y
-            for k in 1:n_samples_t
-                # Sample point coordinates
-                x = x_min + (i - 0.5) * dx
-                y = y_min + (j - 0.5) * dy
-                t_frac = (k - 0.5) / n_samples_t
-                
-                # Linear interpolation of SDF between time steps
-                sdf_n = sdf(front_n, x, y)
-                sdf_np1 = sdf(front_np1, x, y)
-                sdf_interp = (1 - t_frac) * sdf_n + t_frac * sdf_np1
-                
-                # Count if point is in fluid
-                if sdf_interp <= 0
-                    fluid_count += 1
-                end
-            end
-        end
+    # Case 15: Full-Full (completely full)
+    if case_id == 15
+        # Full rectangle in counter-clockwise direction
+        return [[p_min, 0.0], [p_max, 0.0], [p_max, dt], [p_min, dt], [p_min, 0.0]]
     end
     
-    # Calculate volume fraction and total volume
-    volume_fraction = fluid_count / (n_samples_x * n_samples_y * n_samples_t)
-    return volume_fraction * full_volume
+    # Case 1: Dead-Empty (bottom-left only)
+    if case_id == 1
+        # Triangle in counter-clockwise direction
+        return [[p_min, 0.0], [p_max, 0.0], [p_min, t_left], [p_min, 0.0]]
+    end
+    
+    # Case 2: Fresh-Empty (top-left only)
+    if case_id == 2
+        # Triangle in counter-clockwise direction
+        return [[p_min, t_left], [p_min, dt], [p_max, dt], [p_min, t_left]]
+    end
+    
+    # Case 3: Full-Empty (left edge is full)
+    if case_id == 3
+        # Full rectangle in counter-clockwise direction
+        return [[p_min, 0.0], [p_max, 0.0], [p_max, dt], [p_min, dt], [p_min, 0.0]]
+    end
+    
+    # Case 4: Empty-Dead (bottom-right only)
+    if case_id == 4
+        # Triangle in counter-clockwise direction
+        return [[p_min, 0.0], [p_max, 0.0], [p_max, t_right], [p_min, 0.0]]
+    end
+    
+    # Case 5: Dead-Dead (bottom edge is full)
+    if case_id == 5
+        # Quadrilateral in counter-clockwise direction
+        return [[p_min, 0.0], [p_max, 0.0], [p_max, t_right], [p_min, t_left], [p_min, 0.0]]
+    end
+    
+    # Case 6: Fresh-Dead (complex case: bottom-right and top-left)
+    if case_id == 6
+        # This is a challenging shape - ensure it's correctly ordered
+        # It should be a non-convex quadrilateral
+        return [[p_min, t_left], [p_min, dt], [p_max, t_right], [p_max, 0.0], [p_min, t_left]]
+    end
+    
+    # Case 7: Full-Dead (all except top-right)
+    if case_id == 7
+        # Quadrilateral in counter-clockwise direction
+        return [[p_min, 0.0], [p_max, 0.0], [p_max, t_right], [p_min, dt], [p_min, 0.0]]
+    end
+    
+    # Case 8: Empty-Fresh (top-right only)
+    if case_id == 8
+        # Triangle in counter-clockwise direction
+        return [[p_min, dt], [p_max, dt], [p_max, t_right], [p_min, dt]]
+    end
+    
+    # Case 9: Dead-Fresh (complex case: bottom-left and top-right)
+    if case_id == 9
+        # Non-convex quadrilateral - ensure correct ordering
+        return [[p_min, 0.0], [p_min, t_left], [p_max, dt], [p_max, t_right], [p_min, 0.0]]
+    end
+    
+    # Case 10: Fresh-Fresh (top edge is full)
+    if case_id == 10
+        # Quadrilateral in counter-clockwise direction
+        return [[p_min, t_left], [p_max, t_right], [p_max, dt], [p_min, dt], [p_min, t_left]]
+    end
+    
+    # Case 11: Full-Fresh (all except bottom-right)
+    if case_id == 11
+        # Quadrilateral in counter-clockwise direction
+        return [[p_min, 0.0], [p_max, t_right], [p_max, dt], [p_min, dt], [p_min, 0.0]]
+    end
+    
+    # Case 12: Empty-Full (right edge is full)
+    if case_id == 12
+        # Fixed: Ensure counter-clockwise orientation
+        return [[p_min, 0.0], [p_min, dt], [p_max, dt], [p_max, 0.0], [p_min, 0.0]]
+    end
+    
+    # Case 13: Dead-Full (all except top-left)
+    if case_id == 13
+        # Quadrilateral in counter-clockwise direction
+        return [[p_min, 0.0], [p_max, 0.0], [p_max, dt], [p_min, t_left], [p_min, 0.0]]
+    end
+    
+    # Case 14: Fresh-Full (all except bottom-left)
+    if case_id == 14
+        # Quadrilateral in counter-clockwise direction
+        return [[p_min, t_left], [p_max, 0.0], [p_max, dt], [p_min, dt], [p_min, t_left]]
+    end
+    
+    # Fallback for unexpected cases - full cell with warning
+    println("Warning: Unexpected case_id: $case_id, using default full cell")
+    return [[p_min, 0.0], [p_max, 0.0], [p_max, dt], [p_min, dt], [p_min, 0.0]]
 end
 
 """
@@ -1810,137 +1743,15 @@ function find_crossing_time(front_n::FrontTracker, front_np1::FrontTracker, x::F
     end
     
     # Linear interpolation to find crossing time:
-    # t_cross = t_n + dt * |sdf_n| / (|sdf_n| + |sdf_np1|)
     t_cross = dt * abs(sdf_n) / (abs(sdf_n) + abs(sdf_np1))
     
     # Ensure the result is within [0, dt]
     return clamp(t_cross, 0.0, dt)
 end
 
-"""
-    sort_points_clockwise(points::Vector)
 
-Sorts a collection of 2D points in clockwise order around their centroid.
-This function is used for creating well-formed polygons from a set of points.
 
-Parameters:
-- points: A vector of points, where each point is a vector/array [x, y]
 
-Returns:
-- A vector of the same points sorted in clockwise order
-"""
-function sort_points_clockwise(points::Vector)
-    if length(points) < 3
-        return points
-    end
-    
-    # Calculate the centroid (mean position) of all points
-    cx = sum(p[1] for p in points) / length(points)
-    cy = sum(p[2] for p in points) / length(points)
-    
-    # Function to compute the angle between a point and the centroid
-    function get_angle(point)
-        return atan(point[2] - cy, point[1] - cx)
-    end
-    
-    # Sort points based on their angle with respect to the centroid
-    sorted_points = sort(points, by=get_angle)
-    
-    return sorted_points
-end
-
-"""
-    find_interface_y_at_time(front::FrontTracker, x::Float64, y_min::Float64, y_max::Float64)
-
-Finds the y-coordinate where the interface crosses a vertical line at position x.
-Uses bisection method for accuracy.
-"""
-function find_interface_y_at_time(front::FrontTracker, x::Float64, y_min::Float64, y_max::Float64)
-    # Bisection method for finding interface position
-    tol = 1e-8 * (y_max - y_min)
-    max_iter = 30
-    
-    y_low = y_min
-    y_high = y_max
-    
-    for iter in 1:max_iter
-        y_mid = (y_low + y_high) / 2
-        
-        # Check if the point is inside the fluid
-        is_inside = is_point_inside(front, x, y_mid)
-        
-        # Get SDF value for more accurate convergence check
-        sdf_val = sdf(front, x, y_mid)
-        
-        # Check for convergence
-        if abs(sdf_val) < tol || (y_high - y_low) < tol
-            return y_mid
-        elseif is_inside
-            y_high = y_mid
-        else
-            y_low = y_mid
-        end
-    end
-    
-    # Return best estimate
-    return (y_low + y_high) / 2
-end
-
-"""
-    find_interface_x_at_time(front::FrontTracker, x_min::Float64, x_max::Float64, y::Float64)
-
-Finds the x-coordinate where the interface crosses a horizontal line at position y.
-Uses bisection method for accuracy.
-"""
-function find_interface_x_at_time(front::FrontTracker, x_min::Float64, x_max::Float64, y::Float64)
-    # Bisection method for finding interface position
-    tol = 1e-8 * (x_max - x_min)
-    max_iter = 30
-    
-    x_low = x_min
-    x_high = x_max
-    
-    for iter in 1:max_iter
-        x_mid = (x_low + x_high) / 2
-        
-        # Check if the point is inside the fluid
-        is_inside = is_point_inside(front, x_mid, y)
-        
-        # Get SDF value for more accurate convergence check
-        sdf_val = sdf(front, x_mid, y)
-        
-        # Check for convergence
-        if abs(sdf_val) < tol || (x_high - x_low) < tol
-            return x_mid
-        elseif is_inside
-            x_high = x_mid
-        else
-            x_low = x_mid
-        end
-    end
-    
-    # Return best estimate
-    return (x_low + x_high) / 2
-end
-
-"""
-    calculate_polygon_area(points::Vector)
-
-Calculates the area of a polygon defined by its vertices.
-"""
-function calculate_polygon_area(points::Vector)
-    n = length(points)
-    if n < 3
-        return 0.0
-    end
-    
-    area = 0.0
-    for i in 1:n-1
-        area += points[i][1] * points[i+1][2] - points[i+1][1] * points[i][2]
-    end
-    
-    return abs(area) / 2.0
-end
 
 
 

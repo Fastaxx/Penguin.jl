@@ -18,7 +18,6 @@ using Colors
 using Statistics
 using LibGEOS
 using GeoInterface
-using NLsolve
 
 # Write your package code here.
 

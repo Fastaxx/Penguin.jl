@@ -17,8 +17,8 @@ using Roots
 # Define physical parameters
 L = 1.0      # Latent heat
 c = 1.0      # Specific heat capacity
-TM = 0.0     # Melting temperature (inside sphere)
-T∞ = -0.5    # Far field temperature (undercooled liquid)
+TM = -1.0     # Melting temperature (inside sphere)
+T∞ = 1.0    # Far field temperature (undercooled liquid)
 
 # Calculate the Stefan number
 Ste = (c * (TM - T∞)) / L
@@ -68,7 +68,7 @@ radii = [interface_position(t) for t in range(t_init, stop=t_final, length=100)]
 temperatures = [analytical_temperature(r, t_final) for r in radii]
 
 # Define the spatial mesh
-nx, ny = 32, 32
+nx, ny = 64, 64
 lx, ly = 16.0, 16.0
 x0, y0 = -8.0, -8.0
 Δx, Δy = lx/(nx), ly/(ny)
@@ -76,17 +76,70 @@ mesh = Penguin.Mesh((nx, ny), (lx, ly), (x0, y0))
 
 println("Mesh created with dimensions: $(nx) x $(ny), Δx=$(Δx), Δy=$(Δy), domain=[$x0, $(x0+lx)], [$y0, $(y0+ly)]")
 
-# Create the front-tracking body
-nmarkers = 100
-front = FrontTracker() 
-create_circle!(front, 0.01, 0.01, interface_position(t_init), nmarkers)
-
 # Define the initial position of the front
-body = (x, y, t, _=0) -> -sdf(front, x, y)
+body = (x, y, t, _=0) -> begin 
+    r = sqrt(x^2 + y^2)
+    θ = atan(y, x)
+    return -(r*(1+0.2*cos(6*θ)) - R0)  # Perturbed circle
+end
+
+nmarkers = 300  # Number of markers to place around the circle
+
+# Function to place markers based on the body function
+function place_markers_from_body!(front::FrontTracker, body_func, n_markers::Int)
+    # Create the points around the circle
+    markers = Vector{Tuple{Float64, Float64}}(undef, n_markers + 1)
+    
+    for i in 1:n_markers
+        # Angle for this marker
+        θ = 2π * (i-1) / n_markers
+        
+        # Start with an estimate - use simple trig to get close
+        r_est = R0 / (1 + 0.2*cos(6*θ))
+        x_est = r_est * cos(θ)
+        y_est = r_est * sin(θ)
+        
+        # Define a function that returns the body value along this ray
+        ray_func = r -> body_func(r * cos(θ), r * sin(θ), 0.0)
+        
+        # Find the root (where body = 0) along this ray using bracketing
+        r_min = 0.5 * R0
+        r_max = 1.5 * R0
+        
+        # Ensure the bracket contains a root
+        if ray_func(r_min) * ray_func(r_max) >= 0
+            # If no sign change, expand the search range
+            println("Warning: Adjusting search range for θ = $θ")
+            r_min = 0.1 * R0
+            r_max = 2.0 * R0
+        end
+        
+        # Find the radius where body = 0
+        r = find_zero(ray_func, (r_min, r_max), Bisection())
+        
+        # Convert to Cartesian coordinates
+        x = r * cos(θ)
+        y = r * sin(θ)
+        
+        markers[i] = (x, y)
+    end
+    
+    # Close the curve
+    markers[n_markers + 1] = markers[1]
+    
+    # Set the markers in the FrontTracker
+    set_markers!(front, markers)
+    
+    return front
+end
+
+# Create the FrontTracker with markers placed on the zero level set of body
+front = FrontTracker()
+place_markers_from_body!(front, body, nmarkers)
 
 # Define the Space-Time mesh
-Δt = 0.15*(lx / nx)^2  # Time step size
-t_final = t_init + 10Δt
+Δt = 0.5*(lx / nx)^2  # Time step size
+t_final = t_init + 5Δt
 println("Final radius at t=$(t_init + Δt): R=$(interface_position(t_init + Δt))")
 
 STmesh = Penguin.SpaceTimeMesh(mesh, [t_init, t_init + Δt], tag=mesh.tag)
@@ -112,7 +165,7 @@ K = (x,y,z) -> 1.0  # Thermal conductivity
 Fluide = Phase(capacity, operator, f, K)
 
 # Set up initial condition
-u0ₒ = zeros((nx+1)*(ny+1))
+u0ₒ = ones((nx+1)*(ny+1))
 body_init = (x,y,_=0) -> -sdf(front, x, y)
 cap_init = Capacity(body_init, mesh; compute_centroids=false)
 centroids = cap_init.C_ω
@@ -122,7 +175,7 @@ for idx in 1:length(centroids)
     centroid = centroids[idx]
     x, y = centroid[1], centroid[2]  # Access components of the centroid vector
     r = sqrt(x^2 + y^2)
-    u0ₒ[idx] = analytical_temperature(r, t_init)  # Initial temperature at the interface
+    #u0ₒ[idx] = analytical_temperature(r, t_init)  # Initial temperature at the interface
 end
 u0ᵧ = ones((nx+1)*(ny+1))*TM # Initial temperature at the interface
 u0 = vcat(u0ₒ, u0ᵧ)
@@ -154,74 +207,8 @@ Newton_params = (10, 1e-6, 1e-6, 1.0) # max_iter, tol, reltol, α
 solver = StefanMono2D(Fluide, bc_b, bc, Δt, u0, mesh, "BE")
 
 # Solve the problem
-solver, residuals, xf_log, timestep_history, phase, position_increments = solve_StefanMono2D!(solver, Fluide, front, Δt, t_init, t_final,bc_b, bc, stef_cond, mesh, "BE";
+solver, residuals, xf_log, timestep_history = solve_StefanMono2D!(solver, Fluide, front, Δt, t_init, t_final,bc_b, bc, stef_cond, mesh, "BE";
    Newton_params=Newton_params, adaptive_timestep=false, method=Base.:\)
-
-function plot_position_increments(residuals, position_increments, timestep_history)
-    # Créer le répertoire des résultats
-    results_dir = joinpath(pwd(), "simulation_results")
-    if !isdir(results_dir)
-        mkdir(results_dir)
-    end
-    
-    # 1. Graphique des incréments de position par itération
-    fig_increments = Figure(size=(900, 600))
-    ax_increments = Axis(fig_increments[1, 1], 
-                      title="Position Changes Between Iterations (Xᵏ⁺¹ - Xᵏ)", 
-                      xlabel="Iteration", 
-                      ylabel="Position change (log scale)",
-                      yscale=log10)
-    
-    # Tracer les incréments pour chaque pas de temps
-    for (timestep, inc_vec) in sort(collect(position_increments))
-        lines!(ax_increments, 1:length(inc_vec), inc_vec, 
-              label="Timestep $timestep", 
-              linewidth=2)
-    end
-    
-    Legend(fig_increments[1, 2], ax_increments)
-    
-    # 2. Comparaison entre résidus et incréments de position
-    fig_comparison = Figure(size=(1200, 600))
-    
-    max_timesteps = min(4, length(position_increments))
-    timesteps = sort(collect(keys(position_increments)))[1:max_timesteps]
-    
-    for (idx, timestep) in enumerate(timesteps)
-        row = (idx-1) ÷ 2 + 1
-        col = ((idx-1) % 2) + 1
-        
-        # Récupérer les données
-        residual_vec = residuals[timestep]
-        inc_vec = position_increments[timestep]
-        iterations = min(length(residual_vec), length(inc_vec))
-        
-        ax = Axis(fig_comparison[row, col], 
-                 title="Convergence at timestep $timestep", 
-                 xlabel="Iteration", 
-                 yscale=log10)
-        
-        lines!(ax, 1:iterations, residual_vec[1:iterations], 
-              label="Residual", linewidth=2, color=:blue)
-        
-        lines!(ax, 1:iterations, inc_vec[1:iterations], 
-              label="Position Change", linewidth=2, 
-              linestyle=:dash, color=:red)
-        
-        axislegend(ax, position=:rt)
-    end
-    
-    # Sauvegarder les figures
-    save(joinpath(results_dir, "position_increments.png"), fig_increments)
-    save(joinpath(results_dir, "residual_vs_position.png"), fig_comparison)
-    
-    println("\nVisualisations sauvegardées dans: $results_dir")
-    return fig_increments, fig_comparison
-end
-
-# Appeler la fonction après la simulation
-increment_plots = plot_position_increments(residuals, position_increments, timestep_history)
-display(increment_plots[1])  # Afficher le premier graphique
 
 # Plot the results
 function plot_simulation_results(residuals, xf_log, timestep_history, Ste=nothing)
@@ -522,79 +509,3 @@ end
 
 # Appeler la fonction après la simulation
 animation_file = create_temperature_interface_animation(solver, mesh, xf_log, timestep_history)
-
-function compare_numerical_vs_analytical(solver, mesh, t_final)
-    # Créer le répertoire des résultats si nécessaire
-    results_dir = joinpath(pwd(), "simulation_results")
-    if !isdir(results_dir)
-        mkdir(results_dir)
-    end
-    
-    # Extraire les dimensions du maillage
-    npts = (nx+1) * (ny+1)
-    
-    # Récupérer la dernière solution de température numérique (bulk)
-    final_state = solver.states[end]
-    final_temp_numerical = final_state[1:end÷2]  
-    
-    # Récupérer les centroïdes (où la température est évaluée)
-    centroids = phase.capacity.C_ω  # phase.capacity est le même que Fluide.capacity
-    
-    # Calculer la solution analytique aux mêmes points
-    analytical_temps = zeros((nx+1)*(ny+1))
-    for idx in 1:length(centroids)
-        centroid = centroids[idx]
-        x, y = centroid[1], centroid[2]
-        r = sqrt(x^2 + y^2)
-        analytical_temps[idx] = analytical_temperature(r, t_final)
-    end
-
-    # Reshape les températures pour la visualisation
-    temp_numerical_2d = reshape(final_temp_numerical, (nx+1, ny+1))
-    temp_analytical_2d = reshape(analytical_temps, (nx+1, ny+1))
-
-
-    # Calculer les statistiques d'erreur
-    abs_error = abs.(final_temp_numerical - analytical_temps)
-    max_error = maximum(abs_error)
-    mean_error = mean(abs_error)
-    rmse = sqrt(mean(abs_error.^2))
-    
-    println("\nComparaison des températures à t=$t_final:")
-    println("Erreur maximale: $max_error")
-    println("Erreur moyenne: $mean_error")
-    println("RMSE: $rmse")
-    
-    # Créer un graphique de comparaison
-    fig = Figure(size=(1200, 400))
-    
-    # Température numérique
-    ax1 = Axis(fig[1, 1], title="Température numérique", 
-              xlabel="x", ylabel="y", aspect=DataAspect())
-    hm1 = heatmap!(ax1, mesh.nodes[1], mesh.nodes[2], temp_numerical_2d, colormap=:thermal)
-    Colorbar(fig[1, 2], hm1, label="T")
-    
-    # Température analytique
-    ax2 = Axis(fig[1, 3], title="Température analytique", 
-              xlabel="x", ylabel="y", aspect=DataAspect())
-    hm2 = heatmap!(ax2, mesh.nodes[1], mesh.nodes[2], temp_analytical_2d, colormap=:thermal)
-    Colorbar(fig[1, 4], hm2, label="T")
-    
-    # Erreur
-    ax3 = Axis(fig[1, 5], title="Erreur absolue", 
-              xlabel="x", ylabel="y", aspect=DataAspect())
-    
-    # Calculer l'erreur pour visualisation
-    error_2d = abs.(temp_numerical_2d - temp_analytical_2d)
-    hm3 = heatmap!(ax3, mesh.nodes[1], mesh.nodes[2], error_2d, colormap=:plasma)
-    Colorbar(fig[1, 6], hm3, label="Erreur")
-    
-    # Sauvegarder et afficher
-    save(joinpath(results_dir, "temperature_comparison.png"), fig)
-    display(fig)
-    
-    return fig
-end
-
-# Appeler la fonction
-comparison = compare_numerical_vs_analytical(solver, mesh, t_final)

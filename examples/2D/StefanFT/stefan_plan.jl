@@ -112,7 +112,7 @@ function plane_sdf(x, y, x_interface)
 end
 
 # Définir la fonction body pour l'interface
-body = (x, y, t, _=0) -> -plane_sdf(x, y, interface_x)
+body = (x, y, t, _=0) -> plane_sdf(x, y, interface_x)
 
 # Définir le maillage spatio-temporel
 Δt = 0.05
@@ -187,7 +187,7 @@ Newton_params = (100, 1e-6, 1e-6, 1.0)  # max_iter, tol, reltol, α
 solver = StefanMono2D(Fluide, bc_b, bc, Δt, u0, mesh, "BE")
 
 # Résoudre le problème
-solver, residuals, xf_log, timestep_history = solve_StefanMono2D!(
+solver, residuals, xf_log, timestep_history = solve_StefanMono2Dunclosed!(
     solver, Fluide, front, Δt, t_init, t_final, bc_b, bc, stef_cond, mesh, "BE";
     Newton_params=Newton_params, adaptive_timestep=false, method=Base.:\
 )
