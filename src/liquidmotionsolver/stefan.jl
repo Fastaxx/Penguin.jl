@@ -208,6 +208,7 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
             # Reshape to get flux per cell - IMPORTANT: use the same reshape consistently
             interface_flux_2d = reshape(interface_flux, (nx, ny)) #+ reshape(interface_flux, (nx, ny))'
             
+            """
             # Debug visualizations
             if timestep <= 2 || mod(timestep, 5) == 0  # Limit visualizations
                 # Plot temperature field
@@ -270,7 +271,8 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
                     display(fig)
                 end
             end
-            
+            """
+
             # Compute volume Jacobian for the mesh
             volume_jacobian = compute_volume_jacobian(mesh, front, jacobian_epsilon)
             
@@ -350,6 +352,7 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
             println("Cells with both nonzero: $nonzero_both")
             println("Mismatches: $mismatches out of $total_cells cells")
             
+            """
             # Visualization of matches/mismatches
             if iter == 1 || mismatches > 0
                 mismatch_plot = Figure()
@@ -374,7 +377,7 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
                 
                 display(mismatch_plot)
             end
-
+            """
             
             # Visualiser le résidual F sur la grille
             fig_residual = Figure()
@@ -389,6 +392,7 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
                 residual_2d[i, j] = F[eq_idx]
             end
             
+            """
             # Tracer le heatmap du résidual
             hm_residual = heatmap!(ax_residual, residual_2d, colormap=:balance)
             Colorbar(fig_residual[1, 2], hm_residual, label="Residual value")
@@ -399,6 +403,7 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
             lines!(ax_residual, markers_x, markers_y, color=:black, linewidth=1.5)
             
             display(fig_residual)
+            """
             
             # 4. Implement the Gauss-Newton formula: X^{n+1} = X^n - (J^T J)^{-1} J^T F
             JTJ = J' * J
