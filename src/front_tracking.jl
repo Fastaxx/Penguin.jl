@@ -132,6 +132,46 @@ function create_ellipse!(ft::FrontTracker, center_x::Float64, center_y::Float64,
 end
 
 """
+    create_crystal!(ft::FrontTracker, center_x::Float64, center_y::Float64, 
+                   base_radius::Float64, n_lobes::Int=6, amplitude::Float64=0.2, 
+                   n_markers::Int=100)
+
+Crée une interface en forme de cristal (un cercle avec perturbation angulaire).
+- center_x, center_y: coordonnées du centre
+- base_radius: rayon de base
+- n_lobes: nombre de lobes du cristal (6 pour symétrie hexagonale)
+- amplitude: amplitude de la perturbation (0-1)
+- n_markers: nombre de points sur l'interface
+"""
+function create_crystal!(ft::FrontTracker, center_x::Float64, center_y::Float64, 
+                        base_radius::Float64, n_lobes::Int=6, amplitude::Float64=0.2, 
+                        n_markers::Int=100)
+    # Créer un vecteur avec le type approprié
+    markers = Vector{Tuple{Float64, Float64}}(undef, n_markers+1)
+    
+    for i in 1:n_markers
+        # Angle pour ce marqueur
+        θ = 2.0 * π * (i-1) / n_markers
+        
+        # Rayon perturbé pour un effet cristallin
+        r = base_radius * (1.0 + amplitude * cos(n_lobes * θ))
+        
+        # Coordonnées cartésiennes
+        x = center_x + r * cos(θ)
+        y = center_y + r * sin(θ)
+        
+        markers[i] = (x, y)
+    end
+    
+    # Fermer la courbe en répétant le premier point
+    markers[n_markers+1] = markers[1]
+    
+    # Définir les marqueurs dans le FrontTracker
+    set_markers!(ft, markers, true)
+    return ft
+end
+
+"""
     get_fluid_polygon(ft::FrontTracker)
 
 Returns a polygon representing the fluid domain bounded by the interface.

@@ -12,7 +12,7 @@ using DSP
 using Roots
 
 ### 2D Test Case: Frank Sphere (Stefan Problem with Circular Interface)
-### Ice sphere growing in undercooled liquid with self-similar solution
+### Ice crysyal decaying
 
 # Define physical parameters
 L = 1.0      # Latent heat
@@ -68,7 +68,7 @@ radii = [interface_position(t) for t in range(t_init, stop=t_final, length=100)]
 temperatures = [analytical_temperature(r, t_final) for r in radii]
 
 # Define the spatial mesh
-nx, ny = 64, 64
+nx, ny = 128, 128
 lx, ly = 16.0, 16.0
 x0, y0 = -8.0, -8.0
 Δx, Δy = lx/(nx), ly/(ny)
@@ -76,69 +76,21 @@ mesh = Penguin.Mesh((nx, ny), (lx, ly), (x0, y0))
 
 println("Mesh created with dimensions: $(nx) x $(ny), Δx=$(Δx), Δy=$(Δy), domain=[$x0, $(x0+lx)], [$y0, $(y0+ly)]")
 
-# Define the initial position of the front
-body = (x, y, t, _=0) -> begin 
-    r = sqrt(x^2 + y^2)
-    θ = atan(y, x)
-    return -(r*(1+0.2*cos(6*θ)) - R0)  # Perturbed circle
-end
-
-nmarkers = 300  # Number of markers to place around the circle
-
-# Function to place markers based on the body function
-function place_markers_from_body!(front::FrontTracker, body_func, n_markers::Int)
-    # Create the points around the circle
-    markers = Vector{Tuple{Float64, Float64}}(undef, n_markers + 1)
-    
-    for i in 1:n_markers
-        # Angle for this marker
-        θ = 2π * (i-1) / n_markers
-        
-        # Start with an estimate - use simple trig to get close
-        r_est = R0 / (1 + 0.2*cos(6*θ))
-        x_est = r_est * cos(θ)
-        y_est = r_est * sin(θ)
-        
-        # Define a function that returns the body value along this ray
-        ray_func = r -> body_func(r * cos(θ), r * sin(θ), 0.0)
-        
-        # Find the root (where body = 0) along this ray using bracketing
-        r_min = 0.5 * R0
-        r_max = 1.5 * R0
-        
-        # Ensure the bracket contains a root
-        if ray_func(r_min) * ray_func(r_max) >= 0
-            # If no sign change, expand the search range
-            println("Warning: Adjusting search range for θ = $θ")
-            r_min = 0.1 * R0
-            r_max = 2.0 * R0
-        end
-        
-        # Find the radius where body = 0
-        r = find_zero(ray_func, (r_min, r_max), Bisection())
-        
-        # Convert to Cartesian coordinates
-        x = r * cos(θ)
-        y = r * sin(θ)
-        
-        markers[i] = (x, y)
-    end
-    
-    # Close the curve
-    markers[n_markers + 1] = markers[1]
-    
-    # Set the markers in the FrontTracker
-    set_markers!(front, markers)
-    
-    return front
-end
-
-# Create the FrontTracker with markers placed on the zero level set of body
+# Création du cristal - remplace votre body et place_markers_from_body!
 front = FrontTracker()
-place_markers_from_body!(front, body, nmarkers)
+nmarkers = 100  # Nombre de marqueurs pour le cercle
+
+# Pour un cercle parfait (amplitude=0)
+#create_circle!(front, 0.0, 0.0, interface_position(t_init), nmarkers)
+#create_crystal!(front, 0.0, 0.0, R0, 6, 0.0, nmarkers)
+# Pour un cristal avec perturbation
+create_crystal!(front, 0.0, 0.0, R0, 4, 0.2, nmarkers)
+
+# Définir le corps (body) en utilisant la SDF du front
+body = (x, y, t, _=0) -> -sdf(front, x, y)
 
 # Define the Space-Time mesh
-Δt = 0.5*(lx / nx)^2  # Time step size
+Δt = 0.25*(lx / nx)^2  # Time step size
 t_final = t_init + 5Δt
 println("Final radius at t=$(t_init + Δt): R=$(interface_position(t_init + Δt))")
 
@@ -164,20 +116,35 @@ K = (x,y,z) -> 1.0  # Thermal conductivity
 
 Fluide = Phase(capacity, operator, f, K)
 
-# Set up initial condition
-u0ₒ = ones((nx+1)*(ny+1))
-body_init = (x,y,_=0) -> -sdf(front, x, y)
+# Set up initial condition with tanh profile
+# Parameters for tanh profile
+factor = 2.0  # Controls width of transition (adjust as needed)
+L0 = R0       # Characteristic length (use initial radius)
+
+# Initialize temperature fields
+u0ₒ = zeros((nx+1)*(ny+1))
+
+# Create a smooth initial temperature field using normalized tanh
+body_init = (x,y,_=0) -> sdf(front, x, y)
 cap_init = Capacity(body_init, mesh; compute_centroids=false)
 centroids = cap_init.C_ω
-# Initialize the temperature at the interface
+
+# Initialize the temperature with properly scaled tanh profile
 for idx in 1:length(centroids)
-    # Fix: Access each centroid properly and extract its components
     centroid = centroids[idx]
-    x, y = centroid[1], centroid[2]  # Access components of the centroid vector
-    r = sqrt(x^2 + y^2)
-    #u0ₒ[idx] = analytical_temperature(r, t_init)  # Initial temperature at the interface
+    x, y = centroid[1], centroid[2]
+    
+    # Distance signée (négative à l'intérieur, positive à l'extérieur)
+    val = body_init(x, y)
+    
+    # Formule tanh qui va de -1 à l'interface (val=0) à +1 loin
+    normalized_tanh = tanh(val * L0 / factor)
+    
+    # Interpoler de TM (-1) à T∞ (+1)
+    u0ₒ[idx] = TM * (1 - normalized_tanh)/2 + T∞ * (1 + normalized_tanh)/2
 end
-u0ᵧ = ones((nx+1)*(ny+1))*TM # Initial temperature at the interface
+
+u0ᵧ = ones((nx+1)*(ny+1)) * TM  # Interface temperature
 u0 = vcat(u0ₒ, u0ᵧ)
 
 # Visualize initial temperature field to verify
@@ -201,14 +168,14 @@ display(fig_init)
 
 
 # Newton parameters
-Newton_params = (10, 1e-6, 1e-6, 1.0) # max_iter, tol, reltol, α
+Newton_params = (5, 1e-6, 1e-6, 1.0) # max_iter, tol, reltol, α
 
 # Run the simulation
 solver = StefanMono2D(Fluide, bc_b, bc, Δt, u0, mesh, "BE")
 
 # Solve the problem
 solver, residuals, xf_log, timestep_history = solve_StefanMono2D!(solver, Fluide, front, Δt, t_init, t_final,bc_b, bc, stef_cond, mesh, "BE";
-   Newton_params=Newton_params, adaptive_timestep=false, method=Base.:\)
+   Newton_params=Newton_params, smooth_factor=0.5, window_size=20, method=Base.:\)
 
 # Plot the results
 function plot_simulation_results(residuals, xf_log, timestep_history, Ste=nothing)
