@@ -13,7 +13,7 @@ using Statistics
 # Define physical parameters
 L = 1.0                 # Latent heat
 c = 1.0                 # Specific heat capacity
-TM = 0.0                # Melting temperature (solid phase) as specified
+TM = 1.0                # Melting temperature (solid phase) as specified
 T∞ = -1.0               # Far field temperature (undercooled liquid)
 
 # Calculate the Stefan number
@@ -21,7 +21,7 @@ Ste = (c * (TM - T∞)) / L
 println("Stefan number: $Ste")
 
 # Define the spatial mesh
-nx, ny = 64, 64
+nx, ny = 32, 32
 lx, ly = 16.0, 16.0
 x0, y0 = -8.0, -8.0
 Δx, Δy = lx/nx, ly/ny
@@ -31,14 +31,14 @@ println("Mesh created with dimensions: $(nx) x $(ny), Δx=$(Δx), Δy=$(Δy)")
 
 # Initial time settings
 t_init = 1.0
-R0 = 4.0  # Base radius for the crystal
+R0 = 6.0  # Base radius for the crystal
 
 # Create front tracker with perturbed crystal shape
 front = FrontTracker()
-nmarkers = 200  # Number of markers
+nmarkers = 60  # Number of markers
 
 # Create the perturbed crystal
-create_crystal!(front, 0.0, 0.0, R0, 4, 0.3, nmarkers)
+create_crystal!(front, 0.0, 0.0, R0, 4, 0.1, nmarkers)
 
 # Define the body using the SDF from the front tracker
 body = (x, y, t, _=0) -> -sdf(front, x, y)
@@ -72,7 +72,7 @@ Fluide = Phase(capacity, operator, f, K)
 
 # Initialize temperature fields
 u0ₒ = zeros((nx+1)*(ny+1))
-body_init = (x,y,_=0) -> sdf(front, x, y)
+body_init = (x,y,_=0) -> -sdf(front, x, y)
 cap_init = Capacity(body_init, mesh; compute_centroids=false)
 centroids = cap_init.C_ω
 
@@ -89,6 +89,9 @@ function initial_temperature(val, V, t)
     end
 end
 
+factor = 2.0  # Controls width of transition (adjust as needed)
+L0 = R0       # Characteristic length (use initial radius)
+
 # Initialize the temperature with the specified function
 for idx in 1:length(centroids)
     centroid = centroids[idx]
@@ -97,11 +100,17 @@ for idx in 1:length(centroids)
     # Get signed distance (negative inside, positive outside)
     val = body_init(x, y)
     
-    # Utilise la distance signée directement comme 'val' dans la fonction
-    # Pour l'instant initial, t=0.0
-    u0ₒ[idx] = initial_temperature(val, V, 0.0)
+    # Distance absolue à l'interface
+    dist_abs = abs(val)
+    
+    # Fonction qui décroît avec la distance à l'interface
+    # 1 à l'interface, tend vers -1 loin de l'interface
+    normalized_value = 1.0 - 2.0 * tanh(dist_abs * L0 / factor)
+    
+    # Assigner directement cette valeur
+    u0ₒ[idx] = normalized_value
 end
-
+u0ₒ = ones((nx+1)*(ny+1)) * T∞ 
 u0ᵧ = ones((nx+1)*(ny+1)) * TM  # Interface temperature
 u0 = vcat(u0ₒ, u0ᵧ)
 

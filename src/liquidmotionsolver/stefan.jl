@@ -103,7 +103,13 @@ end
 function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::Float64, Tₛ::Float64, Tₑ::Float64, bc_b::BorderConditions, bc::AbstractBoundary, ic::InterfaceConditions, mesh::Penguin.Mesh{2}, scheme::String; 
                             method=Base.:\, 
                             Newton_params=(100, 1e-6, 1e-6, 1.0),
-                            jacobian_epsilon=1e-6, smooth_factor=0.5, window_size=10, kwargs...)
+                            jacobian_epsilon=1e-6, smooth_factor=0.5, window_size=10, 
+                            algorithm="LM", # "GN" pour Gauss-Newton ou "LM" pour Levenberg-Marquardt 
+                            lm_init_lambda=1e-4, # Paramètre d'amortissement initial pour LM
+                            lm_lambda_factor=10.0, # Facteur de multiplication/division pour lambda
+                            lm_min_lambda=1e-10, # Lambda minimum
+                            lm_max_lambda=1e6, # Lambda maximum
+                            kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
@@ -179,6 +185,10 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
         displacements = zeros(n_markers)
         residual_norm_history = Float64[]
         position_increment_history = Float64[]  # Nouveau vecteur pour les incréments de position
+
+        # Variables pour Levenberg-Marquardt
+        lambda = lm_init_lambda
+        prev_residual_norm = Inf
 
         # Gauss-Newton iterations
         for iter in 1:max_iter
@@ -405,19 +415,22 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
             display(fig_residual)
             
             
-            # 4. Implement the Gauss-Newton formula: X^{n+1} = X^n - (J^T J)^{-1} J^T F
-            JTJ = J' * J
+        # 4. Implémenter l'algorithme d'optimisation choisi
+        JTJ = J' * J
+        
+        # Diagnostics initiaux
+        used_columns = unique(col_indices)
+        println("Matrix info: size(J)=$(size(J)), n_markers=$n_markers")
+        println("Used marker indices: $(length(used_columns)) of $n_markers")
+        
+        
+        if uppercase(algorithm) == "LM"
+            println("Using Levenberg-Marquardt with adaptive damping")
             
-            # Diagnose the system
-            used_columns = unique(col_indices)
-            println("Matrix info: size(J)=$(size(J)), n_markers=$n_markers")
-            println("Used marker indices: $(length(used_columns)) of $n_markers")
+            # Extraire la diagonale pour la régularisation LM
+            diag_JTJ = diag(JTJ)
             
-            # Add regularization using JTJ diagonal (Levenberg-Marquardt style)
-            reg_param = 1e-6
-            diag_JTJ = diag(JTJ)  # Extract the diagonal of JTJ
-            
-            # Ensure diagonal elements aren't too small (protect against near-zero entries)
+            # Protéger contre les valeurs trop petites
             min_diag = 1e-10 * maximum(diag_JTJ)
             for i in 1:length(diag_JTJ)
                 if diag_JTJ[i] < min_diag
@@ -425,30 +438,54 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
                 end
             end
             
-            # Apply Levenberg-Marquardt style regularization
-            reg_JTJ = JTJ + reg_param * Diagonal(diag_JTJ)
+            # Appliquer la régularisation adaptative de Levenberg-Marquardt
+            reg_JTJ = JTJ + lambda * Diagonal(diag_JTJ)
             
-            # Solve the system using robust method
-            newton_step = zeros(n_markers)
-            try
-                newton_step = reg_JTJ \ (J' * F)
-            catch e
-                println("Matrix solver failed, using SVD as backup")
-                # SVD-based pseudoinverse for robust solving
-                F_svd = svd(Matrix(reg_JTJ))
-                svd_tol = eps(Float64) * max(size(reg_JTJ)...) * maximum(F_svd.S)
-                S_inv = [s > svd_tol ? 1/s : 0.0 for s in F_svd.S]
-                
-                # Compute pseudoinverse solution
-                JTF = J' * F
-                newton_step = F_svd.V * (S_inv .* (F_svd.U' * JTF))
+        else
+            println("Using Gauss-Newton algorithm with minimal stabilization")
+            
+            # Pour GN, juste une petite régularisation pour éviter les matrices singulières
+            min_reg = 1e-10 * norm(JTJ, Inf)
+            reg_JTJ = JTJ + min_reg * I
+        end
+        
+        # Résoudre le système avec méthode robuste
+        newton_step = zeros(n_markers)
+        try
+            newton_step = reg_JTJ \ (J' * F)
+        catch e
+            println("Matrix solver failed, using SVD as backup")
+            # Résolution par SVD comme fallback
+            F_svd = svd(Matrix(reg_JTJ))
+            svd_tol = eps(Float64) * max(size(reg_JTJ)...) * maximum(F_svd.S)
+            S_inv = [s > svd_tol ? 1/s : 0.0 for s in F_svd.S]
+            
+            # Calculer la solution pseudo-inverse
+            JTF = J' * F
+            newton_step = F_svd.V * (S_inv .* (F_svd.U' * JTF))
+        end
+        
+        # Calculer la norme de l'incrément de position
+        position_increment_norm = α * norm(newton_step)
+        push!(position_increment_history, position_increment_norm)
+        
+        # Pour Levenberg-Marquardt, ajuster lambda en fonction de la convergence
+        if uppercase(algorithm) == "LM" && iter > 1
+            residual_norm = norm(F)
+            if residual_norm < prev_residual_norm
+                # Amélioration - réduire lambda
+                lambda = max(lambda / lm_lambda_factor, lm_min_lambda)
+                println("Residual improved: decreasing lambda to $lambda")
+            else
+                # Dégradation - augmenter lambda
+                lambda = min(lambda * lm_lambda_factor, lm_max_lambda)
+                println("Residual worsened: increasing lambda to $lambda")
             end
-            # Calculer la norme de l'incrément de position avant de l'appliquer
-            position_increment_norm = α * norm(newton_step)
-            push!(position_increment_history, position_increment_norm)
-            
-            # Apply the step with adjustment factor
-            displacements -= α * newton_step
+            prev_residual_norm = residual_norm
+        end
+        
+        # Appliquer le pas avec facteur d'ajustement
+        displacements -= α * newton_step
             
             # For closed curves, match first and last displacement to ensure continuity
             if front.is_closed

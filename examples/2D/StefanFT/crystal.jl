@@ -68,7 +68,7 @@ radii = [interface_position(t) for t in range(t_init, stop=t_final, length=100)]
 temperatures = [analytical_temperature(r, t_final) for r in radii]
 
 # Define the spatial mesh
-nx, ny = 128, 128
+nx, ny = 64, 64
 lx, ly = 16.0, 16.0
 x0, y0 = -8.0, -8.0
 Δx, Δy = lx/(nx), ly/(ny)
@@ -84,13 +84,13 @@ nmarkers = 100  # Nombre de marqueurs pour le cercle
 #create_circle!(front, 0.0, 0.0, interface_position(t_init), nmarkers)
 #create_crystal!(front, 0.0, 0.0, R0, 6, 0.0, nmarkers)
 # Pour un cristal avec perturbation
-create_crystal!(front, 0.0, 0.0, R0, 4, 0.2, nmarkers)
+create_crystal!(front, 0.0, 0.0, R0, 4, 0.1, nmarkers)
 
 # Définir le corps (body) en utilisant la SDF du front
 body = (x, y, t, _=0) -> -sdf(front, x, y)
 
 # Define the Space-Time mesh
-Δt = 0.25*(lx / nx)^2  # Time step size
+Δt = 0.5*(lx / nx)^2  # Time step size
 t_final = t_init + 5Δt
 println("Final radius at t=$(t_init + Δt): R=$(interface_position(t_init + Δt))")
 
@@ -143,7 +143,7 @@ for idx in 1:length(centroids)
     # Interpoler de TM (-1) à T∞ (+1)
     u0ₒ[idx] = TM * (1 - normalized_tanh)/2 + T∞ * (1 + normalized_tanh)/2
 end
-
+#u0ₒ = ones((nx+1)*(ny+1)) * T∞ 
 u0ᵧ = ones((nx+1)*(ny+1)) * TM  # Interface temperature
 u0 = vcat(u0ₒ, u0ᵧ)
 
