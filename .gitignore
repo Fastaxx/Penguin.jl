@@ -38,3 +38,4 @@ quarto/
 sdf_debug/
 *.png
 simulation_results/
+examples/2D/StefanFT/tests/
