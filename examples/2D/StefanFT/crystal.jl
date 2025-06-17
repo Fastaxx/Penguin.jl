@@ -17,7 +17,7 @@ using Roots
 # Define physical parameters
 L = 1.0      # Latent heat
 c = 1.0      # Specific heat capacity
-TM = -1.0     # Melting temperature (inside sphere)
+TM = 0.0     # Melting temperature (inside sphere)
 T∞ = 1.0    # Far field temperature (undercooled liquid)
 
 # Calculate the Stefan number
@@ -34,7 +34,7 @@ S = 1.56
 println("Similarity parameter S = $S")
 
 # Set initial conditions as specified
-R0 = 1.56      # Initial radius
+R0 = 1.0      # Initial radius
 t_init = 1.0  # Initial time
 t_final = 1.1   # Final time
 
@@ -68,9 +68,9 @@ radii = [interface_position(t) for t in range(t_init, stop=t_final, length=100)]
 temperatures = [analytical_temperature(r, t_final) for r in radii]
 
 # Define the spatial mesh
-nx, ny = 64, 64
-lx, ly = 16.0, 16.0
-x0, y0 = -8.0, -8.0
+nx, ny = 32, 32  # Number of grid points in x and y directions
+lx, ly = 4.0, 4.0
+x0, y0 = -2.0, -2.0
 Δx, Δy = lx/(nx), ly/(ny)
 mesh = Penguin.Mesh((nx, ny), (lx, ly), (x0, y0))
 
@@ -78,7 +78,7 @@ println("Mesh created with dimensions: $(nx) x $(ny), Δx=$(Δx), Δy=$(Δy), do
 
 # Création du cristal - remplace votre body et place_markers_from_body!
 front = FrontTracker()
-nmarkers = 100  # Nombre de marqueurs pour le cercle
+nmarkers = 150  # Nombre de marqueurs pour le cercle
 
 # Pour un cercle parfait (amplitude=0)
 #create_circle!(front, 0.0, 0.0, interface_position(t_init), nmarkers)
@@ -90,8 +90,9 @@ create_crystal!(front, 0.0, 0.0, R0, 4, 0.1, nmarkers)
 body = (x, y, t, _=0) -> -sdf(front, x, y)
 
 # Define the Space-Time mesh
-Δt = 0.5*(lx / nx)^2  # Time step size
-t_final = t_init + 5Δt
+#Δt = 0.5*(lx / nx)^2  # Time step size
+Δt = 0.01
+t_final = t_init + 10Δt
 println("Final radius at t=$(t_init + Δt): R=$(interface_position(t_init + Δt))")
 
 STmesh = Penguin.SpaceTimeMesh(mesh, [t_init, t_init + Δt], tag=mesh.tag)
@@ -118,7 +119,7 @@ Fluide = Phase(capacity, operator, f, K)
 
 # Set up initial condition with tanh profile
 # Parameters for tanh profile
-factor = 2.0  # Controls width of transition (adjust as needed)
+factor = 0.5  # Controls width of transition (adjust as needed)
 L0 = R0       # Characteristic length (use initial radius)
 
 # Initialize temperature fields
@@ -137,11 +138,17 @@ for idx in 1:length(centroids)
     # Distance signée (négative à l'intérieur, positive à l'extérieur)
     val = body_init(x, y)
     
-    # Formule tanh qui va de -1 à l'interface (val=0) à +1 loin
-    normalized_tanh = tanh(val * L0 / factor)
-    
-    # Interpoler de TM (-1) à T∞ (+1)
-    u0ₒ[idx] = TM * (1 - normalized_tanh)/2 + T∞ * (1 + normalized_tanh)/2
+    if val <= 0
+        # À l'intérieur ou sur l'interface: température = TM
+        u0ₒ[idx] = TM
+    else
+        # À l'extérieur: transition de TM à T∞ avec tanh
+        # Utilisation de tanh qui va de 0 à l'interface à 1 loin
+        transition = tanh(val * L0 / factor)
+        
+        # Interpoler de TM (à l'interface) à T∞ (loin)
+        u0ₒ[idx] = TM + transition * (T∞ - TM)
+    end
 end
 #u0ₒ = ones((nx+1)*(ny+1)) * T∞ 
 u0ᵧ = ones((nx+1)*(ny+1)) * TM  # Interface temperature
@@ -175,7 +182,8 @@ solver = StefanMono2D(Fluide, bc_b, bc, Δt, u0, mesh, "BE")
 
 # Solve the problem
 solver, residuals, xf_log, timestep_history = solve_StefanMono2D!(solver, Fluide, front, Δt, t_init, t_final,bc_b, bc, stef_cond, mesh, "BE";
-   Newton_params=Newton_params, smooth_factor=0.5, window_size=20, method=Base.:\)
+   Newton_params=Newton_params, smooth_factor=0.75, window_size=3, enable_stencil_fusion=false,
+   method=Base.:\)
 
 # Plot the results
 function plot_simulation_results(residuals, xf_log, timestep_history, Ste=nothing)

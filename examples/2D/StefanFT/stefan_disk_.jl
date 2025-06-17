@@ -148,14 +148,14 @@ display(fig_init)
 
 
 # Newton parameters
-Newton_params = (10, 1e-6, 1e-6, 1.0) # max_iter, tol, reltol, α
+Newton_params = (30, 1e-6, 1e-6, 1.0) # max_iter, tol, reltol, α
 
 # Run the simulation
 solver = StefanMono2D(Fluide, bc_b, bc, Δt, u0, mesh, "BE")
 
 # Solve the problem
 solver, residuals, xf_log, timestep_history, phase, position_increments = solve_StefanMono2D!(solver, Fluide, front, Δt, t_init, t_final,bc_b, bc, stef_cond, mesh, "BE";
-   Newton_params=Newton_params, adaptive_timestep=false, method=Base.:\)
+   Newton_params=Newton_params, adaptive_timestep=false, enable_stencil_fusion=true, fusion_strategy="5x5", method=Base.:\)
 
 function plot_position_increments(residuals, position_increments, timestep_history)
     # Créer le répertoire des résultats
