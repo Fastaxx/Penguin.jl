@@ -51,15 +51,73 @@ Compute the capacity of a body in a given mesh using a specified method.
 function Capacity(body::Function, mesh::AbstractMesh; method::String = "VOFI", compute_centroids::Bool = true)
 
     if method == "VOFI"
+        println("When using VOFI, the body must be a scalar function.")
         A, B, V, W, C_ω, C_γ, Γ, cell_types = VOFI(body, mesh; compute_centroids=compute_centroids)
         N = length(A)
         return Capacity{N}(A, B, V, W, C_ω, C_γ, Γ, cell_types, mesh, body)
     elseif method == "ImplicitIntegration"
-        println("Not implemented yet")
-        #A, B, V, W, C_ω, C_γ, Γ, cell_types = ImplicitIntegration(body, mesh)
-        #N = length(A)
+        println("When using ImplicitIntegration, the body must be a vectorized function.")
+        V, cell_types, C_ω, C_γ, Γ, W, A, B = IINT(mesh, body)
+        N = length(A)
         return Capacity{N}(A, B, V, W, C_ω, C_γ, Γ, cell_types, mesh, body)
     end    
+end
+
+"""
+    IINT(mesh::AbstractMesh, body::Function; compute_centroids::Bool = true)
+
+Compute capacity quantities using Implicit Integration method from CartesianGeometry.
+
+# Arguments
+- `mesh::AbstractMesh`: The mesh on which to compute the capacity
+- `body::Function`: The level set function defining the domain
+- `compute_centroids::Bool`: Whether to compute interface centroids
+
+# Returns
+Tuple of capacity components:
+- `V`: Volume capacity represented by a sparse matrix
+- `cell_types`: Cell types
+- `C_ω`: Cell centroids
+- `C_γ`: Interface centroids
+- `Γ`: Interface norms
+- `W`: Staggered volumes
+- `A`: Face capacity matrices
+- `B`: Center line capacity matrices
+"""
+function IINT(mesh::AbstractMesh, body::Function; compute_centroids::Bool = true)
+    # Use the implicit integration method to compute capacities
+    V, cell_types, C_ω, C_γ, Γ, W, A, B = CartesianGeometry.implicit_integration(mesh.nodes,body)
+    
+    # Convert V to sparse matrix if not already
+    V_sparse = issparse(V) ? V : sparse(Diagonal(V))
+    
+    # Convert Γ to sparse matrix if not already
+    Γ_sparse = issparse(Γ) ? Γ : sparse(Diagonal(Γ))
+    
+    # Process A, B, W tuples to ensure they're sparse matrices
+    function ensure_sparse_tuple(tuple_matrices)
+        return ntuple(i -> begin
+            issparse(tuple_matrices[i]) ? tuple_matrices[i] : sparse(Diagonal(tuple_matrices[i]))
+        end, length(tuple_matrices))
+    end
+    
+    A_sparse = ensure_sparse_tuple(A)
+    B_sparse = ensure_sparse_tuple(B)
+    W_sparse = ensure_sparse_tuple(W)
+    
+    # Handle interface centroids based on compute_centroids flag
+    if !compute_centroids
+        N = length(mesh.nodes)
+        if N == 1
+            C_γ = Vector{SVector{1,Float64}}(undef, 0)
+        elseif N == 2
+            C_γ = Vector{SVector{2,Float64}}(undef, 0)
+        elseif N == 3
+            C_γ = Vector{SVector{3,Float64}}(undef, 0)
+        end
+    end
+    
+    return V_sparse, cell_types, C_ω, C_γ, Γ_sparse, W_sparse, A_sparse, B_sparse
 end
 
 """
