@@ -7,7 +7,107 @@ function compute_volume_jacobian(mesh::Penguin.Mesh{2}, front::FrontTracker, eps
     return compute_volume_jacobian(front, x_faces, y_faces, epsilon)
 end
 
-
+"""
+Génère une heatmap des résidus sur la grille 2D avec visualisation des stencils
+"""
+function plot_residual_heatmap(mesh, residual_values, cells_idx, stencil_centers=nothing, enable_stencil_fusion=false)
+    nx, ny = size(mesh.centers[1])[1], size(mesh.centers[2])[1]
+    
+    # Créer une matrice 2D pour les résidus (initialisation à NaN pour les cellules sans résidu)
+    residual_matrix = fill(NaN, nx, ny)
+    
+    # Remplir avec les valeurs de résidus disponibles
+    if enable_stencil_fusion && stencil_centers !== nothing
+        # Version fusion stencil
+        stencil_indices = collect(keys(stencil_centers))
+        for (eq_idx, (i, j)) in enumerate(stencil_indices)
+            if 1 <= i <= nx && 1 <= j <= ny
+                residual_matrix[i, j] = residual_values[eq_idx]
+            end
+        end
+    else
+        # Version standard sans fusion
+        for (eq_idx, (i, j)) in enumerate(cells_idx)
+            if 1 <= i <= nx && 1 <= j <= ny
+                residual_matrix[i, j] = residual_values[eq_idx]
+            end
+        end
+    end
+    
+    # Créer la figure
+    fig = Figure(size=(800, 700))
+    
+    # Heatmap des résidus (log scale pour mieux voir les variations)
+    ax1 = Axis(fig[1, 1], 
+              title="Carte des résidus", 
+              xlabel="Colonne", ylabel="Rangée",
+              aspect=DataAspect())
+    
+    # Trouver les limites d'échelle qui évitent les NaN
+    residual_values_filtered = filter(!isnan, residual_matrix[:])
+    if !isempty(residual_values_filtered)
+        max_abs_val = maximum(abs.(residual_values_filtered))
+        colorrange = (-max_abs_val, max_abs_val)
+    else
+        colorrange = (-1, 1)  # Valeurs par défaut
+    end
+    
+    # Créer la heatmap avec une échelle de couleur centrée sur zéro
+    hm = heatmap!(ax1, 1:nx, 1:ny, residual_matrix, 
+                 colormap=:balance,  # Colormap rouge-bleu centré sur zéro
+                 colorrange=colorrange,
+                 nan_color=:lightgrey)  # Gris clair pour les cellules sans résidu
+    
+    # Marquer les cellules affectées
+    if enable_stencil_fusion && stencil_centers !== nothing
+        # Afficher les centres des stencils
+        stencil_centers_list = collect(keys(stencil_centers))
+        stencil_i = [c[1] for c in stencil_centers_list]
+        stencil_j = [c[2] for c in stencil_centers_list]
+        scatter!(ax1, stencil_j, stencil_i, 
+                color=:black, markersize=4, marker=:circle)
+        
+        # Afficher les connexions de stencil
+        for (i, j) in stencil_centers_list
+            for (si, sj) in stencil_centers[(i, j)]
+                # Sauter la cellule centrale
+                if (si, sj) != (i, j)
+                    lines!(ax1, [j, sj], [i, si], 
+                          color=:gray, linewidth=0.5, linestyle=:dash, alpha=0.3)
+                end
+            end
+        end
+    else
+        # Marquer simplement les cellules affectées
+        cell_i = [c[1] for c in cells_idx]
+        cell_j = [c[2] for c in cells_idx]
+        scatter!(ax1, cell_j, cell_i, 
+                color=:black, markersize=4, marker=:cross)
+    end
+    
+    # Ajouter une barre de couleur
+    Colorbar(fig[1, 2], hm, label="Valeur du résidu")
+    
+    # Statistiques sur les résidus
+    non_nan_values = filter(!isnan, residual_matrix[:])
+    if !isempty(non_nan_values)
+        max_val = maximum(non_nan_values)
+        min_val = minimum(non_nan_values)
+        mean_val = mean(non_nan_values)
+        std_val = std(non_nan_values)
+        
+        stats_text = """
+        Max: $(round(max_val, digits=6))
+        Min: $(round(min_val, digits=6))
+        Moyenne: $(round(mean_val, digits=6))
+        Écart-type: $(round(std_val, digits=6))
+        """
+        
+        Label(fig[2, 1:2], stats_text, tellwidth=false)
+    end
+    
+    return fig
+end
 """
 Smooth marker displacements using weighted averaging of neighbors
 This helps maintain interface regularity and stability
@@ -109,6 +209,9 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
                             lm_lambda_factor=10.0, # Facteur de multiplication/division pour lambda
                             lm_min_lambda=1e-10, # Lambda minimum
                             lm_max_lambda=1e6, # Lambda maximum
+                            enable_stencil_fusion=true, # Activer/désactiver la fusion des résidus
+                            stencil_weights=nothing, # Poids optionnels pour le stencil (sinon uniforme)
+                            fusion_strategy="3x3", # Nouvelle option: "3x3", "5x5"
                             kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
@@ -157,9 +260,60 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
     # Store initial interface position
     xf_log[1] = markers
     
+    # Afficher l'état de la fusion des résidus et la stratégie
+    if enable_stencil_fusion
+        println("Résidus fusion activée: stratégie $fusion_strategy")
+    else
+        println("Résidus fusion désactivée: résolution standard")
+    end
+    
+    # Définir les poids du stencil selon la stratégie
+    if stencil_weights === nothing
+        if fusion_strategy == "3x3"
+            # Stencil 3x3 par défaut (uniforme ou pondéré)
+            stencil_weights = fill(1.0/9, 3, 3)  # Uniforme
+        elseif fusion_strategy == "5x5"
+            # Stencil 5x5 uniforme
+            stencil_weights = fill(1.0/25, 5, 5)  # Uniforme
+        end
+    end
+    
+    # Définir une fonction pour obtenir les cellules du stencil
+    function get_stencil_cells(i, j, nx, ny, fusion_strategy)
+        stencil_cells = []
+        
+        if fusion_strategy == "5x5"
+            # Stencil 5x5: cellule courante + voisinage plus étendu 
+            for di in -2:2
+                for dj in -2:2
+                    si = i + di
+                    sj = j + dj
+                    if 1 <= si <= nx && 1 <= sj <= ny
+                        push!(stencil_cells, (si, sj))
+                    end
+                end
+            end
+        else
+            # Stencil 3x3 standard (par défaut)
+            for di in -1:1
+                for dj in -1:1
+                    si = i + di
+                    sj = j + dj
+                    if 1 <= si <= nx && 1 <= sj <= ny
+                        push!(stencil_cells, (si, sj))
+                    end
+                end
+            end
+        end
+        
+        return stencil_cells
+    end
+
     # Boucle principale pour tous les pas de temps
     timestep = 1
     phase_2d = phase  # Initialize phase_2d for later use
+    last_displacements = nothing  # Stocker les déplacements du pas de temps précédent
+
     while t < Tₑ
         # Affichage du pas de temps actuel
         if timestep == 1
@@ -171,6 +325,40 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
         # Get current markers and calculate normals
         markers = get_markers(front)
         normals = compute_marker_normals(front, markers)
+        
+        # Si nous avons des déplacements du pas précédent, initialisons l'interface
+        if last_displacements !== nothing && timestep > 1
+            # Calculer un facteur d'extrapolation (peut être ajusté pour stabilité)
+            extrapolation_factor = 0.8  # Valeur prudente inférieure à 1
+            
+            println("Initializing interface using previous displacements (extrapolation factor: $extrapolation_factor)")
+            
+            # Nombre de marqueurs (en excluant le point dupliqué si l'interface est fermée)
+            n_markers = length(markers) - (front.is_closed ? 1 : 0)
+            
+            # Créer des nouveaux marqueurs extrapolés
+            new_markers = copy(markers)
+            for i in 1:n_markers
+                # Appliquer les déplacements précédents avec le facteur d'extrapolation
+                normal = normals[i]
+                new_markers[i] = (
+                    markers[i][1] + extrapolation_factor * last_displacements[i] * normal[1],
+                    markers[i][2] + extrapolation_factor * last_displacements[i] * normal[2]
+                )
+            end
+            
+            # Si l'interface est fermée, mettre à jour le marqueur dupliqué
+            if front.is_closed
+                new_markers[end] = new_markers[1]
+            end
+            
+            # Mettre à jour le front avec les marqueurs extrapolés
+            set_markers!(front, new_markers)
+            
+            # Recalculer les normales avec la nouvelle position
+            markers = get_markers(front)
+            normals = compute_marker_normals(front, markers)
+        end
         
         # Update time for this step
         t += Δt
@@ -184,8 +372,8 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
         # Initialize displacement vector and residual vector
         displacements = zeros(n_markers)
         residual_norm_history = Float64[]
-        position_increment_history = Float64[]  # Nouveau vecteur pour les incréments de position
-
+        position_increment_history = Float64[]
+        
         # Variables pour Levenberg-Marquardt
         lambda = lm_init_lambda
         prev_residual_norm = Inf
@@ -216,80 +404,12 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
             interface_flux = Id * H' * W! * G * Tₒ + Id * H' * W! * H * Tᵧ
             
             # Reshape to get flux per cell - IMPORTANT: use the same reshape consistently
-            interface_flux_2d = reshape(interface_flux, (nx, ny)) #+ reshape(interface_flux, (nx, ny))'
-            
-            
-            # Debug visualizations
-            if timestep <= 2 || mod(timestep, 5) == 0  # Limit visualizations
-                # Plot temperature field
-                fig = Figure()
-                ax = Axis(fig[1, 1], title="Temperature Field", xlabel="x", ylabel="y", aspect=DataAspect())
-                hm = heatmap!(ax, reshape(Tₒ, (nx, ny)), colormap=:viridis)
-                Colorbar(fig[1, 2], hm, label="Temperature")
-                display(fig)
-                
-                # Plot interface flux
-                fig = Figure()
-                ax = Axis(fig[1, 1], title="Interface Flux", xlabel="x", ylabel="y", aspect=DataAspect())
-                hm = heatmap!(ax, interface_flux_2d, colormap=:viridis)
-                Colorbar(fig[1, 2], hm, label="Interface Flux")
-                display(fig)
-                
-                if iter > 1  # Only when we have updated markers
-                    # Calculate updated marker positions
-                    updated_markers = Vector{Tuple{Float64, Float64}}(undef, length(markers))
-                    
-                    # Use eachindex instead of 1:length()
-                    for (i, marker) in enumerate(markers)
-                        if i <= length(displacements) && i <= length(normals)  # Check bounds for both arrays
-                            updated_markers[i] = (
-                                marker[1] + displacements[i] * normals[i][1],
-                                marker[2] + displacements[i] * normals[i][2]
-                            )
-                        else
-                            updated_markers[i] = marker  # Keep the same if no normal or displacement
-                        end
-
-                        if front.is_closed && length(updated_markers) > 1
-                            # Ensure the last marker matches the first for closed curves
-                            updated_markers[end] = updated_markers[1]
-                        end
-                    end
-                    
-                    # Create the comparison plot
-                    fig = Figure()
-                    ax = Axis(fig[1, 1], title="Interface Evolution (Iteration $iter)", 
-                              xlabel="x", ylabel="y", aspect=DataAspect())
-                    
-                    # Plot original markers
-                    orig_x = [m[1] for m in markers]
-                    orig_y = [m[2] for m in markers]
-                    lines!(ax, orig_x, orig_y, color=:blue, linewidth=1.5, 
-                           label="Original", linestyle=:dash)
-                    scatter!(ax, orig_x, orig_y, color=:blue, markersize=3)
-                    
-                    # Plot updated markers
-                    new_x = [m[1] for m in updated_markers]
-                    new_y = [m[2] for m in updated_markers]
-                    lines!(ax, new_x, new_y, color=:red, linewidth=1.5, 
-                           label="Updated")
-                    scatter!(ax, new_x, new_y, color=:red, markersize=3)
-                    
-                    # Add legend
-                    axislegend(ax, position=:rt)
-                    
-                    display(fig)
-                end
-            end
-            
+            interface_flux_2d = reshape(interface_flux, (nx, ny))
 
             # Compute volume Jacobian for the mesh
             volume_jacobian = compute_volume_jacobian(mesh, front, jacobian_epsilon)
             
-            # 3. Build least squares system
-            row_indices = Int[]
-            col_indices = Int[]
-            values = Float64[]
+            # 3. Build least squares system - Modified for stencil fusion
             cells_idx = []
             
             # Precompute affected cells and their indices for residual vector
@@ -300,58 +420,280 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
                     end
                 end
             end
-            
-            # Number of equations (cells) in our system
-            m = length(cells_idx)
-            
-            # Now build the Jacobian matrix for volume changes
-            for (eq_idx, (i, j)) in enumerate(cells_idx)
-                # Handle each marker affecting this cell
-                for (marker_idx, jac_value) in volume_jacobian[(i,j)]
-                    if 0 <= marker_idx < n_markers
-                        push!(row_indices, eq_idx)
-                        push!(col_indices, marker_idx + 1)  # 1-based indexing
-                        # Volume Jacobian is multiplied by ρL to match the Stefan condition
-                        push!(values, ρL * jac_value)
+
+            # Si la fusion par stencil est activée
+            if enable_stencil_fusion
+                # Dictionnaire pour stocker les stencils centrés sur chaque cellule
+                stencil_centers = Dict()
+                
+                # Pour chaque cellule affectée, identifier les fresh/dead cells si nécessaire
+                fresh_cells = []
+                dead_cells = []
+                
+                if fusion_strategy == "fresh_dead"
+                    # Identifier les fresh et dead cells
+                    for (i, j) in cells_idx
+                        volume_new = Vₙ₊₁_matrix[i, j]
+                        volume_old = Vₙ_matrix[i, j]
+                        
+                        # Fresh cell: n'existait pas avant mais existe maintenant
+                        if volume_old < 1e-10 && volume_new > 1e-10
+                            push!(fresh_cells, (i, j))
+                        end
+                        
+                        # Dead cell: existait avant mais n'existe plus maintenant
+                        if volume_old > 1e-10 && volume_new < 1e-10
+                            push!(dead_cells, (i, j))
+                        end
                     end
-                end
-            end
-            
-            # Create Jacobian matrix J for the system
-            J = sparse(row_indices, col_indices, values, m, n_markers)
-            
-            # Calculate current residual vector F
-            F = zeros(m)
-            mismatches = 0
-            total_cells = 0
-            
-            # Diagnostic arrays
-            flux_nonzero = zeros(Bool, nx, ny)
-            volume_nonzero = zeros(Bool, nx, ny)
-            both_nonzero = zeros(Bool, nx, ny)
-            
-            for (eq_idx, (i, j)) in enumerate(cells_idx)
-                # Get the desired volume change based on interface flux
-                volume_change = Vₙ₊₁_matrix[i,j] - Vₙ_matrix[i,j]
-                flux = interface_flux_2d[i,j]
-                
-                # Record diagnostics
-                total_cells += 1
-                volume_nonzero[i,j] = abs(volume_change) > 1e-10
-                flux_nonzero[i,j] = abs(flux) > 1e-10
-                both_nonzero[i,j] = volume_nonzero[i,j] && flux_nonzero[i,j]
-                
-                # Detect mismatches (volume change but no flux or vice versa)
-                if (volume_nonzero[i,j] && !flux_nonzero[i,j]) || (!volume_nonzero[i,j] && flux_nonzero[i,j])
-                    mismatches += 1
-                    if mismatches <= 5  # Limiter le nombre de messages
-                        println("Mismatch at ($i,$j): volume_change = $volume_change, flux = $flux")
+                    
+                    # N'utiliser que les fresh/dead cells comme centres de stencil
+                    for cell in vcat(fresh_cells, dead_cells)
+                        stencil_centers[cell] = get_stencil_cells(cell[1], cell[2], nx, ny, "3x3")
+                    end
+                    
+                    println("Nombre de fresh cells: $(length(fresh_cells))")
+                    println("Nombre de dead cells: $(length(dead_cells))")
+                else
+                    # Pour les autres stratégies, créer un stencil pour chaque cellule affectée
+                    for (i, j) in cells_idx
+                        stencil_centers[(i, j)] = get_stencil_cells(i, j, nx, ny, fusion_strategy)
                     end
                 end
                 
-                # F_i = ρL * volume_change - interface_flux
-                F[eq_idx] = ρL * volume_change - flux
+                println("Nombre de cellules affectées: $(length(cells_idx))")
+                println("Nombre de stencils: $(length(stencil_centers))")
+            
+                
+                # Reconstruire les indices des équations basés sur les stencils
+                row_indices = Int[]
+                col_indices = Int[]
+                values = Float64[]
+                stencil_indices = collect(keys(stencil_centers))
+                # Construire la matrice jacobienne pour chaque stencil
+                for (eq_idx, center_idx) in enumerate(stencil_indices)
+                    # Pour chaque cellule dans ce stencil
+                    i_center, j_center = center_idx
+                    
+                    # Pour chaque marqueur affectant les cellules du stencil
+                    # Commencer par la cellule centrale qui est la plus importante
+                    if haskey(volume_jacobian, (i_center, j_center))
+                        for (marker_idx, jac_value) in volume_jacobian[(i_center, j_center)]
+                            if 0 <= marker_idx < n_markers
+                                push!(row_indices, eq_idx)
+                                push!(col_indices, marker_idx + 1)  # 1-based indexing
+                                
+                                # Déterminer l'indice central selon la taille du stencil
+                                center_index = fusion_strategy == "5x5" ? 3 : 2
+                                
+                                # Utiliser un poids pour la cellule centrale
+                                push!(values, ρL * jac_value * stencil_weights[center_index, center_index])
+                            end
+                        end
+                    end
+                    
+                    # Ensuite, parcourir les voisins dans le stencil
+                    for (si, sj) in stencil_centers[(i_center, j_center)]
+                        # Sauter la cellule centrale qui a déjà été traitée
+                        if (si, sj) == (i_center, j_center)
+                            continue
+                        end
+                        
+                        if haskey(volume_jacobian, (si, sj))
+                            for (marker_idx, jac_value) in volume_jacobian[(si, sj)]
+                                if 0 <= marker_idx < n_markers
+                                    push!(row_indices, eq_idx)
+                                    push!(col_indices, marker_idx + 1)  # 1-based indexing
+                                    
+                                    # Appliquer les poids du stencil selon la position relative
+                                    # Adapter le décalage selon la taille du stencil
+                                    if fusion_strategy == "5x5"
+                                        # Pour un stencil 5x5, on ajoute 3 pour centrer
+                                        stencil_i = si - i_center + 3
+                                        stencil_j = sj - j_center + 3
+                                    else
+                                        # Pour un stencil 3x3, on ajoute 2 comme avant
+                                        stencil_i = si - i_center + 2
+                                        stencil_j = sj - j_center + 2
+                                    end
+                                    
+                                    weight = stencil_weights[stencil_i, stencil_j]
+                                    push!(values, ρL * jac_value * weight)
+                                end
+                            end
+                        end
+                    end
+                end
+                # Créer la matrice jacobienne J pour le système
+                m = length(stencil_indices)  # Nombre d'équations (stencils)
+                J = sparse(row_indices, col_indices, values, m, n_markers)
+                
+                # Calculer le vecteur résidu F fusionné
+                F = zeros(m)
+                mismatches = 0
+                total_stencils = 0
+                
+                # Arrays for diagnostics
+                flux_nonzero = zeros(Bool, nx, ny)
+                volume_nonzero = zeros(Bool, nx, ny)
+                both_nonzero = zeros(Bool, nx, ny)
+                
+                # Pour chaque stencil, calculer le résidu combiné
+                for (eq_idx, center_idx) in enumerate(stencil_indices)
+                    total_stencils += 1
+                    stencil_volume_change = 0.0
+                    stencil_flux = 0.0
+                    i_center, j_center = center_idx
+                    
+                    # Calculer la contribution de la cellule centrale (plus importante)
+                    if 1 <= i_center <= nx && 1 <= j_center <= ny
+                        volume_change = Vₙ₊₁_matrix[i_center, j_center] - Vₙ_matrix[i_center, j_center]
+                        flux = interface_flux_2d[i_center, j_center]
+                        
+                        # Appliquer le poids central (généralement plus élevé)
+                        stencil_volume_change += volume_change * stencil_weights[2, 2]
+                        stencil_flux += flux * stencil_weights[2, 2]
+                        
+                        # Record diagnostics
+                        volume_nonzero[i_center, j_center] = abs(volume_change) > 1e-10
+                        flux_nonzero[i_center, j_center] = abs(flux) > 1e-10
+                        both_nonzero[i_center, j_center] = volume_nonzero[i_center, j_center] && 
+                                                          flux_nonzero[i_center, j_center]
+                    end
+                    
+                    # Ajouter la contribution des cellules voisines
+                    for (si, sj) in stencil_centers[(i_center, j_center)]
+                        # Sauter la cellule centrale déjà traitée
+                        if (si, sj) == (i_center, j_center)
+                            continue
+                        end
+                        
+                        if 1 <= si <= nx && 1 <= sj <= ny
+                            volume_change = Vₙ₊₁_matrix[si, sj] - Vₙ_matrix[si, sj]
+                            flux = interface_flux_2d[si, sj]
+                            
+                            # Appliquer le poids selon la position dans le stencil
+                            if fusion_strategy == "5x5"
+                                # Pour un stencil 5x5, on ajoute 3 pour centrer
+                                stencil_i = si - i_center + 3
+                                stencil_j = sj - j_center + 3
+                                
+                                # Ensure indices are within bounds (1-5)
+                                stencil_i = max(1, min(5, stencil_i))
+                                stencil_j = max(1, min(5, stencil_j))
+                            else
+                                # Pour un stencil 3x3, on ajoute 2 comme avant
+                                stencil_i = si - i_center + 2
+                                stencil_j = sj - j_center + 2
+                                
+                                # Ensure indices are within bounds (1-3)
+                                stencil_i = max(1, min(3, stencil_i))
+                                stencil_j = max(1, min(3, stencil_j))
+                            end
+                            
+                            # Now indices are guaranteed to be valid
+                            weight = stencil_weights[stencil_i, stencil_j]
+                            
+                            stencil_volume_change += volume_change * weight
+                            stencil_flux += flux * weight
+                            
+                            # Record diagnostics
+                            volume_nonzero[si, sj] = abs(volume_change) > 1e-10
+                            flux_nonzero[si, sj] = abs(flux) > 1e-10
+                            both_nonzero[si, sj] = volume_nonzero[si, sj] && flux_nonzero[si, sj]
+                        end
+                    end
+                    
+                    # F_stencil = ρL * stencil_volume_change - stencil_flux
+                    F[eq_idx] = ρL * stencil_volume_change - stencil_flux
+                    
+                    # Diagnostic pour ce stencil
+                    stencil_has_nonzero_vol = abs(stencil_volume_change) > 1e-10
+                    stencil_has_nonzero_flux = abs(stencil_flux) > 1e-10
+                    
+                    if (stencil_has_nonzero_vol && !stencil_has_nonzero_flux) || 
+                       (!stencil_has_nonzero_vol && stencil_has_nonzero_flux)
+                        mismatches += 1
+                        if mismatches <= 5
+                            println("Stencil mismatch at $center_idx: volume_change = $stencil_volume_change, flux = $stencil_flux")
+                        end
+                    end
+                end
+            else
+                # Version standard sans fusion de cellules
+                row_indices = Int[]
+                col_indices = Int[]
+                values = Float64[]
+                
+                # Number of equations (cells) in our system
+                m = length(cells_idx)
+                
+                # Now build the Jacobian matrix for volume changes
+                for (eq_idx, (i, j)) in enumerate(cells_idx)
+                    # Handle each marker affecting this cell
+                    for (marker_idx, jac_value) in volume_jacobian[(i,j)]
+                        if 0 <= marker_idx < n_markers
+                            push!(row_indices, eq_idx)
+                            push!(col_indices, marker_idx + 1)  # 1-based indexing
+                            # Volume Jacobian is multiplied by ρL to match the Stefan condition
+                            push!(values, ρL * jac_value)
+                        end
+                    end
+                end
+                
+                # Create Jacobian matrix J for the system
+                J = sparse(row_indices, col_indices, values, m, n_markers)
+                
+                # Calculate current residual vector F
+                F = zeros(m)
+                mismatches = 0
+                total_cells = 0
+                
+                # Diagnostic arrays
+                flux_nonzero = zeros(Bool, nx, ny)
+                volume_nonzero = zeros(Bool, nx, ny)
+                both_nonzero = zeros(Bool, nx, ny)
+                
+                for (eq_idx, (i, j)) in enumerate(cells_idx)
+                    # Get the desired volume change based on interface flux
+                    volume_change = Vₙ₊₁_matrix[i,j] - Vₙ_matrix[i,j]
+                    flux = interface_flux_2d[i,j]
+                    
+                    # Record diagnostics
+                    total_cells += 1
+                    volume_nonzero[i,j] = abs(volume_change) > 1e-10
+                    flux_nonzero[i,j] = abs(flux) > 1e-10
+                    both_nonzero[i,j] = volume_nonzero[i,j] && flux_nonzero[i,j]
+                    
+                    # Detect mismatches (volume change but no flux or vice versa)
+                    if (volume_nonzero[i,j] && !flux_nonzero[i,j]) || (!volume_nonzero[i,j] && flux_nonzero[i,j])
+                        mismatches += 1
+                        if mismatches <= 5  # Limiter le nombre de messages
+                            println("Mismatch at ($i,$j): volume_change = $volume_change, flux = $flux")
+                        end
+                    end
+                    
+                    # F_i = ρL * volume_change - interface_flux
+                    F[eq_idx] = ρL * volume_change - flux
+                end
             end
+
+            results_dir = joinpath(pwd(), "residuals_visualization")
+            if !isdir(results_dir)
+                mkdir(results_dir)
+            end
+            
+            # Créer la visualisation
+            residual_fig = plot_residual_heatmap(mesh, F, cells_idx, 
+                                                     enable_stencil_fusion ? stencil_centers : nothing,
+                                                     enable_stencil_fusion)
+
+            # Sauvegarder l'image
+            timestamp = round(Int, time())
+            save(joinpath(results_dir, "residual_timestep$(timestep)_iter$(iter)_$(timestamp).png"), residual_fig)
+                
+            display(residual_fig)
+
             
             # Print diagnostic summary
             nonzero_vol = count(volume_nonzero)
@@ -360,133 +702,83 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
             println("Cells with nonzero volume change: $nonzero_vol")
             println("Cells with nonzero interface flux: $nonzero_flux")
             println("Cells with both nonzero: $nonzero_both")
-            println("Mismatches: $mismatches out of $total_cells cells")
+            if enable_stencil_fusion
+                println("Mismatches at stencil level: $mismatches out of $total_stencils stencils")
+            else
+                println("Mismatches: $mismatches out of $total_cells cells")
+            end
             
+            # 4. Implémenter l'algorithme d'optimisation choisi
+            JTJ = J' * J
             
-            # Visualization of matches/mismatches
-            if iter == 1 || mismatches > 0
-                mismatch_plot = Figure()
-                ax1 = Axis(mismatch_plot[1, 1], title="Volume Change", aspect=DataAspect())
-                heatmap!(ax1, [abs(Vₙ₊₁_matrix[i,j] - Vₙ_matrix[i,j]) for i=1:nx, j=1:ny], colormap=:viridis)
+            # Diagnostics initiaux
+            used_columns = unique(col_indices)
+            println("Matrix info: size(J)=$(size(J)), n_markers=$n_markers")
+            println("Used marker indices: $(length(used_columns)) of $n_markers")
+            
+            if uppercase(algorithm) == "LM"
+                println("Using Levenberg-Marquardt with adaptive damping")
                 
-                ax2 = Axis(mismatch_plot[1, 2], title="Interface Flux", aspect=DataAspect()) 
-                heatmap!(ax2, interface_flux_2d, colormap=:viridis)
+                # Extraire la diagonale pour la régularisation LM
+                diag_JTJ = diag(JTJ)
                 
-                ax3 = Axis(mismatch_plot[2, 1:2], title="Mismatch Map", aspect=DataAspect())
-                mismatch_map = zeros(Int, nx, ny)
-                for i=1:nx, j=1:ny
-                    if volume_nonzero[i,j] && !flux_nonzero[i,j]
-                        mismatch_map[i,j] = 1  # Volume sans flux
-                    elseif !volume_nonzero[i,j] && flux_nonzero[i,j]
-                        mismatch_map[i,j] = 2  # Flux sans volume
-                    elseif volume_nonzero[i,j] && flux_nonzero[i,j]
-                        mismatch_map[i,j] = 3  # Les deux
+                # Protéger contre les valeurs trop petites
+                min_diag = 1e-10 * maximum(diag_JTJ)
+                for i in 1:length(diag_JTJ)
+                    if diag_JTJ[i] < min_diag
+                        diag_JTJ[i] = min_diag
                     end
                 end
-                heatmap!(ax3, mismatch_map, colormap=[:transparent, :red, :blue, :green])
                 
-                display(mismatch_plot)
-            end
-            
-            
-            # Visualiser le résidual F sur la grille
-            fig_residual = Figure()
-            ax_residual = Axis(fig_residual[1, 1], 
-                              title="Residual F (Iteration $iter)", 
-                              xlabel="x", ylabel="y",
-                              aspect=DataAspect())
-            
-            # Créer une matrice 2D pour représenter le résidual sur la grille
-            residual_2d = zeros(nx, ny)
-            for (eq_idx, (i, j)) in enumerate(cells_idx)
-                residual_2d[i, j] = F[eq_idx]
-            end
-            
-            
-            # Tracer le heatmap du résidual
-            hm_residual = heatmap!(ax_residual, residual_2d, colormap=:balance)
-            Colorbar(fig_residual[1, 2], hm_residual, label="Residual value")
-            
-            # Ajouter les contours de l'interface pour référence
-            markers_x = [m[1] for m in markers]
-            markers_y = [m[2] for m in markers]
-            lines!(ax_residual, markers_x, markers_y, color=:black, linewidth=1.5)
-            
-            display(fig_residual)
-            
-            
-        # 4. Implémenter l'algorithme d'optimisation choisi
-        JTJ = J' * J
-        
-        # Diagnostics initiaux
-        used_columns = unique(col_indices)
-        println("Matrix info: size(J)=$(size(J)), n_markers=$n_markers")
-        println("Used marker indices: $(length(used_columns)) of $n_markers")
-        
-        
-        if uppercase(algorithm) == "LM"
-            println("Using Levenberg-Marquardt with adaptive damping")
-            
-            # Extraire la diagonale pour la régularisation LM
-            diag_JTJ = diag(JTJ)
-            
-            # Protéger contre les valeurs trop petites
-            min_diag = 1e-10 * maximum(diag_JTJ)
-            for i in 1:length(diag_JTJ)
-                if diag_JTJ[i] < min_diag
-                    diag_JTJ[i] = min_diag
-                end
-            end
-            
-            # Appliquer la régularisation adaptative de Levenberg-Marquardt
-            reg_JTJ = JTJ + lambda * Diagonal(diag_JTJ)
-            
-        else
-            println("Using Gauss-Newton algorithm with minimal stabilization")
-            
-            # Pour GN, juste une petite régularisation pour éviter les matrices singulières
-            min_reg = 1e-10 * norm(JTJ, Inf)
-            reg_JTJ = JTJ + min_reg * I
-        end
-        
-        # Résoudre le système avec méthode robuste
-        newton_step = zeros(n_markers)
-        try
-            newton_step = reg_JTJ \ (J' * F)
-        catch e
-            println("Matrix solver failed, using SVD as backup")
-            # Résolution par SVD comme fallback
-            F_svd = svd(Matrix(reg_JTJ))
-            svd_tol = eps(Float64) * max(size(reg_JTJ)...) * maximum(F_svd.S)
-            S_inv = [s > svd_tol ? 1/s : 0.0 for s in F_svd.S]
-            
-            # Calculer la solution pseudo-inverse
-            JTF = J' * F
-            newton_step = F_svd.V * (S_inv .* (F_svd.U' * JTF))
-        end
-        
-        # Calculer la norme de l'incrément de position
-        position_increment_norm = α * norm(newton_step)
-        push!(position_increment_history, position_increment_norm)
-        
-        # Pour Levenberg-Marquardt, ajuster lambda en fonction de la convergence
-        if uppercase(algorithm) == "LM" && iter > 1
-            residual_norm = norm(F)
-            if residual_norm < prev_residual_norm
-                # Amélioration - réduire lambda
-                lambda = max(lambda / lm_lambda_factor, lm_min_lambda)
-                println("Residual improved: decreasing lambda to $lambda")
+                # Appliquer la régularisation adaptative de Levenberg-Marquardt
+                reg_JTJ = JTJ + lambda * Diagonal(diag_JTJ)
+                
             else
-                # Dégradation - augmenter lambda
-                lambda = min(lambda * lm_lambda_factor, lm_max_lambda)
-                println("Residual worsened: increasing lambda to $lambda")
+                println("Using Gauss-Newton algorithm with minimal stabilization")
+                
+                # Pour GN, juste une petite régularisation pour éviter les matrices singulières
+                min_reg = 1e-10 * norm(JTJ, Inf)
+                reg_JTJ = JTJ + min_reg * I(size(JTJ, 1))
             end
-            prev_residual_norm = residual_norm
-        end
-        
-        # Appliquer le pas avec facteur d'ajustement
-        displacements -= α * newton_step
             
+            # Résoudre le système avec méthode robuste
+            newton_step = zeros(n_markers)
+            try
+                newton_step = reg_JTJ \ (J' * F)
+            catch e
+                println("Matrix solver failed, using SVD as backup")
+                # Résolution par SVD comme fallback
+                F_svd = svd(Matrix(reg_JTJ))
+                svd_tol = eps(Float64) * max(size(reg_JTJ)...) * maximum(F_svd.S)
+                S_inv = [s > svd_tol ? 1/s : 0.0 for s in F_svd.S]
+                
+                # Calculer la solution pseudo-inverse
+                JTF = J' * F
+                newton_step = F_svd.V * (S_inv .* (F_svd.U' * JTF))
+            end
+            
+            # Calculer la norme de l'incrément de position
+            position_increment_norm = α * norm(newton_step)
+            push!(position_increment_history, position_increment_norm)
+            
+            # Pour Levenberg-Marquardt, ajuster lambda en fonction de la convergence
+            if uppercase(algorithm) == "LM" && iter > 1
+                residual_norm = norm(F)
+                if residual_norm < prev_residual_norm
+                    # Amélioration - réduire lambda
+                    lambda = max(lambda / lm_lambda_factor, lm_min_lambda)
+                    println("Residual improved: decreasing lambda to $lambda")
+                else
+                    # Dégradation - augmenter lambda
+                    lambda = min(lambda * lm_lambda_factor, lm_max_lambda)
+                    println("Residual worsened: increasing lambda to $lambda")
+                end
+                prev_residual_norm = residual_norm
+            end
+            
+            # Appliquer le pas avec facteur d'ajustement
+            displacements -= α * newton_step
+                
             # For closed curves, match first and last displacement to ensure continuity
             if front.is_closed
                 displacements[end] = displacements[1]
@@ -499,14 +791,6 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
             max_disp = maximum(abs.(displacements))
             println("Maximum displacement (after smoothing): $max_disp")
             
-            # Optional: Limit maximum displacement if needed
-            #max_allowed = min(mesh.nodes[1][2] - mesh.nodes[1][1], mesh.nodes[2][2] - mesh.nodes[2][1]) * 0.1
-           # if max_disp > max_allowed
-            #    scale = max_allowed / max_disp
-           #     displacements .*= scale
-           #     println("Scaling displacements by $scale to limit maximum displacement")
-            #end
-            
             # Calculate residual norm for convergence check
             residual_norm = norm(F)
             push!(residual_norm_history, residual_norm)
@@ -515,7 +799,7 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
             println("Iteration $iter | Residual = $residual_norm")
             
             # Check convergence
-            if residual_norm < tol || (iter > 1 && abs(residual_norm_history[end] - residual_norm_history[end-1]) < reltol)
+            if residual_norm < tol #|| (iter > 1 && abs(residual_norm_history[end] - residual_norm_history[end-1]) < reltol)
                 println("Converged after $iter iterations with residual $residual_norm and position increment $position_increment_norm")
                 break
             end
@@ -553,26 +837,47 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
                     println("⚠️ Warning: Interface irregularity detected ($(round(100*std_radius/mean_radius, digits=2))% variation)")
                 end
             end
-
-            # Plot the updated interface markers
-            fig = Figure()
-            ax = Axis(fig[1, 1], title="Updated Interface Markers (Iteration $iter)", 
-                      xlabel="x", ylabel="y", aspect=DataAspect())
-            marker_x = [m[1] for m in new_markers]
-            marker_y = [m[2] for m in new_markers]
-
-            # Draw the interface line
-            lines!(ax, marker_x, marker_y, color=:blue, linewidth=2,
-                  label="Updated Interface")
-            scatter!(ax, marker_x, marker_y, color=:red, markersize=6,
-                    label="Markers")
-
-            display(fig)
-
             
             # 6. Create updated front tracking object
             updated_front = FrontTracker(new_markers, front.is_closed)
             
+            # Create figure
+            fig = Figure(size=(800, 700))
+            ax = Axis(fig[1, 1], 
+                    title="Interface Position Update", 
+                    xlabel="x", 
+                    ylabel="y",
+                    aspect=DataAspect())
+            
+            # Extract coordinates from markers and new_markers
+            x_old = [m[1] for m in markers]
+            y_old = [m[2] for m in markers]
+            x_new = [m[1] for m in new_markers]
+            y_new = [m[2] for m in new_markers]
+            
+            # Plot old and new positions
+            lines!(ax, x_old, y_old, color=:blue, linewidth=2, label="Current Position")
+            lines!(ax, x_new, y_new, color=:red, linewidth=2, label="Updated Position")
+            
+            # Plot individual markers
+            scatter!(ax, x_old, y_old, color=:blue, markersize=4)
+            scatter!(ax, x_new, y_new, color=:red, markersize=4)
+            
+            # Connect old to new with arrows to show displacement
+            for i in 1:n_markers
+                arrows!([x_old[i]], [y_old[i]], [x_new[i]-x_old[i]], [y_new[i]-y_old[i]], 
+                        color=:black, arrowsize=10, linewidth=0.5)
+            end
+            
+            # Add legend
+            axislegend(ax, position=:rt)
+            
+            # Display or save the figure
+            display(fig)
+            
+            # Optional: Save the figure
+            save("marker_position_update.png", fig)
+
             # 7. Create space-time level set for capacity calculation
             function body(x, y, t_local, _=0)
                 # Normalized time in [0,1]
@@ -639,7 +944,10 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
         
         println("Time: $(round(t, digits=6))")
         println("Max temperature: $(maximum(abs.(s.x)))")
-        
+
+        # À la fin du pas de temps, après la résolution complète, stocker les déplacements
+        last_displacements = copy(displacements)
+    
         # Increment timestep counter
         timestep += 1
     end
