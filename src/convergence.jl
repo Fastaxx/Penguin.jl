@@ -343,3 +343,61 @@ function check_convergence_diph(u1_analytical::Function, u2_analytical::Function
         (empty_err1, empty_err2, empty_err)
     )
 end
+
+# Space-time convergence analysis for moving boundary problems
+function check_convergence_spacetime(u_analytical::Function, solver, capacity::Capacity, p::Real=2, relative::Bool=false)
+    # 1) Get space-time centroids (x,y,t)
+    cell_centroids = capacity.C_ω
+    cell_centroids = cell_centroids[1:end÷2]  
+    
+    # 2) Compute analytical solution at each space-time point
+    u_ana = zeros(length(cell_centroids))
+    
+    for i in 1:length(cell_centroids)
+        # Extract (x,y,t) coordinates from centroid
+        x = cell_centroids[i][1]
+        y = cell_centroids[i][2]
+        t = cell_centroids[i][3]  # Time coordinate
+        
+        # Evaluate analytical solution
+        u_ana[i] = u_analytical(x, y, t)
+    end
+    
+    # 3) Extract numerical solution from solver states
+    # For space-time, numerical solution is stored directly (not as time series)
+    u_num = solver.x[1:end÷2]  # First half contains solution 
+    
+    # 4) Compute pointwise errors
+    err = u_ana .- u_num
+    
+    # 5) Retrieve cell types and separate full, cut, empty
+    cell_types = capacity.cell_types
+    idx_all    = findall((cell_types .== 1) .| (cell_types .== -1))
+    idx_full   = findall(cell_types .== 1)
+    idx_cut    = findall(cell_types .== -1)
+    idx_empty  = findall(cell_types .== 0)
+    
+    # 6) Compute error norms
+    if relative
+        global_err = relative_lp_norm(err, idx_all, p, capacity, u_ana)
+        full_err   = relative_lp_norm(err, idx_full,  p, capacity, u_ana)
+        cut_err    = relative_lp_norm(err, idx_cut,   p, capacity, u_ana)
+       # empty_err  = relative_lp_norm(err, idx_empty, p, capacity, u_ana)
+    else
+        global_err = lp_norm(err, idx_all, p, capacity)
+        full_err   = lp_norm(err, idx_full,  p, capacity)
+        cut_err    = lp_norm(err, idx_cut,   p, capacity)
+#        empty_err  = lp_norm(err, idx_empty, p, capacity)
+    end
+    
+    # 7) Print results
+    println("Space-Time Mesh Error Analysis (L$p norm)")
+    println("----------------------------------------")
+    println("All cells error     = $global_err")
+    println("Full cells error    = $full_err")
+    println("Cut cells error     = $cut_err")
+#    println("Empty cells error   = $empty_err")
+    
+    # 8) Return all computed values for further analysis
+    return (u_ana, u_num, global_err, full_err, cut_err )
+end

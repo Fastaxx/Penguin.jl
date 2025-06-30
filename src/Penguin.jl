@@ -89,6 +89,10 @@ export MovingDiffusionUnsteadyMono, solve_MovingDiffusionUnsteadyMono!
 export MovingDiffusionUnsteadyDiph, solve_MovingDiffusionUnsteadyDiph!
 export A_mono_unstead_diff_moving, b_mono_unstead_diff_moving
 
+include("prescribedmotionsolver/advectiondiffusion.jl")
+export MovingAdvDiffusionUnsteadyMono, solve_MovingAdvDiffusionUnsteadyMono!
+export MovingAdvDiffusionUnsteadyDiph, solve_MovingAdvDiffusionUnsteadyDiph!
+
 include("liquidmotionsolver/diffusion.jl")
 export MovingLiquidDiffusionUnsteadyMono, solve_MovingLiquidDiffusionUnsteadyMono!
 export MovingLiquidDiffusionUnsteadyDiph, solve_MovingLiquidDiffusionUnsteadyDiph!
@@ -117,7 +121,7 @@ include("vizualize_mov.jl")
 export analyze_convergence_rates_newton, plot_timestep_history, plot_interface_evolution, plot_newton_residuals, analyze_interface_spectrum
 
 include("convergence.jl")
-export check_convergence, check_convergence_diph
+export check_convergence, check_convergence_diph, check_convergence_spacetime
 
 include("vtk.jl")
 export write_vtk

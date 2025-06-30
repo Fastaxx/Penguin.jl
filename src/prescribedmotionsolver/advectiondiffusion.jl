@@ -1,8 +1,8 @@
 # Moving - Diffusion - Unsteady - Monophasic
 """
-    MovingDiffusionUnsteadyMono(phase::Phase, bc_b::BorderConditions, bc_i::AbstractBoundary, Δt::Float64, Tᵢ::Vector{Float64}, scheme::String)
+    MovingAdvDiffusionUnsteadyMono(phase::Phase, bc_b::BorderConditions, bc_i::AbstractBoundary, Δt::Float64, Tᵢ::Vector{Float64}, scheme::String)
 
-Create a solver for the unsteady monophasic diffusion problem inside a moving body.
+Create a solver for the unsteady monophasic advection-diffusion problem inside a moving body.
 
 # Arguments
 - `phase::Phase`: The phase object containing the capacity and operator.
@@ -12,92 +12,27 @@ Create a solver for the unsteady monophasic diffusion problem inside a moving bo
 - `Tᵢ::Vector{Float64}`: The initial temperature field.
 - `scheme::String`: The time integration scheme. Either "CN" or "BE".
 """
-function MovingDiffusionUnsteadyMono(phase::Phase, bc_b::BorderConditions, bc_i::AbstractBoundary, Δt::Float64, Tᵢ::Vector{Float64}, mesh::AbstractMesh, scheme::String)
+function MovingAdvDiffusionUnsteadyMono(phase::Phase, bc_b::BorderConditions, bc_i::AbstractBoundary, Δt::Float64, Tᵢ::Vector{Float64}, mesh::AbstractMesh, scheme::String)
     println("Solver Creation:")
     println("- Moving problem")
     println("- Monophasic problem")
     println("- Unsteady problem")
-    println("- Diffusion problem")
+    println("- Advection-Diffusion problem")
     
-    s = Solver(Unsteady, Monophasic, Diffusion, nothing, nothing, nothing, ConvergenceHistory(), [])
+    s = Solver(Unsteady, Monophasic, DiffusionAdvection, nothing, nothing, nothing, ConvergenceHistory(), [])
     
     if scheme == "CN"
-        s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, "CN")
-        s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc_i, Tᵢ, Δt, 0.0, "CN")
+        s.A = A_mono_unstead_advdiff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, "CN")
+        s.b = b_mono_unstead_advdiff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc_i, Tᵢ, Δt, 0.0, "CN")
     else # BE
-        s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, "BE")
-        s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc_i, Tᵢ, Δt, 0.0, "BE")
+        s.A = A_mono_unstead_advdiff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, "BE")
+        s.b = b_mono_unstead_advdiff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc_i, Tᵢ, Δt, 0.0, "BE")
     end
     BC_border_mono!(s.A, s.b, bc_b, mesh)
     return s
 end
 
-# Helper function to compute bulk value in a space time mesh
-"""
-function psip_cn(args::Vararg{T,2}) where {T<:Real}
-    if all(iszero, args)
-        0.0
-    elseif all(!iszero, args)
-        0.5
-    else
-        0.5
-    end
-end
-
-function psim_cn(args::Vararg{T,2}) where {T<:Real}
-    if all(iszero, args)
-        0.0
-    elseif all(!iszero, args)
-        0.5
-    else
-        0.5
-    end
-end
-"""
-
-function psip_cn(args::Vararg{T,2}) where {T<:Real}
-    if all(iszero, args)
-        0.0
-    elseif all(!iszero, args)
-        0.5
-    elseif iszero(args[1]) && !iszero(args[2])
-        0.5
-    elseif !iszero(args[1]) && iszero(args[2])
-        1.0
-    else
-        0.0
-    end        
-end
-
-function psim_cn(args::Vararg{T,2}) where {T<:Real}
-    if all(iszero, args)
-        0.0
-    elseif all(!iszero, args)
-        0.5
-    elseif iszero(args[1]) && !iszero(args[2]) # Fresh
-        0.5
-    elseif !iszero(args[1]) && iszero(args[2]) # Dead
-        0.0
-    else
-        0.0
-    end
-end
-
-function psip_be(args::Vararg{T,2}) where {T<:Real}
-    if all(iszero, args)
-        0.0
-    elseif all(!iszero, args)
-        1.0
-    else
-        1.0
-    end
-end
-
-function psim_be(args::Vararg{T,2}) where {T<:Real}
-    0.0
-end
-
-function A_mono_unstead_diff_moving(operator::DiffusionOps, capacity::Capacity, D, bc::AbstractBoundary, scheme::String)
+function A_mono_unstead_advdiff_moving(operator::ConvectionOps, capacity::Capacity, D, bc::AbstractBoundary, scheme::String)
     # Determine dimension (1D vs 2D) from operator.size
     dims = operator.size
     len_dims = length(dims)
@@ -124,6 +59,12 @@ function A_mono_unstead_diff_moving(operator::DiffusionOps, capacity::Capacity, 
     Iᵧ     = capacity.Γ
     Id     = build_I_D(operator, D, capacity)
 
+    C = operator.C
+    K = operator.K
+
+    C = C[1][1:end÷2, 1:end÷2], C[2][end÷2+1:end, end÷2+1:end], C[3][1:end÷2, end÷2+1:end]
+    K = K[1][1:end÷2, 1:end÷2], K[2][end÷2+1:end, end÷2+1:end], K[3][1:end÷2, end÷2+1:end]
+
     # Adjust for dimension
     if len_dims == 2
         # 1D problem
@@ -146,15 +87,15 @@ function A_mono_unstead_diff_moving(operator::DiffusionOps, capacity::Capacity, 
     Id  = Id[1:end÷2, 1:end÷2]
 
     # Construct subblocks
-    block1 = Vn_1 + Id * G' * W! * G * Ψn1
-    block2 = -(Vn_1 - Vn) + Id * G' * W! * H * Ψn1
+    block1 = Vn_1 + Id * G' * W! * G * Ψn1 + (sum(C) + 0.5 * sum(K)) * Ψn1
+    block2 = -(Vn_1 - Vn) + Id * G' * W! * H * Ψn1 + 0.5 * sum(K) * Ψn1
     block3 = Iᵦ * H' * W! * G
     block4 = Iᵦ * H' * W! * H + (Iₐ * Iᵧ)
 
     return [block1 block2; block3 block4]
 end
 
-function b_mono_unstead_diff_moving(operator::DiffusionOps, capacity::Capacity, D, f::Function, bc::AbstractBoundary, Tᵢ::Vector{Float64}, Δt::Float64, t::Float64, scheme::String)
+function b_mono_unstead_advdiff_moving(operator::ConvectionOps, capacity::Capacity, D, f::Function, bc::AbstractBoundary, Tᵢ::Vector{Float64}, Δt::Float64, t::Float64, scheme::String)
     # Determine how many dimensions
     dims = operator.size
     len_dims = length(dims)
@@ -177,6 +118,12 @@ function b_mono_unstead_diff_moving(operator::DiffusionOps, capacity::Capacity, 
         psip, psim = psip_be, psim_be
     end
     Ψn = Diagonal(psim.(Vn, Vn_1))
+
+    C = operator.C
+    K = operator.K
+
+    C = C[1][1:end÷2, 1:end÷2], C[2][end÷2+1:end, end÷2+1:end], C[3][1:end÷2, end÷2+1:end]
+    K = K[1][1:end÷2, 1:end÷2], K[2][end÷2+1:end, end÷2+1:end], K[3][1:end÷2, end÷2+1:end]
 
     # Create the 1D or 2D indices
     if len_dims == 2
@@ -206,7 +153,7 @@ function b_mono_unstead_diff_moving(operator::DiffusionOps, capacity::Capacity, 
 
     # Construct the right-hand side
     if scheme == "CN"
-        b1 = (Vn - Id * G' * W! * G * Ψn)*Tₒ - 0.5 * Id * G' * W! * H * Tᵧ + 0.5 * V * (fₒn + fₒn1)
+        b1 = (Vn - Id * G' * W! * G * Ψn)*Tₒ - 0.5 * Id * G' * W! * H * Tᵧ + 0.5 * V * (fₒn + fₒn1) - sum(C) * Ψn * Tₒ - 0.5 * sum(K) * Ψn * Tₒ - 0.5 * sum(K) * Tᵧ
     else
         b1 = Vn * Tₒ + V * fₒn1
     end
@@ -215,7 +162,7 @@ function b_mono_unstead_diff_moving(operator::DiffusionOps, capacity::Capacity, 
     return [b1; b2]
 end
 
-function solve_MovingDiffusionUnsteadyMono!(s::Solver, phase::Phase, body::Function, Δt::Float64, Tₛ::Float64, Tₑ::Float64, bc_b::BorderConditions, bc::AbstractBoundary, mesh::AbstractMesh, scheme::String; method = IterativeSolvers.gmres, kwargs...)
+function solve_MovingAdvDiffusionUnsteadyMono!(s::Solver, phase::Phase, body::Function, Δt::Float64, Tₛ::Float64, Tₑ::Float64, bc_b::BorderConditions, bc::AbstractBoundary, mesh::AbstractMesh, scheme::String, uₒ, uᵧ; method = IterativeSolvers.gmres, kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
@@ -224,7 +171,7 @@ function solve_MovingDiffusionUnsteadyMono!(s::Solver, phase::Phase, body::Funct
     println("- Moving problem")
     println("- Monophasic problem")
     println("- Unsteady problem")
-    println("- Diffusion problem")
+    println("- Advection-Diffusion problem")
 
     # Solve system for the initial condition
     t=Tₛ
@@ -241,10 +188,10 @@ function solve_MovingDiffusionUnsteadyMono!(s::Solver, phase::Phase, body::Funct
         println("Time : $(t)")
         STmesh = Penguin.SpaceTimeMesh(mesh, [t, t+Δt], tag=mesh.tag)
         capacity = Capacity(body, STmesh; compute_centroids=true)
-        operator = DiffusionOps(capacity)
+        operator = ConvectionOps(capacity, uₒ, uᵧ)
 
-        s.A = A_mono_unstead_diff_moving(operator, capacity, phase.Diffusion_coeff, bc, scheme)
-        s.b = b_mono_unstead_diff_moving(operator, capacity, phase.Diffusion_coeff, phase.source, bc, Tᵢ, Δt, t, scheme)
+        s.A = A_mono_unstead_advdiff_moving(operator, capacity, phase.Diffusion_coeff, bc, scheme)
+        s.b = b_mono_unstead_advdiff_moving(operator, capacity, phase.Diffusion_coeff, phase.source, bc, Tᵢ, Δt, t, scheme)
 
         BC_border_mono!(s.A, s.b, bc_b, mesh)  
 
@@ -259,28 +206,28 @@ function solve_MovingDiffusionUnsteadyMono!(s::Solver, phase::Phase, body::Funct
 end
 
 
-# Moving - Diffusion - Unsteady - Diphasic
-function MovingDiffusionUnsteadyDiph(phase1::Phase, phase2::Phase, bc_b::BorderConditions, ic::InterfaceConditions, Δt::Float64, Tᵢ::Vector{Float64}, mesh::AbstractMesh, scheme::String)
+# Moving - Diffusion - Unsteady - Diphasic
+function MovingAdvDiffusionUnsteadyDiph(phase1::Phase, phase2::Phase, bc_b::BorderConditions, ic::InterfaceConditions, Δt::Float64, Tᵢ::Vector{Float64}, mesh::AbstractMesh, scheme::String)
     println("Solver Creation:")
     println("- Moving problem")
     println("- Diphasic problem")
     println("- Unsteady problem")
-    println("- Diffusion problem")
+    println("- Advection-Diffusion problem")
     
-    s = Solver(Unsteady, Diphasic, Diffusion, nothing, nothing, nothing, ConvergenceHistory(), [])
+    s = Solver(Unsteady, Diphasic, DiffusionAdvection, nothing, nothing, nothing, ConvergenceHistory(), [])
     
     if scheme == "CN"
-        s.A = A_diph_unstead_diff_moving(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, "CN")
-        s.b = b_diph_unstead_diff_moving(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, phase1.source, phase2.source, ic, Tᵢ, Δt, 0.0, "CN")
+        s.A = A_diph_unstead_advdiff_moving(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, "CN")
+        s.b = b_diph_unstead_advdiff_moving(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, phase1.source, phase2.source, ic, Tᵢ, Δt, 0.0, "CN")
     else 
-        s.A = A_diph_unstead_diff_moving(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, "BE")
-        s.b = b_diph_unstead_diff_moving(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, phase1.source, phase2.source, ic, Tᵢ, Δt, 0.0, "BE")
+        s.A = A_diph_unstead_advdiff_moving(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, "BE")
+        s.b = b_diph_unstead_advdiff_moving(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, phase1.source, phase2.source, ic, Tᵢ, Δt, 0.0, "BE")
     end
     BC_border_diph!(s.A, s.b, bc_b, mesh)
     return s
 end
 
-function A_diph_unstead_diff_moving(operator1::DiffusionOps, operator2::DiffusionOps, capacite1::Capacity, capacite2::Capacity, D1, D2, ic::InterfaceConditions, scheme::String)
+function A_diph_unstead_advdiff_moving(operator1::ConvectionOps, operator2::ConvectionOps, capacite1::Capacity, capacite2::Capacity, D1, D2, ic::InterfaceConditions, scheme::String)
     # Determine dimensionality from operator1
     dims1 = operator1.size
     dims2 = operator2.size
@@ -325,6 +272,16 @@ function A_diph_unstead_diff_moving(operator1::DiffusionOps, operator2::Diffusio
     Vn2_1 = capacite2.A[cap_index2][1:end÷2, 1:end÷2]
     Vn2   = capacite2.A[cap_index2][end÷2+1:end, end÷2+1:end]
 
+    C1 = operator1.C
+    K1 = operator1.K
+    C2 = operator2.C
+    K2 = operator2.K
+
+    C1 = C1[1][1:end÷2, 1:end÷2], C1[2][end÷2+1:end, end÷2+1:end], C1[3][1:end÷2, end÷2+1:end]
+    K1 = K1[1][1:end÷2, 1:end÷2], K1[2][end÷2+1:end, end÷2+1:end], K1[3][1:end÷2, end÷2+1:end]
+    C2 = C2[1][1:end÷2, 1:end÷2], C2[2][end÷2+1:end, end÷2+1:end], C2[3][1:end÷2, end÷2+1:end]
+    K2 = K2[1][1:end÷2, 1:end÷2], K2[2][end÷2+1:end, end÷2+1:end], K2[3][1:end÷2, end÷2+1:end]
+
 
     # Time integration weighting
     if scheme == "CN"
@@ -357,10 +314,10 @@ function A_diph_unstead_diff_moving(operator1::DiffusionOps, operator2::Diffusio
     Id2  = Id2[1:end÷2, 1:end÷2]
 
     # Construct blocks
-    block1 = Vn1_1 + Id1 * G1' * W!1 * G1 * Ψn1
-    block2 = -(Vn1_1 - Vn1) + Id1 * G1' * W!1 * H1 * Ψn1
-    block3 = Vn2_1 + Id2 * G2' * W!2 * G2 * Ψn2
-    block4 = -(Vn2_1 - Vn2) + Id2 * G2' * W!2 * H2 * Ψn2
+    block1 = Vn1_1 + Id1 * G1' * W!1 * G1 * Ψn1 + (sum(C1) + 0.5 * sum(K1)) * Ψn1
+    block2 = -(Vn1_1 - Vn1) + Id1 * G1' * W!1 * H1 * Ψn1 + 0.5 * sum(K1) * Ψn1
+    block3 = Vn2_1 + Id2 * G2' * W!2 * G2 * Ψn2 + (sum(C2) + 0.5 * sum(K2)) * Ψn2
+    block4 = -(Vn2_1 - Vn2) + Id2 * G2' * W!2 * H2 * Ψn2 + 0.5 * sum(K2) * Ψn2
 
     block5 = Iᵦ1 * H1' * W!1 * G1 * Ψn1
     block6 = Iᵦ1 * H1' * W!1 * H1 * Ψn1
@@ -388,7 +345,7 @@ function A_diph_unstead_diff_moving(operator1::DiffusionOps, operator2::Diffusio
     return A
 end
 
-function b_diph_unstead_diff_moving(operator1::DiffusionOps, operator2::DiffusionOps, capacity1::Capacity, capacity2::Capacity, D1, D2, f1::Function, f2::Function, ic::InterfaceConditions, Tᵢ::Vector{Float64}, Δt::Float64, t::Float64, scheme::String)
+function b_diph_unstead_advdiff_moving(operator1::ConvectionOps, operator2::ConvectionOps, capacity1::Capacity, capacity2::Capacity, D1, D2, f1::Function, f2::Function, ic::InterfaceConditions, Tᵢ::Vector{Float64}, Δt::Float64, t::Float64, scheme::String)
     # 1) Determine total degrees of freedom for each operator
     dims1 = operator1.size
     dims2 = operator2.size
@@ -429,6 +386,17 @@ function b_diph_unstead_diff_moving(operator1::DiffusionOps, operator2::Diffusio
     end
     Ψn1 = Diagonal(psim.(Vn1, Vn1_1))
     Ψn2 = Diagonal(psim.(Vn2, Vn2_1))
+
+    C1 = operator1.C
+    K1 = operator1.K
+    C2 = operator2.C
+    K2 = operator2.K
+
+    C1 = C1[1][1:end÷2, 1:end÷2], C1[2][end÷2+1:end, end÷2+1:end], C1[3][1:end÷2, end÷2+1:end]
+    K1 = K1[1][1:end÷2, 1:end÷2], K1[2][end÷2+1:end, end÷2+1:end], K1[3][1:end÷2, end÷2+1:end]
+    C2 = C2[1][1:end÷2, 1:end÷2], C2[2][end÷2+1:end, end÷2+1:end], C2[3][1:end÷2, end÷2+1:end]
+    K2 = K2[1][1:end÷2, 1:end÷2], K2[2][end÷2+1:end, end÷2+1:end], K2[3][1:end÷2, end÷2+1:end]
+
 
     # 7) Determine whether 1D or 2D from dims1, and form local n for sub-blocks
     if len_dims1 == 2
@@ -476,8 +444,8 @@ function b_diph_unstead_diff_moving(operator1::DiffusionOps, operator2::Diffusio
 
     # 9) Build the right-hand side
     if scheme == "CN"
-        b1 = (Vn1 - Id1 * G1' * W!1 * G1 * Ψn1) * Tₒ1 - 0.5 * Id1 * G1' * W!1 * H1 * Tᵧ1 + 0.5 * V1 * (f1ₒn + f1ₒn1)
-        b3 = (Vn2 - Id2 * G2' * W!2 * G2 * Ψn2) * Tₒ2 - 0.5 * Id2 * G2' * W!2 * H2 * Tᵧ2 + 0.5 * V2 * (f2ₒn + f2ₒn1)
+        b1 = (Vn1 - Id1 * G1' * W!1 * G1 * Ψn1) * Tₒ1 - 0.5 * Id1 * G1' * W!1 * H1 * Tᵧ1 + 0.5 * V1 * (f1ₒn + f1ₒn1) - sum(C1) * Ψn1 * Tₒ1 - 0.5 * sum(K1) * Ψn1 * Tₒ1 - 0.5 * sum(K1) * Tᵧ1
+        b3 = (Vn2 - Id2 * G2' * W!2 * G2 * Ψn2) * Tₒ2 - 0.5 * Id2 * G2' * W!2 * H2 * Tᵧ2 + 0.5 * V2 * (f2ₒn + f2ₒn1) - sum(C2) * Ψn2 * Tₒ2 - 0.5 * sum(K2) * Ψn2 * Tₒ2 - 0.5 * sum(K2) * Tᵧ2
     else
         b1 = Vn1 * Tₒ1 + V1 * f1ₒn1
         b3 = Vn2 * Tₒ2 + V2 * f2ₒn1
@@ -492,7 +460,7 @@ function b_diph_unstead_diff_moving(operator1::DiffusionOps, operator2::Diffusio
 end
 
 
-function solve_MovingDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phase2::Phase, body::Function, body_c::Function, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, ic::InterfaceConditions, mesh::AbstractMesh, scheme::String; method = IterativeSolvers.gmres, kwargs...)
+function solve_MovingAdvDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phase2::Phase, body::Function, body_c::Function, Δt::Float64, Tₛ::Float64, Tₑ::Float64, bc_b::BorderConditions, ic::InterfaceConditions, mesh::AbstractMesh, scheme::String, uₒ, uᵧ; method = IterativeSolvers.gmres, kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
@@ -504,7 +472,7 @@ function solve_MovingDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phase2::Ph
     println("- Diffusion problem")
 
     # Solve system for the initial condition
-    t=0.0
+    t=Tₛ
     println("Time : $(t)")
     solve_system!(s; method, kwargs...)
 
@@ -519,11 +487,11 @@ function solve_MovingDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phase2::Ph
         STmesh = Penguin.SpaceTimeMesh(mesh, [t, t+Δt], tag=mesh.tag)
         capacity1 = Capacity(body, STmesh)
         capacity2 = Capacity(body_c, STmesh)
-        operator1 = DiffusionOps(capacity1)
-        operator2 = DiffusionOps(capacity2)
+        operator1 = ConvectionOps(capacity1, uₒ, uᵧ)
+        operator2 = ConvectionOps(capacity2, uₒ, uᵧ)
 
-        s.A = A_diph_unstead_diff_moving(operator1, operator2, capacity1, capacity2, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, scheme)
-        s.b = b_diph_unstead_diff_moving(operator1, operator2, capacity1, capacity2, phase1.Diffusion_coeff, phase2.Diffusion_coeff, phase1.source, phase2.source, ic, Tᵢ, Δt, t, scheme)
+        s.A = A_diph_unstead_advdiff_moving(operator1, operator2, capacity1, capacity2, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, scheme)
+        s.b = b_diph_unstead_advdiff_moving(operator1, operator2, capacity1, capacity2, phase1.Diffusion_coeff, phase2.Diffusion_coeff, phase1.source, phase2.source, ic, Tᵢ, Δt, t, scheme)
 
         BC_border_diph!(s.A, s.b, bc_b, mesh)
 
