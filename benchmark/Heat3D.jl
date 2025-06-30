@@ -6,17 +6,20 @@ using Roots
 using CSV, DataFrames
 using Dates
 using Printf
+using Statistics
 
 function run_mesh_convergence(
     nx_list::Vector{Int},
     ny_list::Vector{Int},
+    nz_list::Vector{Int},
     radius::Float64,
-    center::Tuple{Float64,Float64},
+    center::Tuple{Float64,Float64,Float64},
     u_analytical::Function;
     lx::Float64=4.0,
     ly::Float64=4.0,
+    lz::Float64=4.0,
     norm,
-    output_dir::String="heat_convergence_results"
+    output_dir::String="heat3D_convergence_results"
 )
     # Create output directory if it doesn't exist
     mkpath(output_dir)
@@ -32,23 +35,25 @@ function run_mesh_convergence(
     err_cut_vals = Float64[]
     err_empty_vals = Float64[]
 
-    for (i, (nx, ny)) in enumerate(zip(nx_list, ny_list))
-        println("Running mesh test $i of $(length(nx_list)): nx=$nx, ny=$ny")
+    for (i, (nx, ny, nz)) in enumerate(zip(nx_list, ny_list, nz_list))
+        println("Running mesh test $i of $(length(nx_list)): nx=$nx, ny=$ny, nz=$nz")
         
         # Build mesh
-        x0, y0 = 0.0, 0.0
-        mesh = Penguin.Mesh((nx, ny), (lx, ly), (x0, y0))
+        x0, y0, z0 = 0.0, 0.0, 0.0
+        mesh = Penguin.Mesh((nx, ny, nz), (lx, ly, lz), (x0, y0, z0))
 
         # Define the body
-        circle = (x,y,_=0) -> (sqrt((x-center[1])^2 + (y-center[2])^2) - radius)
+        circle = (x,y,z) -> (
+            sqrt((x - center[1])^2 + (y - center[2])^2 + (z - center[3])^2) - radius
+        )
             
         # Define capacity/operator
         capacity = Capacity(circle, mesh)
         operator = DiffusionOps(capacity)
 
         # BC + solver
-        bc_boundary = Robin(3.0,1.0,3.0*400)
-        bc0 = Dirichlet(400.0)
+        bc_boundary = Dirichlet(1.0)  # Homogeneous Dirichlet on domain boundaries
+        bc0 = Dirichlet(1.0)
         bc_b = BorderConditions(Dict(
             :left   => bc0,
             :right  => bc0,
@@ -57,23 +62,24 @@ function run_mesh_convergence(
         ))
         phase = Phase(capacity, operator, (x,y,z,t)->0.0, (x,y,z)->1.0)
 
-        u0ₒ = ones((nx+1)*(ny+1)) * 270.0
-        u0ᵧ = zeros((nx+1)*(ny+1)) * 270.0
+        u0ₒ = zeros((nx+1)*(ny+1)*(nz+1)) * 1.0
+        u0ᵧ = zeros((nx+1)*(ny+1)*(nz+1)) * 1.0
         u0 = vcat(u0ₒ, u0ᵧ)
 
-        Δt = 0.25*(lx/nx)^2
+        Δt = 0.75*(lx/nx)^2
         Tend = 0.1
 
         solver = DiffusionUnsteadyMono(phase, bc_b, bc_boundary, Δt, u0, "BE") # Start by a backward Euler scheme
 
         solve_DiffusionUnsteadyMono!(solver, phase, Δt, Tend, bc_b, bc_boundary, "CN"; method=Base.:\)
+        write_vtk("heat_3d", mesh, solver)
 
         # Compute errors
         u_ana, u_num, global_err, full_err, cut_err, empty_err =
             check_convergence(u_analytical, solver, capacity, norm)
 
-        # Representative mesh size ~ 1 / min(nx, ny)
-        h = 1.0 / min(nx, ny)
+        # Representative mesh size ~ 1 / min(nx, ny, nz)
+        h = 1.0 / min(nx, ny, nz)
         push!(h_vals, h)
         push!(err_vals, global_err)
         push!(err_full_vals, full_err)
@@ -85,6 +91,7 @@ function run_mesh_convergence(
             mesh_size = h,
             nx = nx,
             ny = ny,
+            nz = nz,
             global_error = global_err,
             full_error = full_err,
             cut_error = cut_err,
@@ -92,7 +99,7 @@ function run_mesh_convergence(
         )
         
         # Use formatted nx/ny in filename for easier reading
-        test_filename = @sprintf("mesh_%04dx%04d.csv", nx, ny)
+        test_filename = @sprintf("mesh_%04dx%04dx%04d.csv", nx, ny, nz)
         test_filepath = joinpath(run_dir, test_filename)
         CSV.write(test_filepath, test_df)
         println("  Saved result to $(test_filepath)")
@@ -129,6 +136,7 @@ function run_mesh_convergence(
         mesh_size = h_vals,
         nx = nx_list,
         ny = ny_list,
+        nz = nz_list,
         global_error = err_vals,
         full_error = err_full_vals,
         cut_error = err_cut_vals,
@@ -192,51 +200,72 @@ function run_mesh_convergence(
 end
 
 # Example usage:
-nx_list = [20, 40, 80, 160, 320]
-ny_list = [20, 40, 80, 160, 320]
-radius, center = 1.0, (2.01, 2.01)
-function radial_heat_(x, y)
-    t=0.1
-    R=1.0
-    k=3.0
-    a=1.0
-
-    function j0_zeros_robin(N, k, R; guess_shift = 0.25)
-        # Define the function for alpha J1(alpha) - k R J0(alpha) = 0
-        eq(alpha) = alpha * besselj1(alpha) - k * R * besselj0(alpha)
+nx_list = [10, 20, 30, 40, 50, 60, 70]
+ny_list = [10, 20, 30, 40, 50, 60, 70]
+nz_list = [10, 20, 30, 40, 50, 60, 70]
+radius, center = 1.0, (2.01, 2.01, 2.01)
+function heat3d_analytical(x, y, z, t, center, radius, D, T0, Tb)
+    # Calculate radial distance from center
+    r = sqrt((x - center[1])^2 + (y - center[2])^2 + (z - center[3])^2)
     
-        zs = zeros(Float64, N)
-        for m in 1:N
-            # Approximate location around (m - guess_shift)*π
-            x_left  = (m - guess_shift - 0.5) * π
-            x_right = (m - guess_shift + 0.5) * π
-            x_left  = max(x_left, 1e-6)  # Ensure bracket is positive
-            zs[m]   = find_zero(eq, (x_left, x_right))
+    # Return boundary temperature if outside or on the sphere
+    if r >= radius
+        return Tb
+    end
+    
+    # For numerical stability, avoid r=0 (center of sphere)
+    if r < 1e-10
+        # At center, all sin(πnr/R) terms become 0 except as r→0, 
+        # use L'Hôpital's rule: sin(πnr/R)/(πr/R) → 1 as r→0
+        # This gives 2∑(-1)^(n+1)exp(-Dπ²n²t/R²) at r=0
+        sum_val = 0.0
+        max_terms = 20
+        for n in 1:max_terms
+            term = ((-1)^(n+1)) * exp(-D * π^2 * n^2 * t / radius^2)
+            sum_val += term
+            if abs(term) < 1e-10
+                break
+            end
         end
-        return zs
-    end
-
-    alphas = j0_zeros_robin(1000, k, R)
-    N=length(alphas)
-    r = sqrt((x - center[1])^2 + (y - center[2])^2)
-    if r >= R
-        # Not physically in the domain, so return NaN or handle as you wish.
-        return NaN
+        return Tb + (T0 - Tb) * 2 * sum_val
     end
     
-    # If in the disk: sum the series
-    s = 0.0
-    for m in 1:N
-        αm = alphas[m]
-        An = 2.0 * k * R / ((k^2 * R^2 + αm^2) * besselj0(αm))
-        s += An * exp(- a * αm^2 * t/R^2) * besselj0(αm * (r / R))
+    # Normal calculation for 0 < r < R
+    max_terms = 20
+    sum_val = 0.0
+    
+    for n in 1:max_terms
+        # Calculate term in the series
+        term = ((-1)^(n+1)) / n * sin(π * n * r / radius) * exp(-D * π^2 * n^2 * t / radius^2)
+        sum_val += term
+        
+        # Early stopping if terms become very small
+        if abs(term) < 1e-10
+            break
+        end
     end
-    return (1.0 - s) * (400 - 270) + 270
+    
+    # Complete analytical solution
+    T = Tb + (T0 - Tb) * (2 * radius / (π * r)) * sum_val
+    
+    return T
 end
 
-# Run with organized output directory
-#output_dir = "heat_convergence_results"
-#run_mesh_convergence(nx_list, ny_list, radius, center, radial_heat_, norm=2, output_dir=output_dir)
+
+# Example parameters
+center = (2.0, 2.0, 2.0)  # center of sphere
+radius = 1.0              # radius of sphere
+D = 1.0                   # thermal diffusivity
+T0 = 0.0                # initial temperature
+Tb = 1.0                # boundary temperature
+t = 0.1                   # time
+
+# Function to pass to the convergence analysis
+u_analytical(x, y, z) = heat3d_analytical(x, y, z, t, center, radius, D, T0, Tb)
+
+# Run the benchmark
+output_dir = "heat3D_convergence_results"
+#run_mesh_convergence(nx_list, ny_list, nz_list, radius, center, u_analytical, norm=Inf; output_dir=output_dir)
 
 function plot_convergence_results(
     h_vals::Vector{Float64},
@@ -259,7 +288,7 @@ function plot_convergence_results(
     ax = Axis(
         fig[1, 1],
         xlabel = "Mesh size (h)",
-        ylabel = "Relative Error (L₂ norm)",
+        ylabel = "Relative Error (L∞ norm)",
         xscale = log10,
         yscale = log10,
         xminorticksvisible = true,
@@ -269,7 +298,7 @@ function plot_convergence_results(
         xminorticks = IntervalsBetween(10),
         yminorticks = IntervalsBetween(10),
         xticks = LogTicks(WilkinsonTicks(5)),
-        yticks = LogTicks(WilkinsonTicks(5)),
+        yticks = LogTicks(WilkinsonTicks(3)),
     )
 
     # Calculate fit lines
@@ -279,7 +308,31 @@ function plot_convergence_results(
     function compute_last3_rate(h_data, err_data)
         # Get last 3 points (or fewer if not enough data)
         n = length(h_data)
-        idx_start = max(1, n-2)
+        idx_start =  max(1, n-5)
+        last_h = h_data[idx_start:n]
+        last_err = err_data[idx_start:n]
+        
+        # Compute rate using linear regression on log-log data
+        log_h = log.(last_h)
+        log_err = log.(last_err)
+        
+        # Simple linear regression slope formula: slope = cov(x,y)/var(x)
+        if length(log_h) > 1
+            h_mean = mean(log_h)
+            err_mean = mean(log_err)
+            numerator = sum((log_h .- h_mean) .* (log_err .- err_mean))
+            denominator = sum((log_h .- h_mean).^2)
+            rate = numerator / denominator
+            return round(rate, digits=2)
+        else
+            return p_global  # Fall back to original if not enough points
+        end
+    end
+
+    function compute_lastcut_rate(h_data, err_data)
+        # Get last 3 points (or fewer if not enough data)
+        n = length(h_data)
+        idx_start = max(1, n-0)
         last_h = h_data[idx_start:n]
         last_err = err_data[idx_start:n]
         
@@ -303,7 +356,7 @@ function plot_convergence_results(
     # Calculate last 3 point rates
     last3_p_global = compute_last3_rate(h_vals, err_vals)
     last3_p_full = compute_last3_rate(h_vals, err_full_vals)
-    last3_p_cut = compute_last3_rate(h_vals, err_cut_vals)
+    last3_p_cut = compute_lastcut_rate(h_vals, err_cut_vals)
     
     # Function to compute power law curve from order and data
     function power_fit(h, p, h_data, err_data)
@@ -366,6 +419,65 @@ function plot_convergence_results(
     save(save_path, fig, pt_per_unit=1)
     
     return fig
+end
+
+function load_convergence_results(dir_path::String="heat3D_convergence_results")
+    # Check if directory exists
+    if !isdir(dir_path)
+        error("Directory $dir_path does not exist")
+    end
+    
+    # Find all run directories (they're timestamps)
+    run_dirs = filter(d -> isdir(joinpath(dir_path, d)), readdir(dir_path))
+    
+    if isempty(run_dirs)
+        error("No run directories found in $dir_path")
+    end
+    
+    # Sort by timestamp to get the most recent one
+    sort!(run_dirs)
+    latest_run = run_dirs[end]
+    
+    # Construct path to the latest run
+    run_path = joinpath(dir_path, latest_run)
+    
+    # Check for summary file
+    summary_file = joinpath(run_path, "summary.csv")
+    rates_file = joinpath(run_path, "convergence_rates.csv")
+    
+    if !isfile(summary_file) || !isfile(rates_file)
+        error("Missing summary.csv or convergence_rates.csv in $run_path")
+    end
+    
+    # Load the data
+    df = CSV.read(summary_file, DataFrame)
+    rates_df = CSV.read(rates_file, DataFrame)
+    
+    # Extract values
+    h_vals = df.mesh_size
+    
+    # Global, full, cut and empty errors
+    err_vals = df.global_error
+    err_full_vals = df.full_error
+    err_cut_vals = df.cut_error
+    err_empty_vals = df.empty_error
+    
+    # Extract rates
+    p_global = rates_df[rates_df.parameter .== "p_global", :value][1]
+    p_full = rates_df[rates_df.parameter .== "p_full", :value][1]
+    p_cut = rates_df[rates_df.parameter .== "p_cut", :value][1]
+    
+    return (
+        h_vals,
+        err_vals,
+        err_full_vals,
+        err_cut_vals,
+        err_empty_vals,
+        p_global,
+        p_full,
+        p_cut,
+        run_path
+    )
 end
 
 # Load from the most recent run

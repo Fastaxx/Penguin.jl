@@ -3,8 +3,10 @@ using IterativeSolvers
 using CairoMakie
 using SpecialFunctions
 using Roots
-using DelimitedFiles
+using CSV, DataFrames  # Replace DelimitedFiles with CSV and DataFrames
+using Dates
 using Printf
+using Statistics
 
 """
 Run mesh convergence study for diphasic heat transfer problem
@@ -22,10 +24,20 @@ function run_diphasic_mesh_convergence(
     D2::Float64=1.0,
     norm::Real=2,
     relative::Bool=false,
-    npts::Int=3
+    npts::Int=3,
+    output_dir::String="diphasic_heat_convergence_results"
 )
+    # Create output directory if it doesn't exist
+    mkpath(output_dir)
+    
+    # Create a timestamp for this run
+    timestamp = Dates.format(now(), "yyyy-mm-dd_HH-MM-SS")
+    run_dir = joinpath(output_dir, timestamp)
+    mkpath(run_dir)
+    
     # Initialize storage arrays
     h_vals = Float64[]
+    dt_vals = Float64[] # To track dt values
     
     # Global errors (all cells)
     err1_vals = Float64[]  # Phase 1
@@ -41,6 +53,13 @@ function run_diphasic_mesh_convergence(
     err1_cut_vals = Float64[]  # Phase 1
     err2_cut_vals = Float64[]  # Phase 2
     err_cut_combined_vals = Float64[]  # Combined phases
+
+    # Save test configuration
+    config_df = DataFrame(
+        parameter = ["lx", "x0", "xint", "Tend", "He", "D1", "D2", "norm", "relative"],
+        value = [lx, x0, xint, Tend, He, D1, D2, norm, relative]
+    )
+    CSV.write(joinpath(run_dir, "config.csv"), config_df)
 
     # For each mesh resolution
     for nx in nx_list
@@ -91,6 +110,7 @@ function run_diphasic_mesh_convergence(
         
         # Time step based on mesh size
         Δt = 0.5 * (lx/nx)^2
+        push!(dt_vals, Δt)
         
         # Define the solver
         solver = DiffusionUnsteadyDiph(Fluide_1, Fluide_2, bc_b, ic, Δt, u0, "CN")
@@ -125,53 +145,27 @@ function run_diphasic_mesh_convergence(
         push!(err2_cut_vals, err2_cut)
         push!(err_cut_combined_vals, err_cut_combined)
         
-        # For the largest mesh, save a plot of the solution and error
-        if nx == maximum(nx_list)
-            # Create x coordinates
-            x = range(x0, stop = lx, length = nx+1)
-            
-            # Extract solutions
-            (u1_ana, u2_ana) = ana_sols
-            (u1_num, u2_num) = num_sols
-            
-            # Mask empty cells with NaN
-            u1_ana[capacity.cell_types .== 0] .= NaN
-            u2_ana[capacity_c.cell_types .== 0] .= NaN
-            u1_num[capacity.cell_types .== 0] .= NaN
-            u2_num[capacity_c.cell_types .== 0] .= NaN
-            
-            # Plot solutions
-            fig_sol = Figure()
-            ax_sol = Axis(fig_sol[1, 1], 
-                         xlabel="x", 
-                         ylabel="u", 
-                         title="Diphasic Solution (nx=$nx)")
-            
-            scatter!(ax_sol, x, u1_ana, color=:blue, label="Phase 1 Analytical")
-            scatter!(ax_sol, x, u1_num, color=:red, label="Phase 1 Numerical")
-            scatter!(ax_sol, x, u2_ana, color=:green, label="Phase 2 Analytical")
-            scatter!(ax_sol, x, u2_num, color=:orange, label="Phase 2 Numerical")
-            
-            axislegend(ax_sol, position=:rb)
-            display(fig_sol)
-            
-            # Plot errors
-            err1 = abs.(u1_ana .- u1_num)
-            err2 = abs.(u2_ana .- u2_num)
-            
-            fig_err = Figure()
-            ax_err = Axis(fig_err[1, 1], 
-                         xlabel="x", 
-                         ylabel="Absolute Error", 
-                         title="Diphasic Error (nx=$nx)",
-                         yscale=log10)
-            
-            scatter!(ax_err, x, err1, color=:blue, label="Phase 1 Error")
-            scatter!(ax_err, x, err2, color=:red, label="Phase 2 Error")
-            
-            axislegend(ax_err, position=:rt)
-            display(fig_err)
-        end
+        # Save individual test result to CSV
+        test_df = DataFrame(
+            mesh_size = lx / nx,
+            nx = nx,
+            dt = Δt,
+            phase1_error = err1,
+            phase2_error = err2,
+            combined_error = err_combined,
+            phase1_full_error = err1_full,
+            phase2_full_error = err2_full,
+            combined_full_error = err_full_combined,
+            phase1_cut_error = err1_cut,
+            phase2_cut_error = err2_cut,
+            combined_cut_error = err_cut_combined
+        )
+        
+        # Use formatted nx in filename for easier reading
+        test_filename = @sprintf("mesh_%04d.csv", nx)
+        test_filepath = joinpath(run_dir, test_filename)
+        CSV.write(test_filepath, test_df)
+        println("  Saved result to $(test_filepath)")
     end
     
     # Fit convergence rates
@@ -179,12 +173,12 @@ function run_diphasic_mesh_convergence(
     function fit_model(x, p)
         p[1] .* x .+ p[2]
     end
-    
+
     # Fit each on log scale: log(err) = p*log(h) + c
     log_h = log.(h_vals)
-    
-    function do_fit(log_err, use_last_n=3)
-        # Use only the last n points (default 3)
+
+    function do_fit(log_err, use_last_n=npts)
+        # Use only the last n points
         n = min(use_last_n, length(log_h))
         idx = length(log_h) - n + 1 : length(log_h)
         
@@ -193,45 +187,20 @@ function run_diphasic_mesh_convergence(
         return fit_result.param[1], fit_result.param[2]  # (p_est, c_est)
     end
     
-    # Fit convergence rates for each phase and cell type (all points)
-    p1_global_all, _ = do_fit(log.(err1_vals), length(err1_vals))
-    p2_global_all, _ = do_fit(log.(err2_vals), length(err2_vals))
-    p_combined_all, _ = do_fit(log.(err_combined_vals), length(err_combined_vals))
+    # Fit convergence rates for each phase and cell type (using last npts points)
+    p1_global, _ = do_fit(log.(err1_vals))
+    p2_global, _ = do_fit(log.(err2_vals))
+    p_combined, _ = do_fit(log.(err_combined_vals))
     
-    p1_full_all, _ = do_fit(log.(err1_full_vals), length(err1_full_vals))
-    p2_full_all, _ = do_fit(log.(err2_full_vals), length(err2_full_vals))
-    p_full_combined_all, _ = do_fit(log.(err_full_combined_vals), length(err_full_combined_vals))
+    p1_full, _ = do_fit(log.(err1_full_vals))
+    p2_full, _ = do_fit(log.(err2_full_vals))
+    p_full_combined, _ = do_fit(log.(err_full_combined_vals))
     
-    p1_cut_all, _ = do_fit(log.(err1_cut_vals), length(err1_cut_vals))
-    p2_cut_all, _ = do_fit(log.(err2_cut_vals), length(err2_cut_vals))
-    p_cut_combined_all, _ = do_fit(log.(err_cut_combined_vals), length(err_cut_combined_vals))
-    
-    # Fit convergence rates using only last 3 points
-    p1_global, _ = do_fit(log.(err1_vals), npts)
-    p2_global, _ = do_fit(log.(err2_vals), npts)
-    p_combined, _ = do_fit(log.(err_combined_vals), npts)
-    
-    p1_full, _ = do_fit(log.(err1_full_vals), npts)
-    p2_full, _ = do_fit(log.(err2_full_vals), npts)
-    p_full_combined, _ = do_fit(log.(err_full_combined_vals), npts)
-    
-    p1_cut, _ = do_fit(log.(err1_cut_vals), npts)
-    p2_cut, _ = do_fit(log.(err2_cut_vals), npts)
-    p_cut_combined, _ = do_fit(log.(err_cut_combined_vals), npts)
+    p1_cut, _ = do_fit(log.(err1_cut_vals))
+    p2_cut, _ = do_fit(log.(err2_cut_vals))
+    p_cut_combined, _ = do_fit(log.(err_cut_combined_vals))
     
     # Round for display
-    p1_global_all = round(p1_global_all, digits=2)
-    p2_global_all = round(p2_global_all, digits=2)
-    p_combined_all = round(p_combined_all, digits=2)
-    
-    p1_full_all = round(p1_full_all, digits=2)
-    p2_full_all = round(p2_full_all, digits=2)
-    p_full_combined_all = round(p_full_combined_all, digits=2)
-    
-    p1_cut_all = round(p1_cut_all, digits=2)
-    p2_cut_all = round(p2_cut_all, digits=2)
-    p_cut_combined_all = round(p_cut_combined_all, digits=2)
-    
     p1_global = round(p1_global, digits=2)
     p2_global = round(p2_global, digits=2)
     p_combined = round(p_combined, digits=2)
@@ -247,333 +216,571 @@ function run_diphasic_mesh_convergence(
     # Print convergence rates
     println("\n===== Convergence Rates =====")
     println("\n--- Global Errors (All Cells) ---")
-    println("Phase 1: p = $p1_global (last $npts), p = $p1_global_all (all)")
-    println("Phase 2: p = $p2_global (last $npts), p = $p2_global_all (all)")
-    println("Combined: p = $p_combined (last $npts), p = $p_combined_all (all)")
+    println("Phase 1: p = $p1_global (last $npts)")
+    println("Phase 2: p = $p2_global (last $npts)")
+    println("Combined: p = $p_combined (last $npts)")
     
     println("\n--- Full Cell Errors ---")
-    println("Phase 1: p = $p1_full (last $npts), p = $p1_full_all (all)")
-    println("Phase 2: p = $p2_full (last $npts), p = $p2_full_all (all)")
-    println("Combined: p = $p_full_combined (last $npts), p = $p_full_combined_all (all)")
+    println("Phase 1: p = $p1_full (last $npts)")
+    println("Phase 2: p = $p2_full (last $npts)")
+    println("Combined: p = $p_full_combined (last $npts)")
     
     println("\n--- Cut Cell Errors ---")
-    println("Phase 1: p = $p1_cut (last $npts), p = $p1_cut_all (all)")
-    println("Phase 2: p = $p2_cut (last $npts), p = $p2_cut_all (all)")
-    println("Combined: p = $p_cut_combined (last $npts), p = $p_cut_combined_all (all)")
-    
-    # Plot global errors
-    fig_global = Figure()
-    ax_global = Axis(
-        fig_global[1, 1],
-        xlabel = "Mesh size (h)",
-        ylabel = "L$norm error",
-        title  = "Global Errors (All Cells)",
-        xscale = log10,
-        yscale = log10
-    )
-    
-    scatter!(ax_global, h_vals, err1_vals, 
-             label="Phase 1 (p = $p1_global)", 
-             markersize=12, color=:blue)
-    lines!(ax_global, h_vals, err1_vals, color=:blue)
-    
-    scatter!(ax_global, h_vals, err2_vals, 
-             label="Phase 2 (p = $p2_global)", 
-             markersize=12, color=:red)
-    lines!(ax_global, h_vals, err2_vals, color=:red)
-    
-    scatter!(ax_global, h_vals, err_combined_vals, 
-             label="Combined (p = $p_combined)", 
-             markersize=12, color=:black)
-    lines!(ax_global, h_vals, err_combined_vals, color=:black)
-    
-    # Add reference lines
-    lines!(ax_global, h_vals, 0.1*h_vals.^2.0, label="O(h²)", color=:black, linestyle=:dash)
-    lines!(ax_global, h_vals, 0.1*h_vals.^1.0, label="O(h¹)", color=:black, linestyle=:dashdot)
-    
-    # Fix the error by getting the c_est value properly from the do_fit function
-    # The issue is that you're trying to use "_" which is a write-only placeholder
-    
-    # Add fitted line for last 3 points (for Phase 1)
-    last_3_idx = length(h_vals)-2:length(h_vals)
-    h_range = exp.(range(log(h_vals[last_3_idx[1]]), log(h_vals[last_3_idx[end]]), length=100))
-    
-    # Get the coefficient for the fitted curve
-    _, c_est_p1 = do_fit(log.(err1_vals), 3)
-    c_est_p1 = exp(c_est_p1)  # Convert from log space
-    
-    # Use the coefficient to generate the fitted line
-    err_fit1 = c_est_p1 * h_range.^p1_global
-    lines!(ax_global, h_range, err_fit1, 
-           color=:blue, linestyle=:dot, linewidth=2, 
-           label="Last $npts fit (p = $p1_global)")
-    
-    axislegend(ax_global, position=:rb)
-    display(fig_global)
-    
-    # Plot full cell errors
-    fig_full = Figure()
-    ax_full = Axis(
-        fig_full[1, 1],
-        xlabel = "Mesh size (h)",
-        ylabel = "L$norm error",
-        title  = "Full Cell Errors",
-        xscale = log10,
-        yscale = log10,
-    )
-    
-    scatter!(ax_full, h_vals, err1_full_vals, label="Phase 1 ($p1_full)", markersize=12, color=:blue)
-    lines!(ax_full, h_vals, err1_full_vals, color=:blue)
-    
-    scatter!(ax_full, h_vals, err2_full_vals, label="Phase 2 ($p2_full)", markersize=12, color=:red)
-    lines!(ax_full, h_vals, err2_full_vals, color=:red)
-    
-    scatter!(ax_full, h_vals, err_full_combined_vals, label="Combined ($p_full_combined)", markersize=12, color=:black)
-    lines!(ax_full, h_vals, err_full_combined_vals, color=:black)
-    
-    # Add reference lines
-    lines!(ax_full, h_vals, 0.1*h_vals.^2.0, label="O(h²)", color=:black, linestyle=:dash)
-    lines!(ax_full, h_vals, 0.1*h_vals.^1.0, label="O(h¹)", color=:black, linestyle=:dashdot)
-    
-    axislegend(ax_full, position=:rb)
-    display(fig_full)
-    
-    # Plot cut cell errors
-    fig_cut = Figure()
-    ax_cut = Axis(
-        fig_cut[1, 1],
-        xlabel = "Mesh size (h)",
-        ylabel = "L$norm error",
-        title  = "Cut Cell Errors",
-        xscale = log10,
-        yscale = log10,
-        xminorticksvisible = true, 
-        xminorgridvisible = true,
-        xminorticks = IntervalsBetween(10),
-        yminorticksvisible = true,
-        yminorgridvisible = true,
-        yminorticks = IntervalsBetween(10),
-    )
-    
-    scatter!(ax_cut, h_vals, err1_cut_vals, label="Phase 1 ($p1_cut)", markersize=12, color=:blue)
-    lines!(ax_cut, h_vals, err1_cut_vals, color=:blue)
-    
-    scatter!(ax_cut, h_vals, err2_cut_vals, label="Phase 2 ($p2_cut)", markersize=12, color=:red)
-    lines!(ax_cut, h_vals, err2_cut_vals, color=:red)
-    
-    scatter!(ax_cut, h_vals, err_cut_combined_vals, label="Combined ($p_cut_combined)", markersize=12, color=:black)
-    lines!(ax_cut, h_vals, err_cut_combined_vals, color=:black)
-    
-    # Add reference lines
-    lines!(ax_cut, h_vals, 0.1*h_vals.^2.0, label="O(h²)", color=:black, linestyle=:dash)
-    lines!(ax_cut, h_vals, 0.1*h_vals.^1.0, label="O(h¹)", color=:black, linestyle=:dashdot)
-    
-    axislegend(ax_cut, position=:rb)
-    display(fig_cut)
-    
-    # Create a comprehensive convergence plot for both phases
-    fig_comp = Figure(resolution=(1200, 800))
-    
-    # Global errors panel
-    ax_comp_global = Axis(
-        fig_comp[1, 1],
-        xlabel = "Mesh size (h)",
-        ylabel = "L$norm error",
-        title  = "Global Errors",
-        xscale = log10,
-        yscale = log10,
-        xminorticksvisible = true, 
-        xminorgridvisible = true,
-        xminorticks = IntervalsBetween(10),
-        yminorticksvisible = true,
-        yminorgridvisible = true,
-        yminorticks = IntervalsBetween(10),
-    )
-    
-    # Full cell errors panel
-    ax_comp_full = Axis(
-        fig_comp[1, 2],
-        xlabel = "Mesh size (h)",
-        ylabel = "L$norm error",
-        title  = "Full Cell Errors",
-        xscale = log10,
-        yscale = log10,
-        xminorticksvisible = true, 
-        xminorgridvisible = true,
-        xminorticks = IntervalsBetween(10),
-        yminorticksvisible = true,
-        yminorgridvisible = true,
-        yminorticks = IntervalsBetween(10),
-    )
-    
-    # Cut cell errors panel
-    ax_comp_cut = Axis(
-        fig_comp[2, 1],
-        xlabel = "Mesh size (h)",
-        ylabel = "L$norm error",
-        title  = "Cut Cell Errors",
-        xscale = log10,
-        yscale = log10,
-        xminorticksvisible = true, 
-        xminorgridvisible = true,
-        xminorticks = IntervalsBetween(10),
-        yminorticksvisible = true,
-        yminorgridvisible = true,
-        yminorticks = IntervalsBetween(10),
-    )
-    
-    # Combined errors panel
-    ax_comp_combined = Axis(
-        fig_comp[2, 2],
-        xlabel = "Mesh size (h)",
-        ylabel = "L$norm error",
-        title  = "Combined Errors",
-        xscale = log10,
-        yscale = log10,
-        xminorticksvisible = true, 
-        xminorgridvisible = true,
-        xminorticks = IntervalsBetween(10),
-        yminorticksvisible = true,
-        yminorgridvisible = true,
-        yminorticks = IntervalsBetween(10),
+    println("Phase 1: p = $p1_cut (last $npts)")
+    println("Phase 2: p = $p2_cut (last $npts)")
+    println("Combined: p = $p_cut_combined (last $npts)")
 
+    # Save final summary results to CSV
+    df = DataFrame(
+        mesh_size = h_vals,
+        nx = nx_list,
+        dt = dt_vals,
+        phase1_error = err1_vals,
+        phase2_error = err2_vals,
+        combined_error = err_combined_vals,
+        phase1_full_error = err1_full_vals,
+        phase2_full_error = err2_full_vals,
+        combined_full_error = err_full_combined_vals,
+        phase1_cut_error = err1_cut_vals,
+        phase2_cut_error = err2_cut_vals,
+        combined_cut_error = err_cut_combined_vals
     )
     
-    # Plot in global panel
-    scatter!(ax_comp_global, h_vals, err1_vals, label="Phase 1 ($p1_global)", markersize=10, color=:blue)
-    lines!(ax_comp_global, h_vals, err1_vals, color=:blue)
-    scatter!(ax_comp_global, h_vals, err2_vals, label="Phase 2 ($p2_global)", markersize=10, color=:red)
-    lines!(ax_comp_global, h_vals, err2_vals, color=:red)
+    metadata = DataFrame(
+        parameter = ["p1_global", "p2_global", "p_combined", 
+                     "p1_full", "p2_full", "p_full_combined",
+                     "p1_cut", "p2_cut", "p_cut_combined"],
+        value = [p1_global, p2_global, p_combined,
+                 p1_full, p2_full, p_full_combined,
+                 p1_cut, p2_cut, p_cut_combined]
+    )
     
-    # Plot in full cell panel
-    scatter!(ax_comp_full, h_vals, err1_full_vals, label="Phase 1 ($p1_full)", markersize=10, color=:blue)
-    lines!(ax_comp_full, h_vals, err1_full_vals, color=:blue)
-    scatter!(ax_comp_full, h_vals, err2_full_vals, label="Phase 2 ($p2_full)", markersize=10, color=:red)
-    lines!(ax_comp_full, h_vals, err2_full_vals, color=:red)
+    # Write final results
+    summary_file = joinpath(run_dir, "summary.csv")
+    rates_file = joinpath(run_dir, "convergence_rates.csv")
+    CSV.write(summary_file, df)
+    CSV.write(rates_file, metadata)
     
-    # Plot in cut cell panel
-    scatter!(ax_comp_cut, h_vals, err1_cut_vals, label="Phase 1 ($p1_cut)", markersize=10, color=:blue)
-    lines!(ax_comp_cut, h_vals, err1_cut_vals, color=:blue)
-    scatter!(ax_comp_cut, h_vals, err2_cut_vals, label="Phase 2 ($p2_cut)", markersize=10, color=:red)
-    lines!(ax_comp_cut, h_vals, err2_cut_vals, color=:red)
-    
-    # Plot in combined panel
-    scatter!(ax_comp_combined, h_vals, err_combined_vals, label="Global ($p_combined)", markersize=10, color=:black)
-    lines!(ax_comp_combined, h_vals, err_combined_vals, color=:black)
-    scatter!(ax_comp_combined, h_vals, err_full_combined_vals, label="Full ($p_full_combined)", markersize=10, color=:green)
-    lines!(ax_comp_combined, h_vals, err_full_combined_vals, color=:green)
-    scatter!(ax_comp_combined, h_vals, err_cut_combined_vals, label="Cut ($p_cut_combined)", markersize=10, color=:purple)
-    lines!(ax_comp_combined, h_vals, err_cut_combined_vals, color=:purple)
-    
-    # Add reference slopes to all panels
-    for ax in [ax_comp_global, ax_comp_full, ax_comp_cut, ax_comp_combined]
-        lines!(ax, h_vals, 0.1*h_vals.^2.0, label="O(h²)", color=:black, linestyle=:dash)
-        lines!(ax, h_vals, 0.1*h_vals.^1.0, label="O(h¹)", color=:black, linestyle=:dashdot)
-    end
-    
-    # Add legends
-    axislegend(ax_comp_global, position=:rb)
-    axislegend(ax_comp_full, position=:rb)
-    axislegend(ax_comp_cut, position=:rb)
-    axislegend(ax_comp_combined, position=:rb)
-    
-    display(fig_comp)
-    
-        # Save errors and rates to a file
-    open("diphasic_convergence_results.txt", "w") do io
-        write(io, "# Diphasic Heat Transfer Convergence Study\n\n")
-        
-        # Write parameters
-        write(io, "Parameters:\n")
-        write(io, "  Mesh sizes: $nx_list\n")
-        write(io, "  Norm: L$norm\n")
-        write(io, "  Relative error: $relative\n")
-        write(io, "  Interface position: $xint\n")
-        write(io, "  Final time: $Tend\n")
-        write(io, "  Henry coefficient: $He\n")
-        write(io, "  Diffusion coefficients: D1=$D1, D2=$D2\n\n")
-        
-        # Write convergence rates
-        write(io, "Convergence Rates:\n")
-        write(io, "  Global Errors:\n")
-        write(io, "    Phase 1: $p1_global (last 3), $p1_global_all (all)\n")
-        write(io, "    Phase 2: $p2_global (last 3), $p2_global_all (all)\n")
-        write(io, "    Combined: $p_combined (last 3), $p_combined_all (all)\n\n")
-        
-        write(io, "  Full Cell Errors:\n")
-        write(io, "    Phase 1: $p1_full (last 3), $p1_full_all (all)\n")
-        write(io, "    Phase 2: $p2_full (last 3), $p2_full_all (all)\n")
-        write(io, "    Combined: $p_full_combined (last 3), $p_full_combined_all (all)\n\n")
-        
-        write(io, "  Cut Cell Errors:\n")
-        write(io, "    Phase 1: $p1_cut (last 3), $p1_cut_all (all)\n")
-        write(io, "    Phase 2: $p2_cut (last 3), $p2_cut_all (all)\n")
-        write(io, "    Combined: $p_cut_combined (last 3), $p_cut_combined_all (all)\n\n")
-        
-        # Write error data
-        write(io, "Raw Data:\n")
-        write(io, "h,err1,err2,err_combined,err1_full,err2_full,err_full_combined,err1_cut,err2_cut,err_cut_combined\n")
-        
-        for i in 1:length(h_vals)
-            write(io, @sprintf("%.6e,%.6e,%.6e,%.6e,%.6e,%.6e,%.6e,%.6e,%.6e,%.6e\n",
-                h_vals[i],
-                err1_vals[i], err2_vals[i], err_combined_vals[i],
-                err1_full_vals[i], err2_full_vals[i], err_full_combined_vals[i],
-                err1_cut_vals[i], err2_cut_vals[i], err_cut_combined_vals[i]
-            ))
-        end
-    end
+    println("Results saved to $(run_dir)")
+    println("  Summary: $(summary_file)")
+    println("  Convergence rates: $(rates_file)")
     
     return (
         h_vals,
         (err1_vals, err2_vals, err_combined_vals),
         (err1_full_vals, err2_full_vals, err_full_combined_vals),
         (err1_cut_vals, err2_cut_vals, err_cut_combined_vals),
-        (p1_global, p2_global, p_combined),     # Last 3 points
-        (p1_full, p2_full, p_full_combined),    # Last 3 points
-        (p1_cut, p2_cut, p_cut_combined),       # Last 3 points
-        (p1_global_all, p2_global_all, p_combined_all),  # All points
-        (p1_full_all, p2_full_all, p_full_combined_all), # All points
-        (p1_cut_all, p2_cut_all, p_cut_combined_all)     # All points
+        (p1_global, p2_global, p_combined),
+        (p1_full, p2_full, p_full_combined),
+        (p1_cut, p2_cut, p_cut_combined),
+        run_dir
     )
 end
 
-# Run the convergence study
-nx_list = [40, 80, 160, 320, 640]
-xint = 4.0
-Tend = 0.5
-He = 0.5
-D1 = 1.0
-D2 = 1.0
-
-# Define analytical solutions
-function T1(x)
-    t = Tend
-    x = x - xint
-    return - He/(1+He*sqrt(D1/D2))*(erfc(x/(2*sqrt(D1*t))) - 2)
+"""
+Load most recent convergence results for diphasic heat transfer problem
+"""
+function load_latest_diphasic_convergence_results(output_dir="diphasic_heat_convergence_results")
+    if !isdir(output_dir)
+        error("Output directory not found: $output_dir")
+    end
+    
+    # Get all subdirectories (runs)
+    runs = filter(isdir, map(d -> joinpath(output_dir, d), readdir(output_dir)))
+    
+    # Sort by modification time (most recent first)
+    sort!(runs, by=mtime, rev=true)
+    
+    if isempty(runs)
+        error("No run directories found in $output_dir")
+    end
+    
+    latest_run = runs[1]
+    
+    # Load summary and rates
+    summary_file = joinpath(latest_run, "summary.csv")
+    rates_file = joinpath(latest_run, "convergence_rates.csv")
+    
+    if !isfile(summary_file) || !isfile(rates_file)
+        error("Missing summary or rates file in $latest_run")
+    end
+    
+    df = CSV.read(summary_file, DataFrame)
+    rates = CSV.read(rates_file, DataFrame)
+    
+    # Extract data
+    h_vals = df.mesh_size
+    
+    # Extract global errors
+    err1_vals = df.phase1_error
+    err2_vals = df.phase2_error
+    err_combined_vals = df.combined_error
+    
+    # Extract full cell errors
+    err1_full_vals = df.phase1_full_error
+    err2_full_vals = df.phase2_full_error
+    err_full_combined_vals = df.combined_full_error
+    
+    # Extract cut cell errors
+    err1_cut_vals = df.phase1_cut_error
+    err2_cut_vals = df.phase2_cut_error
+    err_cut_combined_vals = df.combined_cut_error
+    
+    # Get convergence rates
+    p1_global = rates[rates.parameter .== "p1_global", :value][1]
+    p2_global = rates[rates.parameter .== "p2_global", :value][1]
+    p_combined = rates[rates.parameter .== "p_combined", :value][1]
+    
+    p1_full = rates[rates.parameter .== "p1_full", :value][1]
+    p2_full = rates[rates.parameter .== "p2_full", :value][1]
+    p_full_combined = rates[rates.parameter .== "p_full_combined", :value][1]
+    
+    p1_cut = rates[rates.parameter .== "p1_cut", :value][1]
+    p2_cut = rates[rates.parameter .== "p2_cut", :value][1]
+    p_cut_combined = rates[rates.parameter .== "p_cut_combined", :value][1]
+    
+    println("Loaded results from $latest_run")
+    
+    return (
+        h_vals,
+        (err1_vals, err2_vals, err_combined_vals),
+        (err1_full_vals, err2_full_vals, err_full_combined_vals),
+        (err1_cut_vals, err2_cut_vals, err_cut_combined_vals),
+        (p1_global, p2_global, p_combined),
+        (p1_full, p2_full, p_full_combined),
+        (p1_cut, p2_cut, p_cut_combined),
+        latest_run
+    )
 end
-
-function T2(x)
-    t = Tend
-    x = x - xint
-    return - He/(1+He*sqrt(D1/D2))*erfc(x/(2*sqrt(D2*t))) + 1
-end
-
-# Run convergence study
-results = run_diphasic_mesh_convergence(
-    nx_list,
-    T1,
-    T2,
-    lx=8.0,
-    x0=0.0,
-    xint=xint,
-    Tend=Tend,
-    He=He,
-    D1=D1,
-    D2=D2,
-    norm=2,
-    relative=false,
-    npts=3
+function plot_diphasic_convergence_results(
+    h_vals::Vector{Float64},
+    global_errors::Tuple,
+    full_errors::Tuple, 
+    cut_errors::Tuple,
+    global_rates::Tuple,
+    full_rates::Tuple,
+    cut_rates::Tuple;
+    style::Symbol=:by_phase,  # :by_phase or :by_error_type
+    norm::Int=2,
+    save_dir::String="."
 )
+    # Unpack error values
+    (err1_vals, err2_vals, err_combined_vals) = global_errors
+    (err1_full_vals, err2_full_vals, err_full_combined_vals) = full_errors
+    (err1_cut_vals, err2_cut_vals, err_cut_combined_vals) = cut_errors
+    
+    # Unpack rates
+    (p1_global, p2_global, p_combined) = global_rates
+    (p1_full, p2_full, p_full_combined) = full_rates
+    (p1_cut, p2_cut, p_cut_combined) = cut_rates
+    
+    # Create directory if it doesn't exist
+    mkpath(save_dir)
+    
+    # Scientific color palette (colorblind-friendly)
+    colors = [:darkblue, :darkred, :black]
+    symbols = [:circle, :rect, :diamond]
+    
+    # Function to compute power law curve from order and data
+    function power_fit(h, p, h_data, err_data)
+        # Get last 3 points (or fewer if not enough data)
+        n = length(h_data)
+        idx_start = max(1, n-2)
+        last_three_h = h_data[idx_start:n]
+        last_three_err = err_data[idx_start:n]
+        
+        # Compute C based on the finest grid point (last point)
+        C = last_three_err[end] / (last_three_h[end]^p)
+        return C .* h.^p
+    end
 
-println("\nDiphasic heat transfer convergence study completed!")
+    # Function to compute rates using only last 3 points
+    function compute_last3_rate(h_data, err_data)
+        # Get last 3 points (or fewer if not enough data)
+        n = length(h_data)
+        idx_start = max(1, n-2)
+        last_h = h_data[idx_start:n]
+        last_err = err_data[idx_start:n]
+        
+        # Compute rate using linear regression on log-log data
+        log_h = log.(last_h)
+        log_err = log.(last_err)
+        
+        if length(log_h) > 1
+            h_mean = mean(log_h)
+            err_mean = mean(log_err)
+            numerator = sum((log_h .- h_mean) .* (log_err .- err_mean))
+            denominator = sum((log_h .- h_mean).^2)
+            rate = numerator / denominator
+            return round(rate, digits=2)
+        else
+            return 0.0
+        end
+    end
+    
+    # Calculate last 3 point rates
+    last3_p1_global = compute_last3_rate(h_vals, err1_vals)
+    last3_p2_global = compute_last3_rate(h_vals, err2_vals)
+    last3_p_combined = compute_last3_rate(h_vals, err_combined_vals)
+    
+    last3_p1_full = compute_last3_rate(h_vals, err1_full_vals)
+    last3_p2_full = compute_last3_rate(h_vals, err2_full_vals)
+    
+    last3_p1_cut = compute_last3_rate(h_vals, err1_cut_vals)
+    last3_p2_cut = compute_last3_rate(h_vals, err2_cut_vals)
+    
+    h_fine = 10 .^ range(log10(minimum(h_vals)), log10(maximum(h_vals)), length=100)
+    
+    if style == :by_error_type
+        # Create figure with two panels side by side for Phase 1 and Phase 2
+        fig = Figure(resolution=(1200, 600), fontsize=14)
+        
+        # Create axes for Phase 1 and Phase 2
+        ax_phase1 = Axis(
+            fig[1, 1],
+            xlabel = "Mesh size (h)",
+            ylabel = "Relative Error (L$norm norm)",
+            title = "Phase 1",
+            xscale = log10,
+            yscale = log10,
+            xminorticksvisible = true,
+            yminorticksvisible = true,
+            xminorgridvisible = true,
+            yminorgridvisible = true,
+            xminorticks = IntervalsBetween(10),
+            yminorticks = IntervalsBetween(10),
+            xticks = LogTicks(WilkinsonTicks(5))
+        )
+        
+        ax_phase2 = Axis(
+            fig[1, 2],
+            xlabel = "Mesh size (h)",
+            ylabel = "Relative Error (L$norm norm)",
+            title = "Phase 2",
+            xscale = log10,
+            yscale = log10,
+            xminorticksvisible = true,
+            yminorticksvisible = true,
+            xminorgridvisible = true,
+            yminorgridvisible = true,
+            xminorticks = IntervalsBetween(10),
+            yminorticks = IntervalsBetween(10),
+            xticks = LogTicks(WilkinsonTicks(5))
+        )
+        
+        # Plot Phase 1 data - different error types
+        scatter!(ax_phase1, h_vals, err1_vals, color=colors[1], marker=symbols[1],
+                markersize=10, label="Global (p = $(last3_p1_global))")
+        lines!(ax_phase1, h_fine, power_fit(h_fine, last3_p1_global, h_vals, err1_vals), 
+              color=colors[1], linestyle=:dash, linewidth=2)
+        
+        scatter!(ax_phase1, h_vals, err1_full_vals, color=colors[2], marker=symbols[2],
+                markersize=10, label="Full (p = $(last3_p1_full))")
+        lines!(ax_phase1, h_fine, power_fit(h_fine, last3_p1_full, h_vals, err1_full_vals), 
+              color=colors[2], linestyle=:dash, linewidth=2)
+        
+        scatter!(ax_phase1, h_vals, err1_cut_vals, color=colors[3], marker=symbols[3],
+                markersize=10, label="Cut (p = $(last3_p1_cut))")
+        lines!(ax_phase1, h_fine, power_fit(h_fine, last3_p1_cut, h_vals, err1_cut_vals), 
+              color=colors[3], linestyle=:dash, linewidth=2)
+        
+        # Plot Phase 2 data - different error types
+        scatter!(ax_phase2, h_vals, err2_vals, color=colors[1], marker=symbols[1],
+                markersize=10, label="Global (p = $(last3_p2_global))")
+        lines!(ax_phase2, h_fine, power_fit(h_fine, last3_p2_global, h_vals, err2_vals), 
+              color=colors[1], linestyle=:dash, linewidth=2)
+        
+        scatter!(ax_phase2, h_vals, err2_full_vals, color=colors[2], marker=symbols[2],
+                markersize=10, label="Full (p = $(last3_p2_full))")
+        lines!(ax_phase2, h_fine, power_fit(h_fine, last3_p2_full, h_vals, err2_full_vals), 
+              color=colors[2], linestyle=:dash, linewidth=2)
+        
+        scatter!(ax_phase2, h_vals, err2_cut_vals, color=colors[3], marker=symbols[3],
+                markersize=10, label="Cut (p = $(last3_p2_cut))")
+        lines!(ax_phase2, h_fine, power_fit(h_fine, last3_p2_cut, h_vals, err2_cut_vals), 
+              color=colors[3], linestyle=:dash, linewidth=2)
+        
+        # Add reference slopes to both panels
+        for ax in [ax_phase1, ax_phase2]
+            # Reference slopes
+            h_ref = h_vals[end]
+            err_ref = minimum([minimum(err1_vals), minimum(err2_vals)]) * 5.0
+            
+            lines!(ax, h_fine, err_ref * (h_fine/h_ref).^2, color=:black, linestyle=:dot, 
+                  linewidth=1.5, label="O(h²)")
+            
+            lines!(ax, h_fine, err_ref * (h_fine/h_ref), color=:black, linestyle=:dashdot, 
+                  linewidth=1.5, label="O(h)")
+        end
+        
+        # Add legends
+        axislegend(ax_phase1, position=:rb, framevisible=true, backgroundcolor=(:white, 0.7))
+        axislegend(ax_phase2, position=:rb, framevisible=true, backgroundcolor=(:white, 0.7))
+        
+        # Save the figure
+        save(joinpath(save_dir, "diphasic_by_error_type.pdf"), fig, pt_per_unit=1)
+        save(joinpath(save_dir, "diphasic_by_error_type.png"), fig, px_per_unit=4)
+        
+        return fig
+        
+    else # style == :by_phase
+        # Create comprehensive figure with all results
+        fig = Figure(resolution=(1200, 800), fontsize=14)
+        
+        # Global errors panel
+        ax_comp_global = Axis(
+            fig[1, 1],
+            xlabel = "Mesh size (h)",
+            ylabel = "Relative Error (L$norm norm)",
+            title  = "Global Errors",
+            xscale = log10,
+            yscale = log10,
+            xminorticksvisible = true, 
+            xminorgridvisible = true,
+            xminorticks = IntervalsBetween(10),
+            yminorticksvisible = true,
+            yminorgridvisible = true,
+            yminorticks = IntervalsBetween(10),
+        )
+        
+        # Full cell errors panel
+        ax_comp_full = Axis(
+            fig[1, 2],
+            xlabel = "Mesh size (h)",
+            ylabel = "Relative Error (L$norm norm)",
+            title  = "Full Cell Errors",
+            xscale = log10,
+            yscale = log10,
+            xminorticksvisible = true, 
+            xminorgridvisible = true,
+            xminorticks = IntervalsBetween(10),
+            yminorticksvisible = true,
+            yminorgridvisible = true,
+            yminorticks = IntervalsBetween(10),
+        )
+        
+        # Cut cell errors panel
+        ax_comp_cut = Axis(
+            fig[2, 1],
+            xlabel = "Mesh size (h)",
+            ylabel = "Relative Error (L$norm norm)",
+            title  = "Cut Cell Errors",
+            xscale = log10,
+            yscale = log10,
+            xminorticksvisible = true, 
+            xminorgridvisible = true,
+            xminorticks = IntervalsBetween(10),
+            yminorticksvisible = true,
+            yminorgridvisible = true,
+            yminorticks = IntervalsBetween(10),
+        )
+        
+        # Combined errors panel - compare between cell types for each phase
+        ax_comp_combined = Axis(
+            fig[2, 2],
+            xlabel = "Mesh size (h)",
+            ylabel = "Relative Error (L$norm norm)",
+            title  = "Combined Errors",
+            xscale = log10,
+            yscale = log10,
+            xminorticksvisible = true, 
+            xminorgridvisible = true,
+            xminorticks = IntervalsBetween(10),
+            yminorticksvisible = true,
+            yminorgridvisible = true,
+            yminorticks = IntervalsBetween(10),
+        )
+        
+        # Plot in global panel - different phases
+        scatter!(ax_comp_global, h_vals, err1_vals, color=colors[1], marker=symbols[1], 
+                markersize=10, label="Phase 1 (p = $(last3_p1_global))")
+        lines!(ax_comp_global, h_fine, power_fit(h_fine, last3_p1_global, h_vals, err1_vals), 
+              color=colors[1], linestyle=:dash, linewidth=2)
+        
+        scatter!(ax_comp_global, h_vals, err2_vals, color=colors[2], marker=symbols[2], 
+                markersize=10, label="Phase 2 (p = $(last3_p2_global))")
+        lines!(ax_comp_global, h_fine, power_fit(h_fine, last3_p2_global, h_vals, err2_vals), 
+              color=colors[2], linestyle=:dash, linewidth=2)
+        
+        scatter!(ax_comp_global, h_vals, err_combined_vals, color=colors[3], marker=symbols[3], 
+                markersize=10, label="Combined (p = $(last3_p_combined))")
+        lines!(ax_comp_global, h_fine, power_fit(h_fine, last3_p_combined, h_vals, err_combined_vals), 
+              color=colors[3], linestyle=:dash, linewidth=2)
+        
+        # Plot in full cell panel - different phases
+        scatter!(ax_comp_full, h_vals, err1_full_vals, color=colors[1], marker=symbols[1], 
+                markersize=10, label="Phase 1 (p = $(last3_p1_full))")
+        lines!(ax_comp_full, h_fine, power_fit(h_fine, last3_p1_full, h_vals, err1_full_vals), 
+              color=colors[1], linestyle=:dash, linewidth=2)
+        
+        scatter!(ax_comp_full, h_vals, err2_full_vals, color=colors[2], marker=symbols[2], 
+                markersize=10, label="Phase 2 (p = $(last3_p2_full))")
+        lines!(ax_comp_full, h_fine, power_fit(h_fine, last3_p2_full, h_vals, err2_full_vals), 
+              color=colors[2], linestyle=:dash, linewidth=2)
+        
+        scatter!(ax_comp_full, h_vals, err_full_combined_vals, color=colors[3], marker=symbols[3], 
+                markersize=10, label="Combined (p = $(p_full_combined))")
+        lines!(ax_comp_full, h_fine, power_fit(h_fine, p_full_combined, h_vals, err_full_combined_vals), 
+              color=colors[3], linestyle=:dash, linewidth=2)
+        
+        # Plot in cut cell panel - different phases
+        scatter!(ax_comp_cut, h_vals, err1_cut_vals, color=colors[1], marker=symbols[1], 
+                markersize=10, label="Phase 1 (p = $(last3_p1_cut))")
+        lines!(ax_comp_cut, h_fine, power_fit(h_fine, last3_p1_cut, h_vals, err1_cut_vals), 
+              color=colors[1], linestyle=:dash, linewidth=2)
+        
+        scatter!(ax_comp_cut, h_vals, err2_cut_vals, color=colors[2], marker=symbols[2], 
+                markersize=10, label="Phase 2 (p = $(last3_p2_cut))")
+        lines!(ax_comp_cut, h_fine, power_fit(h_fine, last3_p2_cut, h_vals, err2_cut_vals), 
+              color=colors[2], linestyle=:dash, linewidth=2)
+        
+        scatter!(ax_comp_cut, h_vals, err_cut_combined_vals, color=colors[3], marker=symbols[3], 
+                markersize=10, label="Combined (p = $(p_cut_combined))")
+        lines!(ax_comp_cut, h_fine, power_fit(h_fine, p_cut_combined, h_vals, err_cut_combined_vals), 
+              color=colors[3], linestyle=:dash, linewidth=2)
+        
+        # Plot in combined panel - compare between cell types
+        scatter!(ax_comp_combined, h_vals, err_combined_vals, color=:black, marker=:circle, 
+                markersize=10, label="Global")
+        lines!(ax_comp_combined, h_vals, err_combined_vals, color=:black)
+        
+        scatter!(ax_comp_combined, h_vals, err_full_combined_vals, color=:darkgreen, marker=:rect, 
+                markersize=10, label="Full")
+        lines!(ax_comp_combined, h_vals, err_full_combined_vals, color=:darkgreen)
+        
+        scatter!(ax_comp_combined, h_vals, err_cut_combined_vals, color=:purple, marker=:diamond, 
+                markersize=10, label="Cut")
+        lines!(ax_comp_combined, h_vals, err_cut_combined_vals, color=:purple)
+        
+        # Add reference slopes to all panels
+        # Calculate reference values
+        h_ref = h_vals[end]
+        err_ref = err_combined_vals[end] * 0.5
+        
+        for ax in [ax_comp_global, ax_comp_full, ax_comp_cut, ax_comp_combined]
+            lines!(ax, h_fine, err_ref * (h_fine/h_ref).^2, color=:black, linestyle=:dot, 
+                  linewidth=1.5, label="O(h²)")
+            lines!(ax, h_fine, err_ref * (h_fine/h_ref), color=:black, linestyle=:dashdot, 
+                  linewidth=1.5, label="O(h)")
+        end
+        
+        # Add legends
+        axislegend(ax_comp_global, position=:rb, framevisible=true, backgroundcolor=(:white, 0.7))
+        axislegend(ax_comp_full, position=:rb, framevisible=true, backgroundcolor=(:white, 0.7))
+        axislegend(ax_comp_cut, position=:rb, framevisible=true, backgroundcolor=(:white, 0.7))
+        axislegend(ax_comp_combined, position=:rb, framevisible=true, backgroundcolor=(:white, 0.7))
+        
+        # Save comprehensive plot
+        save(joinpath(save_dir, "diphasic_comprehensive_convergence.pdf"), fig, pt_per_unit=1)
+        save(joinpath(save_dir, "diphasic_comprehensive_convergence.png"), fig, px_per_unit=4)
+        
+        return fig
+    end
+end
+
+# Create both plots (by_error_type and by_phase)
+function plot_all_diphasic_convergence_plots(
+    h_vals, 
+    global_errors, 
+    full_errors, 
+    cut_errors, 
+    global_rates, 
+    full_rates, 
+    cut_rates;
+    norm::Int=2,
+    save_dir::String="."
+)
+    fig_by_error = plot_diphasic_convergence_results(
+        h_vals, 
+        global_errors, 
+        full_errors, 
+        cut_errors, 
+        global_rates, 
+        full_rates, 
+        cut_rates,
+        style=:by_error_type,
+        norm=norm,
+        save_dir=save_dir
+    )
+    
+    fig_by_phase = plot_diphasic_convergence_results(
+        h_vals, 
+        global_errors, 
+        full_errors, 
+        cut_errors, 
+        global_rates, 
+        full_rates, 
+        cut_rates,
+        style=:by_phase,
+        norm=norm,
+        save_dir=save_dir
+    )
+    
+    return fig_by_error, fig_by_phase
+end
+
+# Example usage
+function run_diphasic_convergence_analysis()
+    # Define test parameters
+    nx_list = [40, 80, 160, 320, 640, 1280]
+    xint = 4.0
+    Tend = 0.1
+    He = 1.0
+    D1 = 1.0
+    D2 = 1.0
+    
+    # Define analytical solutions
+    function T1(x)
+        t = Tend
+        x = x - xint
+        return - He/(1+He*sqrt(D1/D2))*(erfc(x/(2*sqrt(D1*t))) - 2)
+    end
+    
+    function T2(x)
+        t = Tend
+        x = x - xint
+        return - He/(1+He*sqrt(D1/D2))*erfc(x/(2*sqrt(D2*t))) + 1
+    end
+    
+    # Run convergence study
+    println("Running diphasic heat transfer convergence study...")
+    results = run_diphasic_mesh_convergence(
+        nx_list,
+        T1,
+        T2,
+        lx=8.0,
+        x0=0.0,
+        xint=xint,
+        Tend=Tend,
+        He=He,
+        D1=D1,
+        D2=D2,
+        norm=2,
+        relative=false,
+        npts=3
+    )
+    
+    h_vals, global_errors, full_errors, cut_errors, global_rates, full_rates, cut_rates, run_dir = results
+    
+    # Create publication-quality plots (both styles)
+    println("Creating publication-quality plots...")
+    fig_by_error, fig_by_phase = plot_all_diphasic_convergence_plots(
+        h_vals,
+        global_errors, 
+        full_errors, 
+        cut_errors,
+        global_rates,
+        full_rates,
+        cut_rates,
+        norm=2,
+        save_dir=run_dir
+    )
+    
+    println("\nDiphasic heat transfer convergence study completed!")
+    println("Results saved to: $(run_dir)")
+    
+    return results, (fig_by_error, fig_by_phase)
+end
+
+# Run the analysis
+results, plots = run_diphasic_convergence_analysis()

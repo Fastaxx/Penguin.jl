@@ -6,17 +6,23 @@ using Roots
 using CSV, DataFrames
 using Dates
 using Printf
+using Statistics
 
-function run_mesh_convergence(
+function run_mesh_convergence_moving(
     nx_list::Vector{Int},
     ny_list::Vector{Int},
-    radius::Float64,
+    radius_mean::Float64, 
+    radius_amp::Float64,
+    period::Float64,
     center::Tuple{Float64,Float64},
-    u_analytical::Function;
+    D::Float64,
+    Φ_ana::Function,
+    source_term::Function;
     lx::Float64=4.0,
     ly::Float64=4.0,
-    norm,
-    output_dir::String="heat_convergence_results"
+    Tend::Float64=0.1, 
+    norm::Real=2,
+    output_dir::String="oscillating_disk_convergence_results"
 )
     # Create output directory if it doesn't exist
     mkpath(output_dir)
@@ -31,6 +37,14 @@ function run_mesh_convergence(
     err_full_vals = Float64[]
     err_cut_vals = Float64[]
     err_empty_vals = Float64[]
+    dt_vals = Float64[]  # Also track dt values
+    
+    # Save test configuration
+    config_df = DataFrame(
+        parameter = ["radius_mean", "radius_amp", "period", "center_x", "center_y", "D", "Tend"],
+        value = [radius_mean, radius_amp, period, center[1], center[2], D, Tend]
+    )
+    CSV.write(joinpath(run_dir, "config.csv"), config_df)
 
     for (i, (nx, ny)) in enumerate(zip(nx_list, ny_list))
         println("Running mesh test $i of $(length(nx_list)): nx=$nx, ny=$ny")
@@ -38,42 +52,79 @@ function run_mesh_convergence(
         # Build mesh
         x0, y0 = 0.0, 0.0
         mesh = Penguin.Mesh((nx, ny), (lx, ly), (x0, y0))
-
-        # Define the body
-        circle = (x,y,_=0) -> (sqrt((x-center[1])^2 + (y-center[2])^2) - radius)
-            
+        
+        # Calculate time step based on mesh size (CFL condition)
+        Δt = 0.5*(lx/nx)^2
+        push!(dt_vals, Δt)
+        
+        Tstart = Δt  # Small positive time to avoid t=0 singularity
+        
+        # Define the oscillating body as a level set function
+        function oscillating_body(x, y, t)
+            R_t = radius_mean + radius_amp * sin(2π * t / period)
+            return (sqrt((x-center[1])^2 + (y-center[2])^2) - R_t)
+        end
+        
+        # Define space-time mesh
+        STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt], tag=mesh.tag)
+        
         # Define capacity/operator
-        capacity = Capacity(circle, mesh)
+        capacity = Capacity(oscillating_body, STmesh)
         operator = DiffusionOps(capacity)
 
-        # BC + solver
-        bc_boundary = Robin(3.0,1.0,3.0*400)
-        bc0 = Dirichlet(400.0)
+        # Define boundary conditions
+        bc = Dirichlet(0.0)
         bc_b = BorderConditions(Dict(
-            :left   => bc0,
-            :right  => bc0,
-            :top    => bc0,
-            :bottom => bc0
+            :left   => bc,
+            :right  => bc,
+            :top    => bc,
+            :bottom => bc
         ))
-        phase = Phase(capacity, operator, (x,y,z,t)->0.0, (x,y,z)->1.0)
-
-        u0ₒ = ones((nx+1)*(ny+1)) * 270.0
-        u0ᵧ = zeros((nx+1)*(ny+1)) * 270.0
+        
+        # Dirichlet boundary condition for the disk interface
+        robin_bc = Dirichlet((x, y, t) -> Φ_ana(x, y, t))
+        
+        # Define the phase with source term
+        phase = Phase(capacity, operator, source_term, (x,y,z) -> D)
+        
+        # Initialize with analytical solution at t=Tstart
+        u0ₒ = zeros((nx+1)*(ny+1))
+        u0ᵧ = zeros((nx+1)*(ny+1))
+        
+        # Fill with initial analytical solution
+        for i in 1:nx+1
+            for j in 1:ny+1
+                idx = (j-1)*(nx+1) + i
+                x = mesh.nodes[1][i]
+                y = mesh.nodes[2][j]
+                u0ₒ[idx] = Φ_ana(x, y, Tstart)
+            end
+        end
+        
         u0 = vcat(u0ₒ, u0ᵧ)
-
-        Δt = 0.25*(lx/nx)^2
-        Tend = 0.1
-
-        solver = DiffusionUnsteadyMono(phase, bc_b, bc_boundary, Δt, u0, "BE") # Start by a backward Euler scheme
-
-        solve_DiffusionUnsteadyMono!(solver, phase, Δt, Tend, bc_b, bc_boundary, "CN"; method=Base.:\)
-
-        # Compute errors
+        
+        # Define the solver
+        solver = MovingDiffusionUnsteadyMono(phase, bc_b, robin_bc, Δt, u0, mesh, "BE")
+        
+        # Solve the problem
+        solve_MovingDiffusionUnsteadyMono!(solver, phase, oscillating_body, Δt, Tstart, Tend, bc_b, robin_bc, mesh, "BE"; method=Base.:\)
+        
+        # Check errors based on last body position
+        body_tend = (x, y,_=0) ->  begin
+            # Calculate oscillating radius at Tend
+            R_t = radius_mean + radius_amp * sin(2π * Tend / period)
+            return sqrt((x - center[1])^2 + (y - center[2])^2) - R_t
+        end
+        
+        capacity_tend = Capacity(body_tend, mesh; compute_centroids=false)
+        Φ_ana_tend(x, y) = Φ_ana(x, y, Tend)
+        
+        # Calculate errors
         u_ana, u_num, global_err, full_err, cut_err, empty_err =
-            check_convergence(u_analytical, solver, capacity, norm)
+            check_convergence(Φ_ana_tend, solver, capacity_tend, norm)
 
         # Representative mesh size ~ 1 / min(nx, ny)
-        h = 1.0 / min(nx, ny)
+        h = lx / nx
         push!(h_vals, h)
         push!(err_vals, global_err)
         push!(err_full_vals, full_err)
@@ -85,6 +136,7 @@ function run_mesh_convergence(
             mesh_size = h,
             nx = nx,
             ny = ny,
+            dt = Δt,
             global_error = global_err,
             full_error = full_err,
             cut_error = cut_err,
@@ -129,6 +181,7 @@ function run_mesh_convergence(
         mesh_size = h_vals,
         nx = nx_list,
         ny = ny_list,
+        dt = dt_vals,
         global_error = err_vals,
         full_error = err_full_vals,
         cut_error = err_cut_vals,
@@ -184,59 +237,13 @@ function run_mesh_convergence(
         err_full_vals,
         err_cut_vals,
         err_empty_vals,
+        dt_vals,
         p_global,
         p_full,
         p_cut,
         run_dir
     )
 end
-
-# Example usage:
-nx_list = [20, 40, 80, 160, 320]
-ny_list = [20, 40, 80, 160, 320]
-radius, center = 1.0, (2.01, 2.01)
-function radial_heat_(x, y)
-    t=0.1
-    R=1.0
-    k=3.0
-    a=1.0
-
-    function j0_zeros_robin(N, k, R; guess_shift = 0.25)
-        # Define the function for alpha J1(alpha) - k R J0(alpha) = 0
-        eq(alpha) = alpha * besselj1(alpha) - k * R * besselj0(alpha)
-    
-        zs = zeros(Float64, N)
-        for m in 1:N
-            # Approximate location around (m - guess_shift)*π
-            x_left  = (m - guess_shift - 0.5) * π
-            x_right = (m - guess_shift + 0.5) * π
-            x_left  = max(x_left, 1e-6)  # Ensure bracket is positive
-            zs[m]   = find_zero(eq, (x_left, x_right))
-        end
-        return zs
-    end
-
-    alphas = j0_zeros_robin(1000, k, R)
-    N=length(alphas)
-    r = sqrt((x - center[1])^2 + (y - center[2])^2)
-    if r >= R
-        # Not physically in the domain, so return NaN or handle as you wish.
-        return NaN
-    end
-    
-    # If in the disk: sum the series
-    s = 0.0
-    for m in 1:N
-        αm = alphas[m]
-        An = 2.0 * k * R / ((k^2 * R^2 + αm^2) * besselj0(αm))
-        s += An * exp(- a * αm^2 * t/R^2) * besselj0(αm * (r / R))
-    end
-    return (1.0 - s) * (400 - 270) + 270
-end
-
-# Run with organized output directory
-#output_dir = "heat_convergence_results"
-#run_mesh_convergence(nx_list, ny_list, radius, center, radial_heat_, norm=2, output_dir=output_dir)
 
 function plot_convergence_results(
     h_vals::Vector{Float64},
@@ -269,7 +276,7 @@ function plot_convergence_results(
         xminorticks = IntervalsBetween(10),
         yminorticks = IntervalsBetween(10),
         xticks = LogTicks(WilkinsonTicks(5)),
-        yticks = LogTicks(WilkinsonTicks(5)),
+        yticks = LogTicks(WilkinsonTicks(2)),
     )
 
     # Calculate fit lines
@@ -299,11 +306,35 @@ function plot_convergence_results(
             return p_global  # Fall back to original if not enough points
         end
     end
+
+    function compute_last3_rate_cut(h_data, err_data)
+        # Get last 3 points (or fewer if not enough data)
+        n = length(h_data)
+        idx_start = max(1, n-2)
+        last_h = h_data[idx_start:n]
+        last_err = err_data[idx_start:n]
+        
+        # Compute rate using linear regression on log-log data
+        log_h = log.(last_h)
+        log_err = log.(last_err)
+        
+        # Simple linear regression slope formula: slope = cov(x,y)/var(x)
+        if length(log_h) > 1
+            h_mean = mean(log_h)
+            err_mean = mean(log_err)
+            numerator = sum((log_h .- h_mean) .* (log_err .- err_mean))
+            denominator = sum((log_h .- h_mean).^2)
+            rate = numerator / denominator
+            return round(rate, digits=2)
+        else
+            return p_global  # Fall back to original if not enough points
+        end
+    end
     
     # Calculate last 3 point rates
     last3_p_global = compute_last3_rate(h_vals, err_vals)
     last3_p_full = compute_last3_rate(h_vals, err_full_vals)
-    last3_p_cut = compute_last3_rate(h_vals, err_cut_vals)
+    last3_p_cut = compute_last3_rate_cut(h_vals, err_cut_vals)
     
     # Function to compute power law curve from order and data
     function power_fit(h, p, h_data, err_data)
@@ -319,13 +350,13 @@ function plot_convergence_results(
     end
 
     # Plot data points with last 3 point rates in the legend
-    scatter!(ax, h_vals, err_vals, color=colors[1], marker =symbol[1],
+    scatter!(ax, h_vals, err_vals, color=colors[1], marker=symbol[1],
              markersize=10, label="Global error (p = $(last3_p_global))")
     
-    scatter!(ax, h_vals, err_full_vals, color=colors[2], marker =symbol[2],
+    scatter!(ax, h_vals, err_full_vals, color=colors[2], marker=symbol[2],
              markersize=10, label="Full error (p = $(last3_p_full))")
     
-    scatter!(ax, h_vals, err_cut_vals, color=colors[3], marker =symbol[3],
+    scatter!(ax, h_vals, err_cut_vals, color=colors[3], marker=symbol[3],
              markersize=10, label="Cut error (p = $(last3_p_cut))")
     
     # Plot fitted curves using the last 3 point rates instead of original rates
@@ -355,7 +386,7 @@ function plot_convergence_results(
     limits!(ax, 
         minimum(h_vals)*0.8, maximum(h_vals)*1.2,
         minimum([minimum(err_vals), minimum(err_full_vals), minimum(err_cut_vals)])*0.8,
-        maximum([maximum(err_vals), maximum(err_full_vals), maximum(err_cut_vals)])*1.2
+        maximum([maximum(err_vals), maximum(err_full_vals), maximum(err_cut_vals)])*1.5
     )
     
     # Add grid for readability
@@ -368,21 +399,130 @@ function plot_convergence_results(
     return fig
 end
 
-# Load from the most recent run
-results = load_convergence_results()
+function load_latest_convergence_results(output_dir="oscillating_disk_convergence_results")
+    if !isdir(output_dir)
+        error("Output directory not found: $output_dir")
+    end
+    
+    # Get all subdirectories (runs)
+    runs = filter(isdir, map(d -> joinpath(output_dir, d), readdir(output_dir)))
+    
+    # Sort by modification time (most recent first)
+    sort!(runs, by=mtime, rev=true)
+    
+    if isempty(runs)
+        error("No run directories found in $output_dir")
+    end
+    
+    latest_run = runs[1]
+    
+    # Load summary and rates
+    summary_file = joinpath(latest_run, "summary.csv")
+    rates_file = joinpath(latest_run, "convergence_rates.csv")
+    
+    if !isfile(summary_file) || !isfile(rates_file)
+        error("Missing summary or rates file in $latest_run")
+    end
+    
+    df = CSV.read(summary_file, DataFrame)
+    rates = CSV.read(rates_file, DataFrame)
+    
+    # Extract data
+    h_vals = df.mesh_size
+    err_vals = df.global_error
+    err_full_vals = df.full_error
+    err_cut_vals = df.cut_error
+    err_empty_vals = df.empty_error
+    dt_vals = df.dt
+    
+    # Get convergence rates
+    p_global = rates[rates.parameter .== "p_global", :value][1]
+    p_full = rates[rates.parameter .== "p_full", :value][1]
+    p_cut = rates[rates.parameter .== "p_cut", :value][1]
+    
+    println("Loaded results from $latest_run")
+    
+    return (
+        h_vals,
+        err_vals,
+        err_full_vals,
+        err_cut_vals,
+        err_empty_vals,
+        dt_vals,
+        p_global,
+        p_full,
+        p_cut,
+        latest_run
+    )
+end
 
-# Or load from a specific run directory
-# results = load_convergence_results("/path/to/specific/run/directory")
+# Example usage - define parameters for oscillating disk test
+nx_list = [8, 16, 32, 64, 128]  # Test mesh resolutions
+ny_list = nx_list
 
-# Extract the data
-h_vals, err_vals, err_full_vals, err_cut_vals, _, p_global, p_full, p_cut, _ = results
+# Disk parameters
+radius_mean = 1.0
+radius_amp = 0.5
+period = 1.0
+center = (2.0, 2.0)
+D = 1.0
 
-# Create publication plot
+# Define analytical solution and source term for manufactured solution
+function Φ_ana_disk(x, y, t)
+    # Calculate radius from center
+    r = sqrt((x - center[1])^2 + (y - center[2])^2)
+    
+    # Calculate oscillating radius at this time
+    R_t = radius_mean + radius_amp * sin(2π * t / period)
+    
+    # Handle points outside the domain
+    if r > R_t
+        return 0.0
+    end
+    
+    # Calculate analytical solution (1 + 0.5*sin(2πt/T))*cos(πx)*cos(πy)
+    return (1 + 0.5 * sin(2π * t / period)) * cos(π * x) * cos(π * y)
+end
+
+function source_term_disk(x, y, z, t)
+    # Calculate radius from center
+    r = sqrt((x - center[1])^2 + (y - center[2])^2)
+    
+    # Calculate oscillating radius
+    R_t = radius_mean + radius_amp * sin(2π * t / period)
+    
+    # Handle points outside domain
+    if r > R_t
+        return 0.0
+    end
+    
+    # Calculate source term using the manufactured solution formula
+    # f(x,y,t) = (π/T)*cos(πx)*cos(πy)*cos(2πt/T) + 2π²*D*(1 + 0.5*sin(2πt/T))*cos(πx)*cos(πy)
+    term1 = (π / period) * cos(π * x) * cos(π * y) * cos(2π * t / period)
+    term2 = 2 * π^2 * D * (1 + 0.5 * sin(2π * t / period)) * cos(π * x) * cos(π * y)
+    
+    return term1 + term2
+end
+
+"""
+# Run convergence tests - uncomment to execute
+results = run_mesh_convergence_moving(
+    nx_list, ny_list,
+    radius_mean, radius_amp, period,
+    center, D,
+    Φ_ana_disk, source_term_disk,
+    norm=2
+ )
+"""
+
+# To load and plot the most recent results
+results = load_latest_convergence_results()
+h_vals, err_vals, err_full_vals, err_cut_vals, _, _, p_global, p_full, p_cut, _ = results
+ 
 fig = plot_convergence_results(
     h_vals, err_vals, err_full_vals, err_cut_vals, 
     p_global, p_full, p_cut,
-    save_path="heat_convergence_publication.pdf"
-)
-
-# Display it
+    save_path="oscillating_disk_convergence_publication.pdf"
+ )
+ 
 display(fig)
