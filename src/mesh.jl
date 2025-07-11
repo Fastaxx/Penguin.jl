@@ -1,5 +1,5 @@
-mutable struct MeshTag{N}
-    border_cells::Vector{Tuple{CartesianIndex, NTuple{N, Float64}}}
+struct MeshTag{N}
+    border_cells::Vector{Tuple{CartesianIndex{N}, NTuple{N, Float64}}}
 end
 
 abstract type AbstractMesh end
@@ -17,78 +17,79 @@ Create a mesh object with `N` dimensions, `n` cells in each dimension, and a dom
 # Returns
 - A `Mesh{N}` object with `N` dimensions, `n` cells in each dimension, and a domain size of `domain_size`.
 """
-mutable struct Mesh{N} <: AbstractMesh
+struct Mesh{N} <: AbstractMesh
     nodes::NTuple{N, Vector{Float64}}
     centers::NTuple{N, Vector{Float64}}
     tag::MeshTag
 
     function Mesh(n::NTuple{N, Int}, domain_size::NTuple{N, Float64}, x0::NTuple{N, Float64}=ntuple(_ -> 0.0, N)) where N
-        h_uniform = ntuple(i -> fill(domain_size[i] / n[i], n[i]), N)
+        # Calculate centers and nodes
         centers_uniform = ntuple(i -> [x0[i] + j * (domain_size[i] / n[i]) for j in 0:n[i]-1], N)
-        nodes_uniform  = ntuple(i -> [x0[i] + (j + 0.5) * (domain_size[i] / n[i]) for j in 0:(n[i])], N) 
-        temp_mesh = new{N}(nodes_uniform, centers_uniform, MeshTag{N}([]))
-
-        # Get the border cells
-        bc = get_border_cells(temp_mesh)
-        temp_mesh.tag = MeshTag{N}(bc)
-        return temp_mesh
-    end
-end
-
-"""
-    get_border_cells(mesh::Mesh{N})
-
-Return a collection of tuples identifying the cells at the boundary of `mesh`. Each
-tuple contains a `CartesianIndex` referencing the cell’s location in the mesh and
-an `NTuple{N, Float64}` specifying the physical center coordinates of that cell.
-
-A cell is considered a border cell if it lies at the first or last index along
-any dimension of the mesh. This procedure determines the set of boundary cells
-by iterating over all cell indices in the mesh and checking each one.
-
-# Parameters
-- `mesh::Mesh{N}`: The mesh for which border cells are to be identified.
-
-# Returns
-- `Vector{Tuple{CartesianIndex, NTuple{N, Float64}}}`: A list of tuples representing
-  each border cell by its index and center coordinates.
-"""
-function get_border_cells(mesh::Mesh{N}) where N
-    # Number of cells in each dimension
-    dims = ntuple(i -> length(mesh.centers[i]), N)
-    border_cells = Vector{Tuple{CartesianIndex, NTuple{N, Float64}}}()
-    
-    # Iterate over all cell indices using Iterators.product
-    for idx in Iterators.product((1:d for d in dims)...)
-        # A cell is at the border if any index equals 1 or the maximum in that dimension.
-        if any(d -> idx[d] == 1 || idx[d] == dims[d], 1:N)
-            # Get the physical cell center: tuple (mesh.centers[1][i₁], mesh.centers[2][i₂], ...)
-            pos = ntuple(d -> mesh.centers[d][idx[d]], N)
-            push!(border_cells, (CartesianIndex(idx), pos))
+        nodes_uniform = ntuple(i -> [x0[i] + (j + 0.5) * (domain_size[i] / n[i]) for j in 0:(n[i])], N)
+        
+        # Calculate border cells directly from centers
+        dims = ntuple(i -> length(centers_uniform[i]), N)
+        border_cells = Vector{Tuple{CartesianIndex{N}, NTuple{N, Float64}}}()
+        
+        # For each dimension
+        for d in 1:N
+            # For each face (lower and upper) in dimension d
+            for face_val in [1, dims[d]]
+                # Create iterators for all other dimensions
+                ranges = [1:dims[i] for i in 1:N]
+                # Fix the current dimension to the face value
+                ranges[d] = face_val:face_val
+                
+                # Generate all cells on this face
+                for idx in Iterators.product(ranges...)
+                    pos = ntuple(i -> centers_uniform[i][idx[i]], N)
+                    push!(border_cells, (CartesianIndex(idx), pos))
+                end
+            end
         end
+        
+        # Remove duplicates (corner cells)
+        unique!(border_cells)
+        
+        # Create the mesh directly with all components
+        return new{N}(nodes_uniform, centers_uniform, MeshTag{N}(border_cells))
     end
-    return border_cells
 end
 
 """
-    nC(mesh::Mesh{N}) where N
+    nC(mesh::AbstractMesh)
 
 Calculate the total number of cells in a mesh.
+"""
+nC(mesh::AbstractMesh) = prod(length.(mesh.centers))
+
+"""
+    SpaceTimeMesh{M} <: AbstractMesh
+
+A mesh structure that combines a spatial mesh with a temporal dimension.
+
+# Fields
+- `nodes::NTuple{M, Vector{Float64}}`: Node coordinates for each dimension
+- `centers::NTuple{M, Vector{Float64}}`: Cell center coordinates for each dimension
+- `tag::MeshTag`: Mesh tags for identifying regions or boundaries
+
+# Constructor
+    SpaceTimeMesh(spaceMesh::Mesh{N}, time::Vector{Float64}; tag::MeshTag=MeshTag{N}([]))
+
+Creates a space-time mesh by extending a spatial `Mesh{N}` with a temporal dimension.
 
 # Arguments
-- `mesh::Mesh{N}`: A mesh object of type `Mesh` with `N` dimensions.
+- `spaceMesh::Mesh{N}`: A spatial mesh with N dimensions
+- `time::Vector{Float64}`: Vector of time points representing the temporal grid
 
-# Returns
-- An integer representing the total number of cells in the mesh, calculated as the product of the lengths of the mesh centers.
+# Keyword Arguments
+- `tag::MeshTag=MeshTag{N}([])`: Optional mesh tag information
 
-# Example
-x = range(0.0, stop=1.0, length=5)
-mesh1D = Mesh((x,))
-nC(mesh1D) == 5
+# Notes
+- The resulting mesh has dimensionality M = N + 1, where the (N+1)th dimension represents time
+- Time centers are computed as midpoints between consecutive time nodes
 """
-nC(mesh::Mesh{N}) where N = prod(length.(mesh.centers))
-
-mutable struct SpaceTimeMesh{M} <: AbstractMesh
+struct SpaceTimeMesh{M} <: AbstractMesh
     nodes::NTuple{M, Vector{Float64}}
     centers::NTuple{M, Vector{Float64}}
     tag::MeshTag
@@ -103,5 +104,3 @@ mutable struct SpaceTimeMesh{M} <: AbstractMesh
         return new{M}(nodes, centers, tag)
     end
 end
-
-nC(mesh::SpaceTimeMesh{M}) where M = prod(length.(mesh.centers))
