@@ -156,9 +156,13 @@ function ConvectionOps(Capacity::AbstractCapacity, uₒ, uᵧ)
         G = [Dx_m * Capacity.B[1]; Dy_m * Capacity.B[2]]
         Cx = Dx_p * spdiagm(0 => (Sx_m * Capacity.A[1] * uₒ[1])) * Sx_m
         Cy = Dy_p * spdiagm(0 => (Sy_m * Capacity.A[2] * uₒ[2])) * Sy_m
+        #Cx = Dx_p * Capacity.A[1] * spdiagm(0 => (uₒ[1])) * Sx_p
+        #Cy = Dy_p * Capacity.A[2] * spdiagm(0 => (uₒ[2])) * Sy_p
         H = [Capacity.A[1]*Dx_m - Dx_m*Capacity.B[1]; Capacity.A[2]*Dy_m - Dy_m*Capacity.B[2]]
         Kx = spdiagm(0 => Sx_p * H' * uᵧ)
         Ky = spdiagm(0 => Sy_p * H' * uᵧ)
+        #Kx = H' * spdiagm(0 => uᵧ)
+        #Ky = H' * spdiagm(0 => uᵧ)
         diagW = diag(blockdiag(Capacity.W[1], Capacity.W[2]))
         new_diagW = [val != 0 ? 1.0 / val : 1.0 for val in diagW]
         Wꜝ = spdiagm(0 => new_diagW)
@@ -173,10 +177,16 @@ function ConvectionOps(Capacity::AbstractCapacity, uₒ, uᵧ)
         Cx = Dx_p * spdiagm(0 => (Sx_m * Capacity.A[1] * uₒ[1])) * Sx_m
         Cy = Dy_p * spdiagm(0 => (Sy_m * Capacity.A[2] * uₒ[2])) * Sy_m
         Cz = Dz_p * spdiagm(0 => (Sz_m * Capacity.A[3] * uₒ[3])) * Sz_m
+        #Cx = Dx_p * Capacity.A[1] * spdiagm(0 => (uₒ[1])) * Sx_p
+        #Cy = Dy_p * Capacity.A[2] * spdiagm(0 => (uₒ[2])) * Sy_p
+        #Cz = Dz_p * Capacity.A[3] * spdiagm(0 => (uₒ[3])) * Sz_p
         H = [Capacity.A[1]*Dx_m - Dx_m*Capacity.B[1]; Capacity.A[2]*Dy_m - Dy_m*Capacity.B[2]; Capacity.A[3]*Dz_m - Dz_m*Capacity.B[3]]
         Kx = spdiagm(0 => Sx_p * H' * uᵧ)
         Ky = spdiagm(0 => Sy_p * H' * uᵧ)
         Kz = spdiagm(0 => Sz_p * H' * uᵧ)
+        #Kx = H' * spdiagm(0 => uᵧ)
+        #Ky = H' * spdiagm(0 => uᵧ)
+        #Kz = H' * spdiagm(0 => uᵧ)
         diagW = diag(blockdiag(Capacity.W[1], Capacity.W[2], Capacity.W[3]))
         new_diagW = [val != 0 ? 1.0 / val : 1.0 for val in diagW]
         Wꜝ = spdiagm(0 => new_diagW)

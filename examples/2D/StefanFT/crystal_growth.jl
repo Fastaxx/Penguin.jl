@@ -13,7 +13,7 @@ using Statistics
 # Define physical parameters
 L = 1.0                 # Latent heat
 c = 1.0                 # Specific heat capacity
-TM = 1.0                # Melting temperature (solid phase) as specified
+TM = 0.0                # Melting temperature (solid phase) as specified
 T∞ = -1.0               # Far field temperature (undercooled liquid)
 
 # Calculate the Stefan number
@@ -21,9 +21,9 @@ Ste = (c * (TM - T∞)) / L
 println("Stefan number: $Ste")
 
 # Define the spatial mesh
-nx, ny = 32, 32
-lx, ly = 16.0, 16.0
-x0, y0 = -8.0, -8.0
+nx, ny = 64, 64  # Number of grid points in x and y directions
+lx, ly = 4.0, 4.0
+x0, y0 = -2.0, -2.0
 Δx, Δy = lx/nx, ly/ny
 mesh = Penguin.Mesh((nx, ny), (lx, ly), (x0, y0))
 
@@ -31,20 +31,21 @@ println("Mesh created with dimensions: $(nx) x $(ny), Δx=$(Δx), Δy=$(Δy)")
 
 # Initial time settings
 t_init = 1.0
-R0 = 6.0  # Base radius for the crystal
+R0 = 1.0  # Base radius for the crystal
 
 # Create front tracker with perturbed crystal shape
 front = FrontTracker()
-nmarkers = 60  # Number of markers
+nmarkers = 300  # Number of markers
 
 # Create the perturbed crystal
-create_crystal!(front, 0.0, 0.0, R0, 4, 0.1, nmarkers)
+create_crystal!(front, 0.0, 0.0, R0, 6, 0.1, nmarkers)
 
 # Define the body using the SDF from the front tracker
 body = (x, y, t, _=0) -> -sdf(front, x, y)
 
 # Define the Space-Time mesh
 Δt = 0.1 * (Δx)^2  # Time step size based on mesh spacing
+Δt = 0.005
 t_final = t_init + 10*Δt  # Run for 10 time steps
 
 STmesh = Penguin.SpaceTimeMesh(mesh, [t_init, t_final], tag=mesh.tag)
@@ -72,45 +73,32 @@ Fluide = Phase(capacity, operator, f, K)
 
 # Initialize temperature fields
 u0ₒ = zeros((nx+1)*(ny+1))
-body_init = (x,y,_=0) -> -sdf(front, x, y)
+body_init = (x,y,_=0) -> sdf(front, x, y)
 cap_init = Capacity(body_init, mesh; compute_centroids=false)
 centroids = cap_init.C_ω
-
-
-# Paramètre de vitesse
-V = 60.0  # Valeur du paramètre V comme spécifié
-
-# Définition correcte de la fonction d'initialisation de température
-function initial_temperature(val, V, t)
-    if val > V*t
-        return -1.0 + exp(-V*(val - V*t))
-    else
-        return 0.0
-    end
-end
-
-factor = 2.0  # Controls width of transition (adjust as needed)
+factor = 0.5  # Controls width of transition (adjust as needed)
 L0 = R0       # Characteristic length (use initial radius)
-
-# Initialize the temperature with the specified function
+# Initialize the temperature with properly scaled tanh profile
 for idx in 1:length(centroids)
     centroid = centroids[idx]
     x, y = centroid[1], centroid[2]
     
-    # Get signed distance (negative inside, positive outside)
+    # Distance signée (négative à l'intérieur, positive à l'extérieur)
     val = body_init(x, y)
     
-    # Distance absolue à l'interface
-    dist_abs = abs(val)
-    
-    # Fonction qui décroît avec la distance à l'interface
-    # 1 à l'interface, tend vers -1 loin de l'interface
-    normalized_value = 1.0 - 2.0 * tanh(dist_abs * L0 / factor)
-    
-    # Assigner directement cette valeur
-    u0ₒ[idx] = normalized_value
+    if val <= 0
+        # À l'intérieur ou sur l'interface: température = TM
+        u0ₒ[idx] = TM
+    else
+        # À l'extérieur: transition de TM à T∞ avec tanh
+        # Utilisation de tanh qui va de 0 à l'interface à 1 loin
+        transition = tanh(val * L0 / factor)
+        
+        # Interpoler de TM (à l'interface) à T∞ (loin)
+        u0ₒ[idx] = TM + transition * (T∞ - TM)
+    end
 end
-u0ₒ = ones((nx+1)*(ny+1)) * T∞ 
+#u0ₒ = ones((nx+1)*(ny+1)) * T∞ 
 u0ᵧ = ones((nx+1)*(ny+1)) * TM  # Interface temperature
 u0 = vcat(u0ₒ, u0ᵧ)
 
@@ -144,7 +132,7 @@ solver, residuals, xf_log, timestep_history = solve_StefanMono2D!(
     solver, Fluide, front, Δt, t_init, t_final, bc_b, bc, stef_cond, mesh, "BE";
     Newton_params=Newton_params, 
     smooth_factor=0.7, 
-    window_size=15, 
+    window_size=55, 
     method=Base.:\
 )
 

@@ -187,8 +187,8 @@ function A_mono_unstead_advdiff(operator::ConvectionOps, capacite::Capacity, D, 
     K = operator.K # NTuple{N, SparseMatrixCSC{Float64, Int}}
 
     if scheme == "CN"
-        A11 = operator.V + Δt/2 * (sum(C) + 0.5 * sum(K)) + Δt/2 * Id * operator.G' * operator.Wꜝ * operator.G
-        A12 = Δt/2 * 0.5 * sum(K) + Δt/2 * Id * operator.G' * operator.Wꜝ * operator.H
+        A11 = operator.V + Δt/2 * Id * operator.G' * operator.Wꜝ * operator.G
+        A12 = Δt/2 * Id * operator.G' * operator.Wꜝ * operator.H
         A21 = Δt/2 * Iᵦ * operator.H' * operator.Wꜝ * operator.G
         A22 = Δt/2 * Iᵦ * operator.H' * operator.Wꜝ * operator.H + Δt/2 * Iₐ * Iᵧ
     elseif scheme == "BE"
@@ -248,7 +248,7 @@ function b_mono_unstead_advdiff(operator::ConvectionOps, f, capacite::Capacity, 
     """
 
     if scheme == "CN"
-        b1 = operator.V * Tₒ  - Δt/2 * sum(C) * Tₒ - 0.5 * sum(K) * Tₒ - Δt/2 * 0.5 * sum(K) * Tᵧ - Δt/2 * operator.G' * operator.Wꜝ * operator.G * Tₒ - Δt/2 * operator.G' * operator.Wꜝ * operator.H * Tᵧ + Δt/2 * operator.V * (fₒn + fₒn1)
+        b1 = operator.V * Tₒ  - Δt * sum(C) * Tₒ - 0.5 * Δt * sum(K) * Tₒ - Δt * 0.5 * sum(K) * Tᵧ - Δt/2 * operator.G' * operator.Wꜝ * operator.G * Tₒ - Δt/2 * operator.G' * operator.Wꜝ * operator.H * Tᵧ + Δt/2 * operator.V * (fₒn + fₒn1)
         b2 = Δt/2 * Iᵧ * (gᵧn+gᵧn1) - Δt/2 * Iᵦ * operator.H' * operator.Wꜝ * operator.G * Tₒ - Δt/2 * Iᵦ * operator.H' * operator.Wꜝ * operator.H * Tᵧ - Δt/2 * Iₐ * Iᵧ * Tᵧ
     elseif scheme == "BE"
         b1 = operator.V * Tₒ + Δt * operator.V * fₒn1

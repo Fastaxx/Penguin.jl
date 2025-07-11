@@ -12,12 +12,13 @@ domain = ((x0, lx), (y0, ly))
 mesh = Penguin.Mesh((nx, ny), (lx, ly), (x0, y0))
 
 # Define translation parameters
-radius = 0.75       # Constant radius of disk
-velocity_x = 2.0    # Translation velocity in x-direction
+radius = 1.0       # Constant radius of disk
+velocity_x = 1.0    # Translation velocity in x-direction
 velocity_y = 0.0    # Translation velocity in y-direction
 x_0_initial = 2.0   # Initial x-position
 y_0_initial = ly/2  # Initial y-position
 D = 1.0             # diffusion coefficient
+println("Peclet number: ", (velocity_x * (lx/nx)) / D)
 
 # Define the translating body as a level set function
 function translating_body(x, y, t)
@@ -43,13 +44,17 @@ capacity = Capacity(translating_body, STmesh)
 N = (nx + 1) * (ny + 1)*2
 
 # Initialize velocity components - set to constant field equal to disk translation
-uₒx = fill(velocity_x, N)
-uₒy = fill(velocity_y, N)
+uₒx = ones(N) * velocity_x  # Constant velocity in x-direction
+uₒy = ones(N) * velocity_y  # Constant velocity in y-direction
 uₒt = zeros(N)  # No time component needed for this problem
 uₒ = (uₒx, uₒy, uₒt)
 
 # For boundary velocities
-uᵧ = zeros(3*N)
+uᵧ = zeros(3*N) * 1.0
+uᵧx = ones(N) * velocity_x  # Constant velocity in x-direction
+uᵧy = ones(N) * velocity_y  # Constant velocity in y-direction
+uᵧt = zeros(N)  # No time component needed for this problem
+uᵧ = vcat(uᵧx, uᵧy, uᵧt)
 
 # Define the operators
 operator = ConvectionOps(capacity, uₒ, uᵧ)
@@ -60,16 +65,44 @@ bc = Dirichlet(0.0)
 bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:left => bc, :right => bc, :top => bc, :bottom => bc))
 
 # Dirichlet condition on the disk boundary
-ic = Dirichlet(0.0)
+ic = Dirichlet(1.0)
 
 f = (x,y,z,t) -> 0.0
 
 # Define the phase with source term from manufactured solution
 Fluide = Phase(capacity, operator, f, (x,y,z) -> D)
 
-# Create initial condition arrays
-T0ₒ = ones((nx+1)*(ny+1))
+# Create initial condition arrays with Gaussian bump
+# Calculate mesh nodes coordinates
+mesh_nodes_x = repeat(mesh.nodes[1], outer=length(mesh.nodes[2]))
+mesh_nodes_y = repeat(mesh.nodes[2], inner=length(mesh.nodes[1]))
+npts = (nx+1)*(ny+1)
+
+# Parameters for the Gaussian bump
+amplitude = 1.0       # Maximum temperature value
+sigma = radius / 10.0  # Controls the width of the Gaussian (related to disk radius)
+
+# Initialize temperature arrays
+T0ₒ = zeros((nx+1)*(ny+1))
 T0ᵧ = zeros((nx+1)*(ny+1))
+
+# Fill arrays with Gaussian values
+for i in 1:length(mesh_nodes_x)
+    x = mesh_nodes_x[i]
+    y = mesh_nodes_y[i]
+    
+    # Distance from initial disk center
+    dist = sqrt((x - x_0_initial)^2 + (y - y_0_initial)^2)
+    
+    # Gaussian function
+    if dist <= 2*radius  # Only apply within a reasonable distance
+        T0ₒ[i] = amplitude * exp(-(dist^2) / (2*sigma^2))
+    end
+    # Boundary values remain at zero
+end
+
+# Set the same values for boundary temperatures
+T0ᵧ = copy(T0ₒ)
 
 T0 = vcat(T0ₒ, T0ᵧ)
 
@@ -227,7 +260,7 @@ function plot_snapshots_from_csv(data_dir=joinpath(pwd(), "simulation_data"))
     fig = Figure(resolution=(1500, 400), fontsize=12)
     
     # Create common colorbar
-    Colorbar(fig[1:1, 5], limits=temp_limits, colormap=:viridis, 
+    Colorbar(fig[1:1, 5], colormap=:viridis, 
              label="Temperature", labelsize=14, size=25, ticklabelsize=12)
     
     # Determine global plot limits to keep consistent view
@@ -265,7 +298,7 @@ function plot_snapshots_from_csv(data_dir=joinpath(pwd(), "simulation_data"))
         T_mat[T_mat .== 0.0] .= NaN
         
         # Plot temperature field
-        hm = heatmap!(ax, x_unique, y_unique, T_mat', colormap=:viridis, colorrange=temp_limits)
+        hm = heatmap!(ax, x_unique, y_unique, T_mat', colormap=:viridis)
         
         # Draw the disk interface
         n_interface_points = 200

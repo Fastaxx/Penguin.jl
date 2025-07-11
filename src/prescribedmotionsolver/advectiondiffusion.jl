@@ -32,6 +32,35 @@ function MovingAdvDiffusionUnsteadyMono(phase::Phase, bc_b::BorderConditions, bc
     return s
 end
 
+function psip_conv(args::Vararg{T,2}) where {T<:Real}
+    if all(iszero, args)
+        0.0
+    elseif all(!iszero, args)
+        0.0
+    elseif iszero(args[1]) && !iszero(args[2]) # Fresh
+        1.0
+    elseif !iszero(args[1]) && iszero(args[2]) # Dead
+        0.0
+    else
+        0.0
+    end
+end
+
+function psim_conv(args::Vararg{T,2}) where {T<:Real}
+    if all(iszero, args)
+        0.0
+    elseif all(!iszero, args)
+        1.0
+    elseif iszero(args[1]) && !iszero(args[2]) # Fresh
+        0.0
+    elseif !iszero(args[1]) && iszero(args[2]) # Dead
+        1.0
+    else
+        0.0
+    end
+end
+
+
 function A_mono_unstead_advdiff_moving(operator::ConvectionOps, capacity::Capacity, D, bc::AbstractBoundary, scheme::String)
     # Determine dimension (1D vs 2D) from operator.size
     dims = operator.size
@@ -64,6 +93,7 @@ function A_mono_unstead_advdiff_moving(operator::ConvectionOps, capacity::Capaci
 
     C = C[1][1:end÷2, 1:end÷2], C[2][end÷2+1:end, end÷2+1:end], C[3][1:end÷2, end÷2+1:end]
     K = K[1][1:end÷2, 1:end÷2], K[2][end÷2+1:end, end÷2+1:end], K[3][1:end÷2, end÷2+1:end]
+    #K = K[1][:, 1:end÷3], K[2][:, 1:end÷3], K[3][:, 1:end÷3]
 
     # Adjust for dimension
     if len_dims == 2
@@ -86,9 +116,12 @@ function A_mono_unstead_advdiff_moving(operator::ConvectionOps, capacity::Capaci
     Iᵧ = Iᵧ[1:end÷2, 1:end÷2]
     Id  = Id[1:end÷2, 1:end÷2]
 
+    psimconv, psipconv = psim_conv, psip_conv
+    Ψ_conv = Diagonal(psipconv.(Vn, Vn_1))
+
     # Construct subblocks
-    block1 = Vn_1 + Id * G' * W! * G * Ψn1 + (sum(C) + 0.5 * sum(K)) * Ψn1
-    block2 = -(Vn_1 - Vn) + Id * G' * W! * H * Ψn1 + 0.5 * sum(K) * Ψn1
+    block1 = Vn_1 + Id * G' * W! * G * Ψn1 - (sum(C) + 0.5 * K[1]) * Ψ_conv
+    block2 = -(Vn_1 - Vn) + Id * G' * W! * H * Ψn1 - 0.5 * K[1] * Ψ_conv
     block3 = Iᵦ * H' * W! * G
     block4 = Iᵦ * H' * W! * H + (Iₐ * Iᵧ)
 
@@ -124,13 +157,13 @@ function b_mono_unstead_advdiff_moving(operator::ConvectionOps, capacity::Capaci
 
     C = C[1][1:end÷2, 1:end÷2], C[2][end÷2+1:end, end÷2+1:end], C[3][1:end÷2, end÷2+1:end]
     K = K[1][1:end÷2, 1:end÷2], K[2][end÷2+1:end, end÷2+1:end], K[3][1:end÷2, end÷2+1:end]
+    #K = K[1][:, 1:end÷3], K[2][:, 1:end÷3], K[3][:, 1:end÷3]
 
     # Create the 1D or 2D indices
     if len_dims == 2
         # 1D case
         nx, nt = dims
         n = nx
-        
     elseif len_dims == 3
         # 2D case
         nx, ny, nt = dims
@@ -151,11 +184,14 @@ function b_mono_unstead_advdiff_moving(operator::ConvectionOps, capacity::Capaci
     gᵧ = gᵧ[1:end÷2]
     Id = Id[1:end÷2, 1:end÷2]
 
+    psimconv, psipconv = psim_conv, psip_conv
+    Ψ_conv = Diagonal(psimconv.(Vn, Vn_1))
+
     # Construct the right-hand side
     if scheme == "CN"
-        b1 = (Vn - Id * G' * W! * G * Ψn)*Tₒ - 0.5 * Id * G' * W! * H * Tᵧ + 0.5 * V * (fₒn + fₒn1) - sum(C) * Ψn * Tₒ - 0.5 * sum(K) * Ψn * Tₒ - 0.5 * sum(K) * Tᵧ
+        b1 = (Vn - Id * G' * W! * G * Ψn)*Tₒ - 0.5 * Id * G' * W! * H * Tᵧ + 0.5 * V * (fₒn + fₒn1) - 0.5 * K[1] * Ψn * Tₒ - 0.5 * K[1] * Tᵧ - sum(C) * Tₒ
     else
-        b1 = Vn * Tₒ + V * fₒn1
+        b1 = Vn * Tₒ + V * fₒn1 - 0.5 * K[1] * Ψ_conv * Tₒ - 0.5 * K[1] * Tᵧ - sum(C) * Ψ_conv * Tₒ
     end
     b2 = Iᵧ_mat * gᵧ
 
@@ -272,17 +308,6 @@ function A_diph_unstead_advdiff_moving(operator1::ConvectionOps, operator2::Conv
     Vn2_1 = capacite2.A[cap_index2][1:end÷2, 1:end÷2]
     Vn2   = capacite2.A[cap_index2][end÷2+1:end, end÷2+1:end]
 
-    C1 = operator1.C
-    K1 = operator1.K
-    C2 = operator2.C
-    K2 = operator2.K
-
-    C1 = C1[1][1:end÷2, 1:end÷2], C1[2][end÷2+1:end, end÷2+1:end], C1[3][1:end÷2, end÷2+1:end]
-    K1 = K1[1][1:end÷2, 1:end÷2], K1[2][end÷2+1:end, end÷2+1:end], K1[3][1:end÷2, end÷2+1:end]
-    C2 = C2[1][1:end÷2, 1:end÷2], C2[2][end÷2+1:end, end÷2+1:end], C2[3][1:end÷2, end÷2+1:end]
-    K2 = K2[1][1:end÷2, 1:end÷2], K2[2][end÷2+1:end, end÷2+1:end], K2[3][1:end÷2, end÷2+1:end]
-
-
     # Time integration weighting
     if scheme == "CN"
         psip, psim = psip_cn, psim_cn
@@ -296,6 +321,17 @@ function A_diph_unstead_advdiff_moving(operator1::ConvectionOps, operator2::Conv
     Iₐ1, Iₐ2 = jump.α₁ * I(size(Ψn1)[1]), jump.α₂ * I(size(Ψn2)[1])
     Iᵦ1, Iᵦ2 = flux.β₁ * I(size(Ψn1)[1]), flux.β₂ * I(size(Ψn2)[1])
 
+    C1 = operator1.C
+    K1 = operator1.K
+
+    C2 = operator2.C
+    K2 = operator2.K
+
+    C1 = C1[1][1:end÷2, 1:end÷2], C1[2][end÷2+1:end, end÷2+1:end], C1[3][1:end÷2, end÷2+1:end]
+    K1 = K1[1][1:end÷2, 1:end÷2], K1[2][end÷2+1:end, end÷2+1:end], K1[3][1:end÷2, end÷2+1:end]
+
+    C2 = C2[1][1:end÷2, 1:end÷2], C2[2][end÷2+1:end, end÷2+1:end], C2[3][1:end÷2, end÷2+1:end]
+    K2 = K2[1][1:end÷2, 1:end÷2], K2[2][end÷2+1:end, end÷2+1:end], K2[3][1:end÷2, end÷2+1:end]
 
     # Operator sub-blocks for each phase
     W!1 = operator1.Wꜝ[1:end÷2, 1:end÷2]
@@ -313,11 +349,15 @@ function A_diph_unstead_advdiff_moving(operator1::ConvectionOps, operator2::Conv
     Id1  = Id1[1:end÷2, 1:end÷2]
     Id2  = Id2[1:end÷2, 1:end÷2]
 
+    psimconv, psipconv = psim_conv, psip_conv
+    Ψ_conv1 = Diagonal(psipconv.(Vn1, Vn1_1))
+    Ψ_conv2 = Diagonal(psipconv.(Vn2, Vn2_1))
+
     # Construct blocks
-    block1 = Vn1_1 + Id1 * G1' * W!1 * G1 * Ψn1 + (sum(C1) + 0.5 * sum(K1)) * Ψn1
-    block2 = -(Vn1_1 - Vn1) + Id1 * G1' * W!1 * H1 * Ψn1 + 0.5 * sum(K1) * Ψn1
-    block3 = Vn2_1 + Id2 * G2' * W!2 * G2 * Ψn2 + (sum(C2) + 0.5 * sum(K2)) * Ψn2
-    block4 = -(Vn2_1 - Vn2) + Id2 * G2' * W!2 * H2 * Ψn2 + 0.5 * sum(K2) * Ψn2
+    block1 = Vn1_1 + Id1 * G1' * W!1 * G1 * Ψn1 - (sum(C1) + 0.5 * K1[1]) * Ψ_conv1
+    block2 = -(Vn1_1 - Vn1) + Id1 * G1' * W!1 * H1 * Ψn1 - 0.5 * K1[1] * Ψ_conv1
+    block3 = Vn2_1 + Id2 * G2' * W!2 * G2 * Ψn2 - (sum(C2) + 0.5 * K2[1]) * Ψ_conv2
+    block4 = -(Vn2_1 - Vn2) + Id2 * G2' * W!2 * H2 * Ψn2 - 0.5 * K2[1] * Ψ_conv2
 
     block5 = Iᵦ1 * H1' * W!1 * G1 * Ψn1
     block6 = Iᵦ1 * H1' * W!1 * H1 * Ψn1
@@ -397,6 +437,8 @@ function b_diph_unstead_advdiff_moving(operator1::ConvectionOps, operator2::Conv
     C2 = C2[1][1:end÷2, 1:end÷2], C2[2][end÷2+1:end, end÷2+1:end], C2[3][1:end÷2, end÷2+1:end]
     K2 = K2[1][1:end÷2, 1:end÷2], K2[2][end÷2+1:end, end÷2+1:end], K2[3][1:end÷2, end÷2+1:end]
 
+    #K1 = K1[1][:, 1:end÷3], K2[1][:, 1:end÷3], K2[2][:, 1:end÷3]
+    #K2 = K2[2][:, 1:end÷3], K2[3][:, 1:end÷3], K2[3][:, 1:end÷3]
 
     # 7) Determine whether 1D or 2D from dims1, and form local n for sub-blocks
     if len_dims1 == 2
@@ -442,13 +484,18 @@ function b_diph_unstead_advdiff_moving(operator1::ConvectionOps, operator2::Conv
     H2  = operator2.H[1:end÷2, 1:end÷2]
     V2  = operator2.V[1:end÷2, 1:end÷2]
 
+    psimconv, psipconv = psim_conv, psip_conv
+    Ψ_conv1 = Diagonal(psimconv.(Vn1, Vn1_1))
+    Ψ_conv2 = Diagonal(psimconv.(Vn2, Vn2_1))
+
+
     # 9) Build the right-hand side
     if scheme == "CN"
-        b1 = (Vn1 - Id1 * G1' * W!1 * G1 * Ψn1) * Tₒ1 - 0.5 * Id1 * G1' * W!1 * H1 * Tᵧ1 + 0.5 * V1 * (f1ₒn + f1ₒn1) - sum(C1) * Ψn1 * Tₒ1 - 0.5 * sum(K1) * Ψn1 * Tₒ1 - 0.5 * sum(K1) * Tᵧ1
-        b3 = (Vn2 - Id2 * G2' * W!2 * G2 * Ψn2) * Tₒ2 - 0.5 * Id2 * G2' * W!2 * H2 * Tᵧ2 + 0.5 * V2 * (f2ₒn + f2ₒn1) - sum(C2) * Ψn2 * Tₒ2 - 0.5 * sum(K2) * Ψn2 * Tₒ2 - 0.5 * sum(K2) * Tᵧ2
+        b1 = (Vn1 - Id1 * G1' * W!1 * G1 * Ψn1) * Tₒ1 - 0.5 * Id1 * G1' * W!1 * H1 * Tᵧ1 + 0.5 * V1 * (f1ₒn + f1ₒn1) - sum(C1) * Tₒ1 - 0.5 * K1[1] * Tₒ1 - 0.5 * K1[1] * Tᵧ1
+        b3 = (Vn2 - Id2 * G2' * W!2 * G2 * Ψn2) * Tₒ2 - 0.5 * Id2 * G2' * W!2 * H2 * Tᵧ2 + 0.5 * V2 * (f2ₒn + f2ₒn1) - sum(C2) * Tₒ2 - 0.5 * K2[1] * Tₒ2 - 0.5 * K2[1] * Tᵧ2
     else
-        b1 = Vn1 * Tₒ1 + V1 * f1ₒn1
-        b3 = Vn2 * Tₒ2 + V2 * f2ₒn1
+        b1 = Vn1 * Tₒ1 + V1 * f1ₒn1 - 0.5 * K1[1] * Ψ_conv1 * Tₒ1 - 0.5 * K1[1] * Tᵧ1 - sum(C1) * Ψ_conv1 *Tₒ1 
+        b3 = Vn2 * Tₒ2 + V2 * f2ₒn1 - 0.5 * K2[1] * Ψ_conv2 * Tₒ2 - 0.5 * K2[1] * Tᵧ2 - sum(C2) * Ψ_conv2 *Tₒ2
     end
 
     # 10) Build boundary terms

@@ -34,7 +34,7 @@ function MovingLiquidDiffusionUnsteadyMono(phase::Phase, bc_b::BorderConditions,
     return s
 end
 
-function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, bc::AbstractBoundary, ic::InterfaceConditions, mesh::AbstractMesh, scheme::String; Newton_params=(1000, 1e-10, 1e-10, 1.0), cfl_target=0.5,
+function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, Δt::Float64, Tₛ::Float64, Tₑ::Float64, bc_b::BorderConditions, bc::AbstractBoundary, ic::InterfaceConditions, mesh::AbstractMesh, scheme::String; Newton_params=(1000, 1e-10, 1e-10, 1.0), cfl_target=0.5,
     Δt_min=1e-4,
     Δt_max=1.0,
     adaptive_timestep=true, method=IterativeSolvers.gmres, kwargs...)
@@ -50,7 +50,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
     println("- Diffusion problem")
 
     # Solve system for the initial condition
-    t=0.0
+    t=Tₛ
     println("Time : $(t)")
 
     # Params
@@ -61,7 +61,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
     α        = Newton_params[4]
 
     # Log residuals and interface positions for each time step:
-    nt = Int(Tₑ/Δt)
+    nt = Int(round(Tₑ/Δt))
     residuals = Dict{Int, Vector{Float64}}()
     xf_log = Float64[]
     timestep_history = Tuple{Float64, Float64}[]
@@ -128,7 +128,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
         push!(residuals[1], err)
 
         # 3) Update geometry if not converged
-        if (err <= tol) || (err <= reltol * abs(current_xf))
+        if (err <= tol) || (err <= reltol * abs(current_xf)) || (iter == max_iter)
             push!(xf_log, new_xf)
             break
         end
@@ -252,7 +252,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
             push!(residuals[k], err)
 
             # 3) Update geometry if not converged
-            if (err <= tol) || (err <= reltol * abs(current_xf))
+            if (err <= tol) || (err <= reltol * abs(current_xf)) || (iter == max_iter)
                 push!(xf_log, new_xf)
                 break
             end
@@ -530,7 +530,7 @@ function MovingLiquidDiffusionUnsteadyDiph(phase1::Phase, phase2::Phase, bc_b::B
 end
 
 
-function solve_MovingLiquidDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phase2::Phase, xf, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, ic::InterfaceConditions, mesh::AbstractMesh, scheme::String; Newton_params=(1000, 1e-10, 1e-10, 1.0), method = IterativeSolvers.gmres, kwargs...)
+function solve_MovingLiquidDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phase2::Phase, xf, Δt::Float64, Tₛ::Float64, Tₑ::Float64, bc_b::BorderConditions, ic::InterfaceConditions, mesh::AbstractMesh, scheme::String; Newton_params=(1000, 1e-10, 1e-10, 1.0), method = IterativeSolvers.gmres, kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
@@ -543,7 +543,7 @@ function solve_MovingLiquidDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phas
     println("- Diffusion problem")
 
     # Solve system for the initial condition
-    t=0.0
+    t=Tₛ
     println("Time : $(t)")
 
     # Params
@@ -554,7 +554,7 @@ function solve_MovingLiquidDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phas
     α        = Newton_params[4]
 
     # Log residuals and interface positions for each time step:
-    nt = Int(Tₑ/Δt)
+    nt = Int(round(Tₑ/Δt))
     residuals = [Float64[] for _ in 1:2nt]
     xf_log = Float64[]
 

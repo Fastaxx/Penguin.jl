@@ -5,7 +5,7 @@ using CairoMakie
 
 ### 2D Test Case: Diphasic Unsteady Diffusion Equation inside an oscillating Disk 
 # Define the mesh - larger domain to accommodate oscillation
-nx, ny = 80, 80
+nx, ny = 64, 64
 lx, ly = 4.0, 4.0  
 x0, y0 = 0.0, 0.0
 domain = ((x0, lx), (y0, ly))
@@ -13,10 +13,10 @@ mesh = Penguin.Mesh((nx, ny), (lx, ly), (x0, y0))
 
 # Define translation parameters
 radius = 1.0       # Constant radius of disk
-velocity_x = 1.0    # Translation velocity in x-direction
+velocity_x = 0.0    # Translation velocity in x-direction
 velocity_y = 0.0    # Translation velocity in y-direction
-x_0_initial = 2.0   # Initial x-position
-y_0_initial = 2.0  # Initial y-position
+x_0_initial = 2.01   # Initial x-position
+y_0_initial = 2.01  # Initial y-position
 D = 1.0             # diffusion coefficient
 
 # Define the translating body as a level set function
@@ -41,8 +41,8 @@ end
 
 # Define the Space-Time mesh
 Δt = 0.5*(lx/nx)^2  # Time step based on mesh size
-Tstart = 0.01  # Start at small positive time to avoid t=0 singularity
-Tend = 0.02
+Tstart = 0.0  # Start at small positive time to avoid t=0 singularity
+Tend = 0.1
 STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt], tag=mesh.tag)
 
 # Define the capacity
@@ -61,6 +61,12 @@ uₒ = (uₒx, uₒy, uₒt)
 
 # For boundary velocities
 uᵧ = zeros(3*N)
+uᵧx = fill(velocity_x, N)
+uᵧy = fill(velocity_y, N)
+uᵧt = zeros(N)  # No time component needed for this problem
+uᵧ = vcat(uᵧx, uᵧy, uᵧt)
+uᵧ = zeros(3*N)
+
 
 # Define the operators
 operator = ConvectionOps(capacity, uₒ, uᵧ)
@@ -228,6 +234,9 @@ function plot_diphasic_snapshots_from_csv(data_dir=joinpath(pwd(), "simulation_d
     if !isfinite(temp2_min) || !isfinite(temp2_max)
         temp2_min, temp2_max = 0.0, 1.0
     end
+
+    temp1_min, temp1_max = 0.0, 1.0
+    temp2_min, temp2_max = 0.0, 1.0
     
     # Use a global temperature range for visualization
     temp_min = min(temp1_min, temp2_min)
@@ -248,7 +257,7 @@ function plot_diphasic_snapshots_from_csv(data_dir=joinpath(pwd(), "simulation_d
     fig = Figure(resolution=(1500, 400), fontsize=12)
     
     # Create common colorbar
-    Colorbar(fig[1:1, 5], limits=temp_limits, colormap=:turbo, 
+    Colorbar(fig[1:1, 5], colormap=:turbo, 
              label="Temperature", labelsize=14, size=25, ticklabelsize=12)
     
     # Determine global plot limits to keep consistent view
@@ -256,6 +265,9 @@ function plot_diphasic_snapshots_from_csv(data_dir=joinpath(pwd(), "simulation_d
     x_max = params[:x_0_initial] + total_x_travel + 2
     y_min = params[:y_0_initial] - 2
     y_max = params[:y_0_initial] + total_y_travel + 2
+
+    interface_x = []
+    interface_y = []
     
     for (i, t) in enumerate(snapshot_times)
         # Find closest timestep
@@ -302,7 +314,7 @@ function plot_diphasic_snapshots_from_csv(data_dir=joinpath(pwd(), "simulation_d
         end
         
         # Plot combined temperature field
-        hm = heatmap!(ax, x_unique, y_unique, T_grid, colormap=:turbo, colorrange=temp_limits)
+        hm = heatmap!(ax, x_unique, y_unique, T_grid', colormap=:turbo)
         
         # Draw the disk interface
         n_interface_points = 200

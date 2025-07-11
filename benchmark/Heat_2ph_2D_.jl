@@ -756,7 +756,7 @@ cg_analytical(x, y) = compute_cg_analytical(x, y, final_time)
 cl_analytical(x, y) = compute_cl_analytical(x, y, final_time)
 
 # Define mesh sizes to test
-nx_list = [20, 40, 80, 160, 320]
+nx_list = [16, 32, 64, 128, 256]
 
 """
 # Run the convergence study
@@ -1193,7 +1193,7 @@ function plot_sherwood_numbers()
     sherwood_dir = "sherwood"
     
     # Grid sizes to process
-    grid_sizes = [20, 40, 80, 160, 320]
+    grid_sizes = [16, 32, 64, 128, 256]
     
     # Scientific color palette (colorblind-friendly)
     colors = [:steelblue, :indianred, :seagreen, :darkorchid, :goldenrod]
@@ -1276,8 +1276,8 @@ function plot_sherwood_numbers()
                 markersize=8)
     end
     
-    # Add analytical reference line using the nx=320 data
-    analytical_file = joinpath(sherwood_dir, "Sherwood_number_320.txt")
+    # Add analytical reference line using the nx=256 data
+    analytical_file = joinpath(sherwood_dir, "Sherwood_number_256.txt")
     if isfile(analytical_file)
         lines = readlines(analytical_file)
         analytical_data = Float64[]

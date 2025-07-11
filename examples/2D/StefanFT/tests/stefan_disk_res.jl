@@ -6,7 +6,9 @@ using SpecialFunctions
 using CairoMakie
 using Statistics
 using DataFrames
+using CSV
 using Printf
+using ColorSchemes
 
 """
     run_stefan_simulation(nx::Int; n_timesteps::Int=10)
@@ -108,7 +110,7 @@ function run_stefan_simulation(nx::Int; n_timesteps::Int=10)
     u0 = vcat(u0ₒ, u0ᵧ)
     
     # Paramètres Newton
-    Newton_params = (2, 1e-7, 1e-7, 0.8)  # max_iter, tol, reltol, α
+    Newton_params = (20, 1e-7, 1e-7, 0.8)  # max_iter, tol, reltol, α
     
     # Mesurer le temps d'exécution
     start_time = time()
@@ -118,6 +120,7 @@ function run_stefan_simulation(nx::Int; n_timesteps::Int=10)
     
     # Initialiser la structure pour suivre les résidus
     all_residuals = Dict{Int, Vector{Float64}}()
+    all_position_increments = Dict{Int, Vector{Float64}}()
     all_xf_log = Dict{Int, Vector{Tuple{Float64, Float64}}}()
     timestep_history = Vector{Tuple{Float64, Float64}}()
     
@@ -140,6 +143,9 @@ function run_stefan_simulation(nx::Int; n_timesteps::Int=10)
         # Stocker les résidus pour ce pas de temps
         all_residuals[step] = step_residuals[minimum(keys(step_residuals))]
         
+        # Stocker les incréments de position pour ce pas de temps
+        all_position_increments[step] = position_increments[minimum(keys(position_increments))]
+        
         # Mettre à jour les marqueurs d'interface
         all_xf_log[step] = xf_log[maximum(keys(xf_log))]
         
@@ -160,6 +166,7 @@ function run_stefan_simulation(nx::Int; n_timesteps::Int=10)
         "ny" => ny,
         "dx" => Δx,
         "residuals" => all_residuals,
+        "position_increments" => all_position_increments,
         "xf_log" => all_xf_log,
         "timestep_history" => timestep_history,
         "runtime" => runtime
@@ -167,24 +174,109 @@ function run_stefan_simulation(nx::Int; n_timesteps::Int=10)
 end
 
 """
+    save_results_to_csv(results, output_dir::String)
+
+Sauvegarde les résultats de simulation dans des fichiers CSV.
+"""
+function save_results_to_csv(results, output_dir::String)
+    # Créer le répertoire si nécessaire
+    mkpath(output_dir)
+    
+    # Extraire les informations de la simulation
+    nx = results["nx"]
+    
+    # Créer un sous-répertoire pour cette taille de maillage
+    mesh_dir = joinpath(output_dir, string(nx))
+    mkpath(mesh_dir)
+    
+    # Sauvegarder les résidus pour chaque pas de temps
+    for (step, residuals) in results["residuals"]
+        df = DataFrame(
+            iteration = 1:length(residuals),
+            residual = residuals
+        )
+        CSV.write(joinpath(mesh_dir, "residuals_step_$(step).csv"), df)
+    end
+    
+    # Sauvegarder les incréments de position pour chaque pas de temps
+    for (step, increments) in results["position_increments"]
+        df = DataFrame(
+            iteration = 1:length(increments),
+            increment = increments
+        )
+        CSV.write(joinpath(mesh_dir, "increments_step_$(step).csv"), df)
+    end
+    
+    # Créer un résumé des statistiques par pas de temps
+    summary_rows = []
+    
+    for step in sort(collect(keys(results["residuals"])))
+        residuals = results["residuals"][step]
+        
+        # Collecter les informations pour ce pas de temps
+        if haskey(results["position_increments"], step)
+            increments = results["position_increments"][step]
+            final_increment = increments[end]
+        else
+            final_increment = NaN
+        end
+        
+        push!(summary_rows, (
+            step = step,
+            iterations = length(residuals),
+            initial_residual = residuals[1],
+            final_residual = residuals[end],
+            convergence_ratio = length(residuals) > 1 ? residuals[end] / residuals[1] : NaN,
+            final_position_increment = final_increment
+        ))
+    end
+    
+    # Sauvegarder le résumé
+    summary_df = DataFrame(summary_rows)
+    CSV.write(joinpath(mesh_dir, "simulation_summary.csv"), summary_df)
+    
+    # Créer un fichier de métadonnées
+    metadata_df = DataFrame(
+        nx = nx,
+        ny = results["ny"],
+        dx = results["dx"],
+        runtime = results["runtime"],
+        total_iterations = sum(length(res) for res in values(results["residuals"])),
+        avg_iterations_per_step = sum(length(res) for res in values(results["residuals"])) / length(results["residuals"])
+    )
+    CSV.write(joinpath(mesh_dir, "metadata.csv"), metadata_df)
+    
+    println("Résultats sauvegardés dans: $(mesh_dir)")
+    
+    return mesh_dir
+end
+
+"""
     compare_mesh_residuals(mesh_sizes::Vector{Int}, n_timesteps::Int=10)
 
-Compare les résidus de simulation pour différentes tailles de maillage et génère 
-des graphiques de comparaison.
+Compare les résidus de simulation pour différentes tailles de maillage, sauvegarde
+les données en CSV et génère des graphiques de comparaison.
 """
 function compare_mesh_residuals(mesh_sizes::Vector{Int}, n_timesteps::Int=10)
     # Stocker les résultats
     results = Dict[]
     
+    # Créer le répertoire des résultats
+    results_dir = joinpath(pwd(), "mesh_residuals_data")
+    mkpath(results_dir)
+    
     # Exécuter les simulations pour chaque taille de maillage
     for nx in mesh_sizes
         result = run_stefan_simulation(nx, n_timesteps=n_timesteps)
         push!(results, result)
+        
+        # Sauvegarder les résultats en CSV
+        save_results_to_csv(result, results_dir)
     end
     
-    # Créer le répertoire des résultats
-    results_dir = joinpath(pwd(), "residuals_comparison")
-    mkpath(results_dir)
+    # Créer le répertoire des graphiques
+    plots_dir = joinpath(pwd(), "mesh_residuals_plots")
+    mkpath(plots_dir)
     
     # 1. Comparaison des résidus par taille de maillage pour chaque pas de temps
     for step in 1:n_timesteps
@@ -206,7 +298,7 @@ function compare_mesh_residuals(mesh_sizes::Vector{Int}, n_timesteps::Int=10)
         end
         
         axislegend(ax, position=:rt)
-        save(joinpath(results_dir, "residuals_timestep_$(step).png"), fig)
+        save(joinpath(plots_dir, "residuals_timestep_$(step).png"), fig)
     end
     
     # 2. Graphique composite des résidus de tous les pas de temps pour chaque maillage
@@ -246,7 +338,7 @@ function compare_mesh_residuals(mesh_sizes::Vector{Int}, n_timesteps::Int=10)
         end
     end
     
-    save(joinpath(results_dir, "residuals_all_meshes.png"), fig_composite)
+    save(joinpath(plots_dir, "residuals_all_meshes.png"), fig_composite)
     
     # 3. Visualisation des taux de convergence
     fig_rates = Figure(size=(900, 600))
@@ -279,7 +371,7 @@ function compare_mesh_residuals(mesh_sizes::Vector{Int}, n_timesteps::Int=10)
     end
     
     axislegend(ax_rates, position=:rt)
-    save(joinpath(results_dir, "convergence_rates.png"), fig_rates)
+    save(joinpath(plots_dir, "convergence_rates.png"), fig_rates)
     
     # 4. Tableau comparatif des statistiques
     println("\nComparaison des Statistiques de Convergence:")
@@ -317,13 +409,313 @@ function compare_mesh_residuals(mesh_sizes::Vector{Int}, n_timesteps::Int=10)
     end
     println("=================================================================")
     
-    println("\nVisualisations sauvegardées dans: $results_dir")
+    println("\nVisualisations sauvegardées dans: $plots_dir")
+    println("Données CSV sauvegardées dans: $results_dir")
     
-    return results_dir
+    return results_dir, plots_dir
 end
 
-# Exécuter la comparaison pour différentes tailles de maillage
-mesh_sizes = [24, 32, 48, 64]
-n_timesteps = 10               # Nombre de pas de temps à simuler
+"""
+    plot_combined_mesh_residuals(data_dir::String)
 
-results_dir = compare_mesh_residuals(mesh_sizes, n_timesteps)
+Charge les données CSV des résidus pour différentes tailles de maillage et
+génère des graphiques comparatifs combinés.
+"""
+function plot_combined_mesh_residuals(data_dir::String)
+    # Vérifier si le répertoire existe
+    if !isdir(data_dir)
+        error("Le répertoire $data_dir n'existe pas.")
+    end
+    
+    # Détecter les sous-répertoires correspondant aux différentes tailles de maillage
+    mesh_subdirs = filter(isdir, [joinpath(data_dir, d) for d in readdir(data_dir)])
+    mesh_sizes = [parse(Int, basename(d)) for d in mesh_subdirs]
+    
+    if isempty(mesh_subdirs)
+        error("Aucun sous-répertoire de taille de maillage trouvé dans $data_dir")
+    end
+    
+    println("Analyse des données pour les maillages: $mesh_sizes")
+    
+    # Créer le répertoire pour les graphiques
+    plots_dir = joinpath(dirname(data_dir), "combined_residuals_plots")
+    mkpath(plots_dir)
+    
+    # Collecter les résidus et incréments pour chaque maillage et pas de temps
+    all_residuals = Dict{Tuple{Int, Int}, Vector{Float64}}()  # (mesh_size, timestep) => residuals
+    all_increments = Dict{Tuple{Int, Int}, Vector{Float64}}() # (mesh_size, timestep) => increments
+    max_timestep = 0
+    
+    # Charger toutes les données
+    for (mesh_size, subdir) in zip(mesh_sizes, mesh_subdirs)
+        # Trouver tous les fichiers de résidus
+        residual_files = filter(f -> startswith(f, "residuals_step_") && endswith(f, ".csv"), 
+                               readdir(subdir))
+        
+        for file in residual_files
+            # Extraire le numéro du pas de temps du nom de fichier
+            m = match(r"residuals_step_(\d+)\.csv", file)
+            if m !== nothing
+                step = parse(Int, m.captures[1])
+                max_timestep = max(max_timestep, step)
+                
+                # Charger les données de résidus
+                df = CSV.read(joinpath(subdir, file), DataFrame)
+                all_residuals[(mesh_size, step)] = df.residual
+            end
+        end
+        
+        # Trouver tous les fichiers d'incréments
+        increment_files = filter(f -> startswith(f, "increments_step_") && endswith(f, ".csv"), 
+                                readdir(subdir))
+        
+        for file in increment_files
+            # Extraire le numéro du pas de temps du nom de fichier
+            m = match(r"increments_step_(\d+)\.csv", file)
+            if m !== nothing
+                step = parse(Int, m.captures[1])
+                
+                # Charger les données d'incréments
+                df = CSV.read(joinpath(subdir, file), DataFrame)
+                all_increments[(mesh_size, step)] = df.increment
+            end
+        end
+    end
+    
+    # Définir des couleurs distinctes pour les tailles de maillage
+    mesh_colors = cgrad(:thermal, length(mesh_sizes))
+    
+    # Utiliser différents styles de lignes pour les pas de temps
+    line_styles = [:solid, :dash, :dot, :dashdot, :dashdotdot]
+    
+    # 1. Graphique des résidus combinés pour le premier pas de temps
+    fig_first_step = Figure(size=(1200, 800))
+    ax_first = Axis(fig_first_step[1, 1],
+                  title="Résidus pour toutes les tailles de maillage - Pas de temps 1",
+                  xlabel="Itération",
+                  ylabel="Résidu",
+                  yscale=log10)
+    
+    for (i, mesh_size) in enumerate(sort(mesh_sizes))
+        key = (mesh_size, 1)  # Premier pas de temps
+        if haskey(all_residuals, key)
+            residuals = all_residuals[key]
+            
+            color = mesh_colors[i]
+            
+            lines!(ax_first, 1:length(residuals), residuals,
+                  linewidth=2,
+                  color=color,
+                  label="Maillage $(mesh_size)×$(mesh_size)")
+            
+            scatter!(ax_first, 1:length(residuals), residuals,
+                    markersize=6,
+                    color=color)
+        end
+    end
+    
+    axislegend(ax_first, position=:rt, framevisible=true)
+    save(joinpath(plots_dir, "residuals_first_timestep.png"), fig_first_step)
+    
+    # 2. Graphique des résidus combinés pour tous les pas de temps et maillages
+    # (limité pour la lisibilité)
+    fig_selected = Figure(size=(1200, 800))
+    ax_selected = Axis(fig_selected[1, 1],
+                      title="Résidus pour différentes tailles de maillage et pas de temps sélectionnés",
+                      xlabel="Itération",
+                      ylabel="Résidu",
+                      yscale=log10)
+    
+    # Sélectionner quelques pas de temps représentatifs
+    timesteps_to_show = [1, max(1, max_timestep ÷ 2), max_timestep]
+    
+    for (i, mesh_size) in enumerate(sort(mesh_sizes))
+        for (j, step) in enumerate(timesteps_to_show)
+            key = (mesh_size, step)
+            if haskey(all_residuals, key)
+                residuals = all_residuals[key]
+                
+                color = mesh_colors[i]
+                line_style = line_styles[mod1(j, length(line_styles))]
+                
+                lines!(ax_selected, 1:length(residuals), residuals,
+                      linewidth=2,
+                      color=color,
+                      linestyle=line_style,
+                      label="$(mesh_size)×$(mesh_size), t=$step")
+            end
+        end
+    end
+    
+    axislegend(ax_selected, position=:rt, framevisible=true, nbanks=2)
+    save(joinpath(plots_dir, "residuals_selected_timesteps.png"), fig_selected)
+    
+    # 3. Graphique des incréments de position combinés pour le premier pas de temps
+    fig_inc_first = Figure(size=(1200, 800))
+    ax_inc_first = Axis(fig_inc_first[1, 1],
+                       title="Incréments de position pour toutes les tailles de maillage - Pas de temps 1",
+                       xlabel="Itération",
+                       ylabel="Incrément de position",
+                       yscale=log10)
+    
+    for (i, mesh_size) in enumerate(sort(mesh_sizes))
+        key = (mesh_size, 1)  # Premier pas de temps
+        if haskey(all_increments, key)
+            increments = all_increments[key]
+            
+            color = mesh_colors[i]
+            
+            lines!(ax_inc_first, 1:length(increments), increments,
+                  linewidth=2,
+                  color=color,
+                  label="Maillage $(mesh_size)×$(mesh_size)")
+            
+            scatter!(ax_inc_first, 1:length(increments), increments,
+                    markersize=6,
+                    color=color)
+        end
+    end
+    
+    axislegend(ax_inc_first, position=:rt, framevisible=true)
+    save(joinpath(plots_dir, "increments_first_timestep.png"), fig_inc_first)
+    
+    # 4. Graphique comparatif de la dernière itération pour chaque pas de temps
+    fig_final = Figure(size=(1200, 800))
+    
+    # 4a. Résidus finaux
+    ax_final_res = Axis(fig_final[1, 1],
+                       title="Résidus finaux par pas de temps",
+                       xlabel="Pas de temps",
+                       ylabel="Résidu final",
+                       yscale=log10)
+    
+    # 4b. Incréments finaux
+    ax_final_inc = Axis(fig_final[1, 2],
+                       title="Incréments finaux par pas de temps",
+                       xlabel="Pas de temps",
+                       ylabel="Incrément final",
+                       yscale=log10)
+    
+    for (i, mesh_size) in enumerate(sort(mesh_sizes))
+        final_residuals = Float64[]
+        final_increments = Float64[]
+        timesteps = Int[]
+        
+        for step in 1:max_timestep
+            res_key = (mesh_size, step)
+            inc_key = (mesh_size, step)
+            
+            if haskey(all_residuals, res_key) && !isempty(all_residuals[res_key])
+                push!(timesteps, step)
+                push!(final_residuals, all_residuals[res_key][end])
+                
+                if haskey(all_increments, inc_key) && !isempty(all_increments[inc_key])
+                    push!(final_increments, all_increments[inc_key][end])
+                else
+                    push!(final_increments, NaN)
+                end
+            end
+        end
+        
+        if !isempty(timesteps)
+            color = mesh_colors[i]
+            
+            # Tracer les résidus finaux
+            lines!(ax_final_res, timesteps, final_residuals,
+                  color=color, linewidth=2,
+                  label="Maillage $(mesh_size)×$(mesh_size)")
+            
+            scatter!(ax_final_res, timesteps, final_residuals,
+                    color=color, markersize=8)
+            
+            # Tracer les incréments finaux
+            valid_idx = .!isnan.(final_increments)
+            if any(valid_idx)
+                lines!(ax_final_inc, timesteps[valid_idx], final_increments[valid_idx],
+                      color=color, linewidth=2,
+                      label="Maillage $(mesh_size)×$(mesh_size)")
+                
+                scatter!(ax_final_inc, timesteps[valid_idx], final_increments[valid_idx],
+                        color=color, markersize=8)
+            end
+        end
+    end
+    
+    axislegend(ax_final_res, position=:rt, framevisible=true)
+    axislegend(ax_final_inc, position=:rt, framevisible=true)
+    
+    save(joinpath(plots_dir, "final_values_by_timestep.png"), fig_final)
+    
+    # 5. Graphique des résidus et incréments combinés (limité à quelques pas de temps)
+    fig_combined = Figure(size=(1500, 1000))
+    
+    # 5a. Résidus
+    ax_combined_res = Axis(fig_combined[1, 1],
+                          title="Résidus pour différentes tailles de maillage",
+                          xlabel="Itération",
+                          ylabel="Résidu",
+                          yscale=log10)
+    
+    # 5b. Incréments
+    ax_combined_inc = Axis(fig_combined[2, 1],
+                          title="Incréments pour différentes tailles de maillage",
+                          xlabel="Itération",
+                          ylabel="Incrément de position",
+                          yscale=log10)
+    
+    # Sélectionner le pas de temps 1 pour la comparaison
+    step = 1
+    
+    for (i, mesh_size) in enumerate(sort(mesh_sizes))
+        res_key = (mesh_size, step)
+        inc_key = (mesh_size, step)
+        
+        if haskey(all_residuals, res_key)
+            residuals = all_residuals[res_key]
+            color = mesh_colors[i]
+            
+            lines!(ax_combined_res, 1:length(residuals), residuals,
+                  linewidth=2,
+                  color=color,
+                  label="Maillage $(mesh_size)×$(mesh_size)")
+            
+            scatter!(ax_combined_res, 1:length(residuals), residuals,
+                    markersize=6,
+                    color=color)
+        end
+        
+        if haskey(all_increments, inc_key)
+            increments = all_increments[inc_key]
+            color = mesh_colors[i]
+            
+            lines!(ax_combined_inc, 1:length(increments), increments,
+                  linewidth=2,
+                  color=color,
+                  label="Maillage $(mesh_size)×$(mesh_size)")
+            
+            scatter!(ax_combined_inc, 1:length(increments), increments,
+                    markersize=6,
+                    color=color)
+        end
+    end
+    
+    axislegend(ax_combined_res, position=:rt, framevisible=true)
+    axislegend(ax_combined_inc, position=:rt, framevisible=true)
+    
+    save(joinpath(plots_dir, "combined_convergence_step1.png"), fig_combined)
+    
+    println("Graphiques combinés sauvegardés dans: $plots_dir")
+    
+    return plots_dir
+end
+
+# Exécuter les simulations, sauvegarder les CSV et générer les graphiques
+mesh_sizes = [129]
+n_timesteps = 5  # Réduire le nombre de pas de temps pour l'exemple
+
+# Exécuter les simulations et sauvegarder les données
+#data_dir, initial_plots_dir = compare_mesh_residuals(mesh_sizes, n_timesteps)
+
+data_dir = joinpath(pwd(), "mesh_residuals_data")
+# Générer des visualisations combinées à partir des CSV
+plot_combined_mesh_residuals(data_dir)

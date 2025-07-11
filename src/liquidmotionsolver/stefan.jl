@@ -790,7 +790,22 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
             # Print maximum displacement for diagnostics
             max_disp = maximum(abs.(displacements))
             println("Maximum displacement (after smoothing): $max_disp")
+
+            """
+            # 8.b Limit maximum displacement to one cell size for stability
+            cell_size_x = (mesh.nodes[1][end] - mesh.nodes[1][1]) / nx
+            cell_size_y = (mesh.nodes[2][end] - mesh.nodes[2][1]) / ny
+            max_allowed_disp = min(cell_size_x, cell_size_y)
+
+            if max_disp > max_allowed_disp
+                scaling_factor = max_allowed_disp / max_disp
+                displacements .*= scaling_factor
+                """
+                #println("Limiting displacements (scaling by $(round(scaling_factor, digits=4)))")
+                #println("New maximum displacement: $(round(maximum(abs.(displacements)), digits=6))")
+            #end
             
+
             # Calculate residual norm for convergence check
             residual_norm = norm(F)
             push!(residual_norm_history, residual_norm)
@@ -848,6 +863,8 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
                     xlabel="x", 
                     ylabel="y",
                     aspect=DataAspect())
+
+            temp_2d = reshape(Tₒ, (nx, ny))
             
             # Extract coordinates from markers and new_markers
             x_old = [m[1] for m in markers]
@@ -855,22 +872,18 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
             x_new = [m[1] for m in new_markers]
             y_new = [m[2] for m in new_markers]
             
+            hm = heatmap!(ax, mesh.nodes[1], mesh.nodes[2], 
+                 temp_2d,
+                 colormap=:thermal)
+            Colorbar(fig[1, 2], hm, label="Temperature")
+    
             # Plot old and new positions
-            lines!(ax, x_old, y_old, color=:blue, linewidth=2, label="Current Position")
-            lines!(ax, x_new, y_new, color=:red, linewidth=2, label="Updated Position")
+            #lines!(ax, x_old, y_old, color=:blue, linewidth=2, label="Current Position")
+            lines!(ax, x_new, y_new, color=:red, linewidth=2)
             
             # Plot individual markers
             scatter!(ax, x_old, y_old, color=:blue, markersize=4)
             scatter!(ax, x_new, y_new, color=:red, markersize=4)
-            
-            # Connect old to new with arrows to show displacement
-            for i in 1:n_markers
-                arrows!([x_old[i]], [y_old[i]], [x_new[i]-x_old[i]], [y_new[i]-y_old[i]], 
-                        color=:black, arrowsize=10, linewidth=0.5)
-            end
-            
-            # Add legend
-            axislegend(ax, position=:rt)
             
             # Display or save the figure
             display(fig)

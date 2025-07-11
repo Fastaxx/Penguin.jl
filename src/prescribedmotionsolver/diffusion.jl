@@ -363,9 +363,9 @@ function A_diph_unstead_diff_moving(operator1::DiffusionOps, operator2::Diffusio
     block4 = -(Vn2_1 - Vn2) + Id2 * G2' * W!2 * H2 * Ψn2
 
     block5 = Iᵦ1 * H1' * W!1 * G1 * Ψn1
-    block6 = Iᵦ1 * H1' * W!1 * H1 * Ψn1
+    block6 = Iᵦ1 * H1' * W!1 * H1 * Ψn1 -(Vn1_1 - Vn1) 
     block7 = Iᵦ2 * H2' * W!2 * G2 * Ψn2
-    block8 = Iᵦ2 * H2' * W!2 * H2 * Ψn2
+    block8 = Iᵦ2 * H2' * W!2 * H2 * Ψn2 -(Vn2_1 - Vn2)
 
     # Build the 4n×4n matrix
     A = spzeros(Float64, 4n, 4n)
@@ -476,11 +476,11 @@ function b_diph_unstead_diff_moving(operator1::DiffusionOps, operator2::Diffusio
 
     # 9) Build the right-hand side
     if scheme == "CN"
-        b1 = (Vn1 - Id1 * G1' * W!1 * G1 * Ψn1) * Tₒ1 - 0.5 * Id1 * G1' * W!1 * H1 * Tᵧ1 + 0.5 * V1 * (f1ₒn + f1ₒn1)
-        b3 = (Vn2 - Id2 * G2' * W!2 * G2 * Ψn2) * Tₒ2 - 0.5 * Id2 * G2' * W!2 * H2 * Tᵧ2 + 0.5 * V2 * (f2ₒn + f2ₒn1)
+        b1 = (Vn1 - Id1 * G1' * W!1 * G1 * Ψn1) * Tₒ1 - Id1 * G1' * W!1 * H1 * Ψn1 * Tᵧ1 + 0.5 * V1 * (f1ₒn + f1ₒn1)
+        b3 = (Vn2 - Id2 * G2' * W!2 * G2 * Ψn2) * Tₒ2 - Id2 * G2' * W!2 * H2 * Ψn2 * Tᵧ2 + 0.5 * V2 * (f2ₒn + f2ₒn1)
     else
-        b1 = Vn1 * Tₒ1 + V1 * f1ₒn1
-        b3 = Vn2 * Tₒ2 + V2 * f2ₒn1
+        b1 = (Vn1 - Id1 * G1' * W!1 * G1 * Ψn1) * Tₒ1 - Id1 * G1' * W!1 * H1 * Ψn1 * Tᵧ1 + V1 * f1ₒn1
+        b3 = (Vn2 - Id2 * G2' * W!2 * G2 * Ψn2) * Tₒ2 - Id2 * G2' * W!2 * H2 * Ψn2 * Tᵧ2 + V2 * f2ₒn1
     end
 
     # 10) Build boundary terms

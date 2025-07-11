@@ -6,6 +6,7 @@ using Roots
 using CSV, DataFrames
 using Dates
 using Printf
+using Statistics
 
 function run_mesh_convergence(
     nx_list::Vector{Int},
@@ -47,8 +48,10 @@ function run_mesh_convergence(
         operator = DiffusionOps(capacity)
 
         # BC + solver
-        bc_boundary = Robin(3.0,1.0,3.0*400)
-        bc0 = Dirichlet(400.0)
+        w0 = 0.0
+        wr = 1.0
+        bc_boundary = Robin(1.0,1.0,1.0*wr)
+        bc0 = Dirichlet(w0)
         bc_b = BorderConditions(Dict(
             :left   => bc0,
             :right  => bc0,
@@ -57,8 +60,8 @@ function run_mesh_convergence(
         ))
         phase = Phase(capacity, operator, (x,y,z,t)->0.0, (x,y,z)->1.0)
 
-        u0ₒ = ones((nx+1)*(ny+1)) * 270.0
-        u0ᵧ = zeros((nx+1)*(ny+1)) * 270.0
+        u0ₒ = ones((nx+1)*(ny+1)) * w0
+        u0ᵧ = zeros((nx+1)*(ny+1)) * w0
         u0 = vcat(u0ₒ, u0ᵧ)
 
         Δt = 0.25*(lx/nx)^2
@@ -192,14 +195,16 @@ function run_mesh_convergence(
 end
 
 # Example usage:
-nx_list = [20, 40, 80, 160, 320]
-ny_list = [20, 40, 80, 160, 320]
+nx_list = [16, 32, 64, 128, 256]
+ny_list = nx_list
 radius, center = 1.0, (2.01, 2.01)
 function radial_heat_(x, y)
     t=0.1
     R=1.0
-    k=3.0
+    k=1.0
     a=1.0
+    wr = 1.0
+    w0 = 0.0
 
     function j0_zeros_robin(N, k, R; guess_shift = 0.25)
         # Define the function for alpha J1(alpha) - k R J0(alpha) = 0
@@ -231,11 +236,11 @@ function radial_heat_(x, y)
         An = 2.0 * k * R / ((k^2 * R^2 + αm^2) * besselj0(αm))
         s += An * exp(- a * αm^2 * t/R^2) * besselj0(αm * (r / R))
     end
-    return (1.0 - s) * (400 - 270) + 270
+    return (1.0 - s) * (wr - w0) + w0
 end
 
 # Run with organized output directory
-#output_dir = "heat_convergence_results"
+output_dir = "heat_convergence_results"
 #run_mesh_convergence(nx_list, ny_list, radius, center, radial_heat_, norm=2, output_dir=output_dir)
 
 function plot_convergence_results(
@@ -279,7 +284,7 @@ function plot_convergence_results(
     function compute_last3_rate(h_data, err_data)
         # Get last 3 points (or fewer if not enough data)
         n = length(h_data)
-        idx_start = max(1, n-2)
+        idx_start = max(1, n-1)
         last_h = h_data[idx_start:n]
         last_err = err_data[idx_start:n]
         
@@ -323,10 +328,10 @@ function plot_convergence_results(
              markersize=10, label="Global error (p = $(last3_p_global))")
     
     scatter!(ax, h_vals, err_full_vals, color=colors[2], marker =symbol[2],
-             markersize=10, label="Full error (p = $(last3_p_full))")
+             markersize=10, label="Full error (p = $(last3_p_cut))")
     
     scatter!(ax, h_vals, err_cut_vals, color=colors[3], marker =symbol[3],
-             markersize=10, label="Cut error (p = $(last3_p_cut))")
+             markersize=10, label="Cut error (p = $(last3_p_full))")
     
     # Plot fitted curves using the last 3 point rates instead of original rates
     lines!(ax, h_fine, power_fit(h_fine, last3_p_global, h_vals, err_vals), 
@@ -367,7 +372,64 @@ function plot_convergence_results(
     
     return fig
 end
-
+function load_convergence_results(dir_path::String="heat_convergence_results")
+    # Check if directory exists
+    if !isdir(dir_path)
+        error("Directory $dir_path does not exist")
+    end
+    
+    # Find all run directories (they're timestamps)
+    run_dirs = filter(d -> isdir(joinpath(dir_path, d)), readdir(dir_path))
+    
+    if isempty(run_dirs)
+        error("No run directories found in $dir_path")
+    end
+    
+    # Sort by timestamp to get the most recent one
+    sort!(run_dirs)
+    latest_run = run_dirs[end]
+    
+    # Construct path to the latest run
+    run_path = joinpath(dir_path, latest_run)
+    
+    # Check for summary file
+    summary_file = joinpath(run_path, "summary.csv")
+    rates_file = joinpath(run_path, "convergence_rates.csv")
+    
+    if !isfile(summary_file) || !isfile(rates_file)
+        error("Missing summary.csv or convergence_rates.csv in $run_path")
+    end
+    
+    # Load the data
+    df = CSV.read(summary_file, DataFrame)
+    rates_df = CSV.read(rates_file, DataFrame)
+    
+    # Extract values
+    h_vals = df.mesh_size
+    
+    # Global, full, cut and empty errors
+    err_vals = df.global_error
+    err_full_vals = df.full_error
+    err_cut_vals = df.cut_error
+    err_empty_vals = df.empty_error
+    
+    # Extract rates
+    p_global = rates_df[rates_df.parameter .== "p_global", :value][1]
+    p_full = rates_df[rates_df.parameter .== "p_full", :value][1]
+    p_cut = rates_df[rates_df.parameter .== "p_cut", :value][1]
+    
+    return (
+        h_vals,
+        err_vals,
+        err_full_vals,
+        err_cut_vals,
+        err_empty_vals,
+        p_global,
+        p_full,
+        p_cut,
+        run_path
+    )
+end
 # Load from the most recent run
 results = load_convergence_results()
 

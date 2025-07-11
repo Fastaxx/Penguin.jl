@@ -5,21 +5,37 @@ using Roots
 
 ### 2D Test Case : Diphasic Unsteady Diffusion Equation inside a moving Disk
 # Define the mesh
-nx, ny = 80, 80
+nx, ny = 40, 40
 lx, ly = 4., 4.
 x0, y0 = 0., 0.
 domain = ((x0, lx), (y0, ly))
 mesh = Penguin.Mesh((nx, ny), (lx, ly), (x0, y0))
 
 # Define the body
-radius, center = ly/4, (lx/2, ly/2) .+ (0.01, 0.01)
-c = 0.0
-body = (x,y,t)->(sqrt((x - center[1])^2 + (y - center[2])^2) - radius + c*t)
-body_c = (x,y,t)->-(sqrt((x - center[1])^2 + (y - center[2])^2) - radius + c*t)
+# Define parameters for the moving circle : Low frequency circular motion
+ω = 0.3
+circle_center(t) = [2.0 + 0.5*cos(ω*t), 2.0 + 0.5*sin(ω*t)]
+circle_radius(t) = 1.0 + 0.2*sin(ω*t)
+
+# Circle velocity and radius derivative
+center_velocity(t) = [-0.5*ω*sin(ω*t), 0.5*ω*cos(ω*t)]
+radius_derivative(t) = 0.2*ω*cos(ω*t)
+
+# Level set function S(x,t) = ||x - c(t)||^2 - R(t)^2
+# body > 0 inside the circle, < 0 outside
+function S_func(x, y, t)
+    c = circle_center(t)
+    R = circle_radius(t)
+    return (x - c[1])^2 + (y - c[2])^2 - R^2
+end
+
+# Level set functions: negative inside the circle (Ω⁻), positive outside (Ω⁺)
+body(x, y, t) = S_func(x, y, t)
+body_c(x, y, t) = -S_func(x, y, t)
 
 # Define the Space-Time mesh
 Δt = 0.01
-Tend = 0.1
+Tend = 0.5
 STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt], tag=mesh.tag)
 
 # Define the capacity
@@ -33,7 +49,7 @@ operator_c = DiffusionOps(capacity_c)
 # Define the boundary conditions
 bc = Dirichlet(0.0)
 
-bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:left => bc, :right => bc, :top => bc, :bottom => bc))
+bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:left => bc, :right => bc, :top => Neumann(0.0), :bottom => Neumann(0.0)))
 ic = InterfaceConditions(ScalarJump(1.0, 1.0, 0.0), FluxJump(1.0, 1.0, 0.0))
 
 

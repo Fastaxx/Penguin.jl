@@ -3,10 +3,10 @@ using IterativeSolvers
 using LinearAlgebra
 using SparseArrays
 using SpecialFunctions
-using CairoMakie
 using Statistics
-using DataFrames
 using Printf
+using CSV
+using DataFrames
 
 """
     run_simulation_with_mesh_size(nx::Int, ny::Int, nmarkers::Int=100)
@@ -105,7 +105,7 @@ function run_simulation_with_mesh_size(nx::Int, ny::Int, nmarkers::Int=100)
     u0 = vcat(u0ₒ, u0ᵧ)
     
     # Paramètres Newton
-    Newton_params = (10, 1e-7, 1e-7, 1)  # max_iter, tol, reltol, α
+    Newton_params = (30, 1e-7, 1e-7, 0.8)  # max_iter, tol, reltol, α
     
     # Mesurer le temps d'exécution
     start_time = time()
@@ -143,20 +143,22 @@ function run_simulation_with_mesh_size(nx::Int, ny::Int, nmarkers::Int=100)
     # Calculer le nombre d'itérations total
     total_iterations = sum(length(residuals[k]) for k in keys(residuals))
     
-       # Récupérer le dernier résidu - robustly handle missing keys
+    # Récupérer le dernier résidu
     if haskey(residuals, last_timestep)
         last_residual = minimum(residuals[last_timestep])
     else
-        # If the specific timestep key doesn't exist, find the latest available
-        available_steps = keys(residuals) |> collect |> sort
+        # Trouver le dernier pas de temps disponible
+        available_steps = collect(keys(residuals))
         if !isempty(available_steps)
-            latest_step = available_steps[end]
-            last_residual = minimum(residuals[latest_step])
+            last_residual = minimum(residuals[maximum(available_steps)])
         else
-            # Fallback if no residuals are available
             last_residual = NaN
         end
     end
+    
+    # Sauvegarder les marqueurs dans un format plus simple pour le CSV
+    markers_x = [m[1] for m in final_markers]
+    markers_y = [m[2] for m in final_markers]
     
     return Dict(
         "nx" => nx,
@@ -169,18 +171,19 @@ function run_simulation_with_mesh_size(nx::Int, ny::Int, nmarkers::Int=100)
         "iterations" => total_iterations,
         "final_residual" => last_residual,
         "runtime" => runtime,
-        "markers" => final_markers
+        "markers_x" => markers_x,
+        "markers_y" => markers_y
     )
 end
 
 """
-    analyze_mesh_convergence()
+    run_convergence_study()
 
-Réalise une étude de convergence en maillage et génère des graphiques comparatifs.
+Exécute l'étude de convergence et sauvegarde les résultats dans des fichiers CSV.
 """
-function analyze_mesh_convergence()
+function run_convergence_study()
     # Tailles de maillage à tester
-    mesh_sizes = [ (24, 24), (32, 32), (48, 48), (64, 64)]
+    mesh_sizes = [(24, 24), (32, 32), (48, 48), (64, 64), (96, 96)]
     
     println("Étude de convergence en maillage pour le problème de Stefan")
     println("==========================================================")
@@ -189,125 +192,181 @@ function analyze_mesh_convergence()
     # Nombre de marqueurs constant
     nmarkers = 100
     
-    # Stocker les résultats
-    results = Dict[]
+    # Créer le répertoire des résultats
+    results_dir = joinpath(pwd(), "mesh_convergence_data")
+    mkpath(results_dir)
+    
+    # Stocker les résultats principaux
+    convergence_results = []
     
     # Exécuter les simulations
     for (nx, ny) in mesh_sizes
         result = run_simulation_with_mesh_size(nx, ny, nmarkers)
-        push!(results, result)
+        push!(convergence_results, result)
+        
+        # Sauvegarder les marqueurs de l'interface pour cette simulation
+        markers_df = DataFrame(
+            x = result["markers_x"],
+            y = result["markers_y"]
+        )
+        CSV.write(joinpath(results_dir, "markers_$(nx)x$(ny).csv"), markers_df)
+        
         println("Mesh $(nx)×$(ny): Rayon = $(result["radius"]), Erreur = $(result["analytical_error"] * 100)%")
     end
     
-    # Considérer le maillage le plus fin comme référence
-    finest_result = results[end]
-    reference_radius = finest_result["radius"]
+    # Créer un DataFrame pour les résultats principaux
+    results_df = DataFrame(
+        nx = [r["nx"] for r in convergence_results],
+        ny = [r["ny"] for r in convergence_results],
+        dx = [r["dx"] for r in convergence_results],
+        radius = [r["radius"] for r in convergence_results],
+        radius_std = [r["radius_std"] for r in convergence_results],
+        analytical_radius = [r["analytical_radius"] for r in convergence_results],
+        analytical_error = [r["analytical_error"] for r in convergence_results],
+        iterations = [r["iterations"] for r in convergence_results],
+        final_residual = [r["final_residual"] for r in convergence_results],
+        runtime = [r["runtime"] for r in convergence_results]
+    )
     
-    # Recalculer les erreurs par rapport au maillage le plus fin
-    for result in results
-        result["mesh_error"] = abs(result["radius"] - reference_radius) / reference_radius
+    # Sauvegarder le DataFrame principal
+    CSV.write(joinpath(results_dir, "convergence_results.csv"), results_df)
+    
+    println("\nRésultats sauvegardés dans: $results_dir")
+    
+    return results_dir
+end
+
+# Exécuter l'étude de convergence
+#results_dir = run_convergence_study()
+println("Données enregistrées dans: $results_dir")
+
+using CSV
+using DataFrames
+using CairoMakie
+using Statistics
+using Printf
+
+"""
+    plot_convergence_results(data_dir::String)
+
+Charge les données de l'étude de convergence et génère des graphiques comparatifs.
+"""
+function plot_convergence_results(data_dir::String)
+    # Charger les résultats principaux
+    results_file = joinpath(data_dir, "convergence_results.csv")
+    if !isfile(results_file)
+        error("Le fichier de résultats $results_file n'existe pas.")
     end
     
-    # Créer le répertoire des résultats
-    results_dir = joinpath(pwd(), "mesh_convergence_results")
-    mkpath(results_dir)
-
-    # 1. Graphique d'erreur de rayon vs taille de maillage
-    fig_error = Figure(size=(800, 600))
+    df = CSV.read(results_file, DataFrame)
+    
+    # Créer le répertoire pour les figures
+    plots_dir = joinpath(dirname(data_dir), "mesh_convergence_plots")
+    mkpath(plots_dir)
+    
+    # Calculer l'erreur par rapport au maillage le plus fin
+    finest_idx = findmax(df.nx)[2]
+    reference_radius = df.radius[finest_idx]
+    df.mesh_error = abs.(df.radius .- reference_radius) ./ reference_radius
+    
+    # 1. Graphique d'erreur de rayon vs taille de maillage avec références d'ordre
+    fig_error = Figure(size=(900, 700))
     ax_error = Axis(fig_error[1, 1], 
                   title="Convergence en Maillage - Erreur de Rayon", 
                   xlabel="Pas d'espace (Δx)", 
                   ylabel="Erreur Relative",
                   xscale=log10, yscale=log10)
     
-    dx_values = [r["dx"] for r in results]
-    mesh_errors = [r["mesh_error"] for r in results]
-    analytical_errors = [r["analytical_error"] for r in results]
-    
-
     # Ajouter les points pour les erreurs par rapport à la solution analytique
-    scatter!(ax_error, dx_values, analytical_errors, 
+    scatter!(ax_error, df.dx, df.analytical_error, 
             label="Vs. Solution Analytique", 
             marker=:rect,
-            markersize=12, 
+            markersize=15, 
             color=:red)
     
-    lines!(ax_error, dx_values, analytical_errors, 
+    lines!(ax_error, df.dx, df.analytical_error, 
           color=:red, linewidth=2, linestyle=:dash)
-
-    # Référence d'ordre 1 (Δx) - basée sur l'erreur de maillage
-    ref_x = range(minimum(dx_values), maximum(dx_values), length=100)
-    ref_y = [mesh_errors[end] * (x / dx_values[end]) for x in ref_x]
-    lines!(ax_error, ref_x, ref_y, 
-          color=:blue, linewidth=1, linestyle=:dot,
-          label="Ordre 1 (Δx)")
-          
     
-    # Référence d'ordre 2 (Δx²) - basée sur l'erreur analytique
-    ref_x = range(minimum(dx_values), maximum(dx_values), length=100)
-    ref_y = [analytical_errors[end] * (x / dx_values[end])^2 for x in ref_x]
+    # Référence d'ordre 1 (Δx) - clairement visible
+    ref_idx = findfirst(x -> x > 0, df.mesh_error)  # Premier point non-zéro
+    ref_x = [minimum(df.dx)*0.9, maximum(df.dx)*1.1]  # Étendre légèrement la ligne
+    ref_factor = df.mesh_error[ref_idx] / df.dx[ref_idx]
+    ref_y = [ref_factor * x for x in ref_x]
+    
     lines!(ax_error, ref_x, ref_y, 
-          color=:black, linewidth=1, linestyle=:dot,
+          color=:darkorange, linewidth=2, linestyle=:dash,
+          label="Ordre 1 (Δx)")
+    
+    # Référence d'ordre 2 (Δx²)
+    ref_factor2 = df.analytical_error[ref_idx] / (df.dx[ref_idx]^2)
+    ref_y2 = [ref_factor2 * x^2 for x in ref_x]
+    
+    lines!(ax_error, ref_x, ref_y2, 
+          color=:purple, linewidth=2, linestyle=:dot,
           label="Ordre 2 (Δx²)")
     
+    # Annotations pour clarifier
+    text!(ax_error, ref_x[1]*1.2, ref_y[1]*1.2, text="O(Δx)", fontsize=14)
+    text!(ax_error, ref_x[1]*1.2, ref_y2[1]*1.2, text="O(Δx²)", fontsize=14)
+    
     # Légende
-    axislegend(ax_error, position=:rb)
-
+    axislegend(ax_error, position=:rt, framevisible=true)
+    
     # 2. Graphique de rayon vs taille de maillage
-    fig_radius = Figure(size=(800, 600))
+    fig_radius = Figure(size=(900, 700))
     ax_radius = Axis(fig_radius[1, 1],
                     title="Convergence en Maillage - Valeur du Rayon",
                     xlabel="Pas d'espace (Δx)",
                     ylabel="Rayon Final")
     
-    radii = [r["radius"] for r in results]
-    nx_values = [r["nx"] for r in results]
-    
-    scatter!(ax_radius, dx_values, radii,
+    scatter!(ax_radius, df.dx, df.radius,
             marker=:circle,
-            markersize=12,
+            markersize=15,
             color=:blue)
     
-    lines!(ax_radius, dx_values, radii,
+    lines!(ax_radius, df.dx, df.radius,
           color=:blue, linewidth=2)
     
     # Ajouter la ligne de référence pour le maillage le plus fin
     hlines!(ax_radius, [reference_radius],
            color=:red, linewidth=2, linestyle=:dash,
-           label="Maillage le plus fin ($(nx_values[end])×$(nx_values[end]))")
+           label="Maillage le plus fin ($(df.nx[finest_idx])×$(df.ny[finest_idx]))")
+    
+    # Ajouter la ligne de référence pour la solution analytique
+    hlines!(ax_radius, [df.analytical_radius[1]],  # Ils sont tous identiques
+           color=:green, linewidth=2, linestyle=:dot,
+           label="Solution Analytique")
     
     # Légende
-    axislegend(ax_radius, position=:rb)
+    axislegend(ax_radius, position=:rb, framevisible=true)
     
     # 3. Graphique de performance
-    fig_perf = Figure(size=(800, 600))
+    fig_perf = Figure(size=(900, 700))
     ax_perf = Axis(fig_perf[1, 1],
                   title="Performance et Coût de Calcul",
                   xlabel="Nombre de Cellules (nx×ny)",
                   ylabel="Temps d'Exécution (s)")
     
-    n_cells = [r["nx"] * r["ny"] for r in results]
-    runtimes = [r["runtime"] for r in results]
+    n_cells = df.nx .* df.ny
     
-    scatter!(ax_perf, n_cells, runtimes,
+    scatter!(ax_perf, n_cells, df.runtime,
             marker=:circle,
-            markersize=12,
+            markersize=15,
             color=:blue)
     
-    lines!(ax_perf, n_cells, runtimes,
+    lines!(ax_perf, n_cells, df.runtime,
           color=:blue, linewidth=2)
     
     # Ajouter les labels de taille de maillage
-    for i in 1:length(n_cells)
-        nx, ny = mesh_sizes[i]
-        text!(ax_perf, n_cells[i], runtimes[i] * 1.05,
-             text="$(nx)×$(ny)",
-             fontsize=12)
+    for i in 1:nrow(df)
+        text!(ax_perf, n_cells[i], df.runtime[i] * 1.05,
+             text="$(df.nx[i])×$(df.ny[i])",
+             fontsize=14)
     end
     
     # Référence d'ordre N²
-    if length(n_cells) >= 2
-        ref_factor = runtimes[end-1] / n_cells[end-1]^2
+    if nrow(df) >= 2
+        ref_factor = df.runtime[end-1] / n_cells[end-1]^2
         ref_x_cells = range(minimum(n_cells), maximum(n_cells), length=10)
         ref_y_runtime = [ref_factor * x^2 for x in ref_x_cells]
         lines!(ax_perf, ref_x_cells, ref_y_runtime,
@@ -316,56 +375,58 @@ function analyze_mesh_convergence()
     end
     
     # Légende
-    axislegend(ax_perf, position=:rb)
+    axislegend(ax_perf, position=:lt, framevisible=true)
     
-    # 4. Tableau récapitulatif
-    println("\nRésumé des Résultats:")
-    println("==========================================")
-    println("Maillage | Rayon  |  Erreur vs. Fin | Erreur vs. Analytic | Runtime (s)")
-    println("------------------------------------------")
-    
-    for i in 1:length(results)
-        r = results[i]
-        nx, ny = mesh_sizes[i]
-        @printf("%3d×%-3d | %6.4f | %10.6f%% | %10.6f%% | %7.2f\n", 
-                nx, ny, r["radius"], r["mesh_error"]*100, r["analytical_error"]*100, r["runtime"])
-    end
-    println("==========================================")
-    
-    # 5. Visualisation des interfaces pour différentes tailles de maillage
-    fig_interfaces = Figure(size=(800, 800))
+    # 4. Visualisation des interfaces pour différentes tailles de maillage
+    fig_interfaces = Figure(size=(900, 900))
     ax_interfaces = Axis(fig_interfaces[1, 1],
                        title="Comparaison des Interfaces pour Différentes Tailles de Maillage",
                        xlabel="x", ylabel="y",
                        aspect=DataAspect())
     
     # Générer des couleurs pour chaque taille de maillage
-    colors = cgrad(:viridis, length(mesh_sizes))
+    colors = cgrad(:viridis, nrow(df))
     
     # Tracer l'interface pour chaque maillage
-    for (i, result) in enumerate(results)
-        markers = result["markers"]
-        nx, ny = mesh_sizes[i]
+    for i in 1:nrow(df)
+        nx, ny = df.nx[i], df.ny[i]
         
-        # Extraire les coordonnées pour le tracé
-        marker_x = [m[1] for m in markers]
-        marker_y = [m[2] for m in markers]
-        
-        # Tracer l'interface comme une ligne fermée
-        lines!(ax_interfaces, marker_x, marker_y, 
-              color=colors[i], 
-              linewidth=2,
-              label="$(nx)×$(ny)")
+        # Charger les marqueurs
+        markers_file = joinpath(data_dir, "markers_$(nx)x$(ny).csv")
+        if isfile(markers_file)
+            markers_df = CSV.read(markers_file, DataFrame)
+            
+            # Tracer l'interface comme une ligne fermée
+            lines!(ax_interfaces, 
+                  vcat(markers_df.x, markers_df.x[1]), 
+                  vcat(markers_df.y, markers_df.y[1]),
+                  color=colors[i], 
+                  linewidth=3,
+                  label="$(nx)×$(ny)")
+        end
     end
     
     # Ajouter la légende
-    axislegend(ax_interfaces, position=:rt)
+    axislegend(ax_interfaces, position=:rt, framevisible=true)
+    
+    # 5. Tableau récapitulatif
+    println("\nRésumé des Résultats:")
+    println("=================================================================")
+    println("Maillage | Rayon  |  Erreur vs. Fin | Erreur vs. Analytic | Runtime (s)")
+    println("-----------------------------------------------------------------")
+    
+    for i in 1:nrow(df)
+        @printf("%3d×%-3d | %6.4f | %10.6f%% | %10.6f%% | %7.2f\n", 
+                df.nx[i], df.ny[i], df.radius[i], 
+                df.mesh_error[i]*100, df.analytical_error[i]*100, df.runtime[i])
+    end
+    println("=================================================================")
     
     # Sauvegarder les figures
-    save(joinpath(results_dir, "mesh_error_convergence.png"), fig_error)
-    save(joinpath(results_dir, "mesh_radius_convergence.png"), fig_radius)
-    save(joinpath(results_dir, "mesh_performance.png"), fig_perf)
-    save(joinpath(results_dir, "mesh_interfaces.png"), fig_interfaces)
+    save(joinpath(plots_dir, "mesh_error_convergence.png"), fig_error)
+    save(joinpath(plots_dir, "mesh_radius_convergence.png"), fig_radius)
+    save(joinpath(plots_dir, "mesh_performance.png"), fig_perf)
+    save(joinpath(plots_dir, "mesh_interfaces.png"), fig_interfaces)
     
     # Afficher les figures
     display(fig_error)
@@ -373,10 +434,22 @@ function analyze_mesh_convergence()
     display(fig_perf)
     display(fig_interfaces)
     
-    println("\nFigures sauvegardées dans: $results_dir")
+    println("\nFigures sauvegardées dans: $plots_dir")
     
-    return results
+    return plots_dir
 end
 
-# Exécuter l'étude de convergence
-results = analyze_mesh_convergence()
+# Chercher le répertoire des données par défaut
+default_data_dir = joinpath(pwd(), "mesh_convergence_data")
+    
+if isdir(default_data_dir)
+    plot_convergence_results(default_data_dir)
+else
+    println("Veuillez spécifier le chemin vers le répertoire contenant les données:")
+    data_dir = readline()
+    if isdir(data_dir)
+        plot_convergence_results(data_dir)
+    else
+        println("Répertoire invalide.")
+    end
+end
