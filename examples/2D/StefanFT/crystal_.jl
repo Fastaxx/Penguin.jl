@@ -131,6 +131,7 @@ L0 = R0       # Characteristic length (use initial radius)
 u0ₒ = zeros((nx+1)*(ny+1))
 
 # Create a smooth initial temperature field using normalized tanh
+# Change now ImplicitIntegration work with body(x,y,z,t) and not body(x)
 body_init = (x,y,_=0) -> sdf(front, x, y)
 body_init = (x) -> begin
     # Handle interval arithmetic by converting to floats

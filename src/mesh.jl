@@ -1,6 +1,26 @@
+"""
+    MeshTag{N}
+
+A tag structure for a mesh, containing information about border cells.
+"""
 struct MeshTag{N}
     border_cells::Vector{Tuple{CartesianIndex{N}, NTuple{N, Float64}}}
 end
+
+"""
+    Dimension{N}
+
+A type parameter representing the spatial dimension N of the grid.
+"""
+struct Dimension{N} end
+
+"""
+    Dimension(N::Int) -> Dimension{N}
+
+Zero-argument constructor for Dimension type.
+"""
+Dimension(N::Int) = Dimension{N}()
+(::Dimension{N})() where {N} = N
 
 abstract type AbstractMesh end
 

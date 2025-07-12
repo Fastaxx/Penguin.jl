@@ -24,12 +24,12 @@ center = [x_0, y_0, z_0]  # center position vector
 D = 1.0              # diffusion coefficient
 
 # Define the oscillating body as a level set function
-function oscillating_body(x)
+function oscillating_body(x, y, z, t)
     # Calculate oscillating radius
-    R_t = radius_mean + radius_amp * sin(2π * x[4] / period)
+    R_t = radius_mean + radius_amp * sin(2π * t / period)
     
     # Return signed distance function to sphere
-    return (sqrt((x[1] - x_0)^2 + (x[2] - y_0)^2 + (x[3] - z_0)^2) - R_t)
+    return (sqrt((x - x_0)^2 + (y - y_0)^2 + (z - z_0)^2) - R_t)
 end
 
 # Analytical solution for 3D

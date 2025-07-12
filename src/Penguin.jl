@@ -22,7 +22,7 @@ using GeoInterface
 # Write your package code here.
 
 include("mesh.jl")
-export Mesh, nC, SpaceTimeMesh
+export Dimension, Mesh, nC, SpaceTimeMesh
 
 include("front_tracking.jl")
 export FrontTracker, create_circle!, create_rectangle!, create_ellipse!, update_geometry!, create_crystal!

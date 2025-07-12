@@ -22,7 +22,7 @@ operator = DiffusionOps(capacity)
 cell_types = capacity.cell_types
 
 # Define the boundary conditions 
-bc = Dirichlet(1.0)
+bc = Dirichlet((x,y,z,t)->sin(π*x) * sin(π*y))
 bc0 = Dirichlet(0.0)
 
 bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:left => bc0, :right => bc0, :top => bc0, :bottom => bc0))
