@@ -8,6 +8,7 @@ abstract type AbstractMesh end
     Mesh{N}(n::NTuple{N, Int}, domain_size::NTuple{N, Float64}, x0::NTuple{N, Float64}=ntuple(_ -> 0.0, N))
 
 Create a mesh object with `N` dimensions, `n` cells in each dimension, and a domain size of `domain_size`.
+x--|--x--|--x with x representing cell centers, | representing cell boundaries.
 
 # Arguments
 - `n::NTuple{N, Int}`: A tuple of integers specifying the number of cells in each dimension.
@@ -18,9 +19,10 @@ Create a mesh object with `N` dimensions, `n` cells in each dimension, and a dom
 - A `Mesh{N}` object with `N` dimensions, `n` cells in each dimension, and a domain size of `domain_size`.
 """
 struct Mesh{N} <: AbstractMesh
-    nodes::NTuple{N, Vector{Float64}}
     centers::NTuple{N, Vector{Float64}}
+    nodes::NTuple{N, Vector{Float64}}
     tag::MeshTag
+    dims::NTuple{N, Int}
 
     function Mesh(n::NTuple{N, Int}, domain_size::NTuple{N, Float64}, x0::NTuple{N, Float64}=ntuple(_ -> 0.0, N)) where N
         # Calculate centers and nodes
@@ -52,7 +54,7 @@ struct Mesh{N} <: AbstractMesh
         unique!(border_cells)
         
         # Create the mesh directly with all components
-        return new{N}(nodes_uniform, centers_uniform, MeshTag{N}(border_cells))
+        return new{N}(centers_uniform, nodes_uniform, MeshTag{N}(border_cells), dims)
     end
 end
 
@@ -61,7 +63,22 @@ end
 
 Calculate the total number of cells in a mesh.
 """
-nC(mesh::AbstractMesh) = prod(length.(mesh.centers))
+nC(mesh::AbstractMesh) = prod(mesh.dims)
+
+"""
+    size(grid::AbstractMesh{N}) -> NTuple{N, Int}
+
+Return the number of cells in each dimension.
+"""
+Base.size(grid::AbstractMesh) = grid.dims
+
+"""
+    size(grid::AbstractMesh, dim::Int) -> Int
+
+Return the number of cells in dimension `dim`.
+"""
+Base.size(grid::AbstractMesh, dim::Int) = grid.dims[dim]
+
 
 """
     SpaceTimeMesh{M} <: AbstractMesh
@@ -93,14 +110,15 @@ struct SpaceTimeMesh{M} <: AbstractMesh
     nodes::NTuple{M, Vector{Float64}}
     centers::NTuple{M, Vector{Float64}}
     tag::MeshTag
+    dims::NTuple{M, Int}
 
     function SpaceTimeMesh(spaceMesh::Mesh{N}, time::Vector{Float64}; tag::MeshTag=MeshTag{N}([])) where {N}
         local M = N + 1
 
-        Δt = diff(time)
         centers_time = [(time[i+1] + time[i]) / 2 for i in 1:length(time)-1]
         nodes = ntuple(i -> i<=N ? spaceMesh.nodes[i] : time, M)
         centers = ntuple(i -> i<=N ? spaceMesh.centers[i] : centers_time, M)
-        return new{M}(nodes, centers, tag)
+        dims = ntuple(i -> length(centers[i]), M)
+        return new{M}(nodes, centers, tag, dims)
     end
 end

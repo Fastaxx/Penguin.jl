@@ -9,6 +9,7 @@ using Test
     borders1D = mesh1D.tag.border_cells
     @test mesh1D.centers == ([0.0, 0.2, 0.4, 0.6000000000000001, 0.8],)
     @test nC(mesh1D) == 5
+    @test size(mesh1D, 1) == 5
     @test length(borders1D) == 2
     @test borders1D[1] == (CartesianIndex((1,)), (0.0,))
     @test borders1D[2] == (CartesianIndex((5,)), (0.8,))
@@ -22,6 +23,8 @@ end
     borders2D = mesh2D.tag.border_cells
     @test mesh2D.centers == ([0.0, 0.2, 0.4, 0.6000000000000001, 0.8], [0.0, 0.2, 0.4, 0.6000000000000001, 0.8])
     @test nC(mesh2D) == 25
+    println(size(mesh2D))
+    println(size(mesh2D.centers[1]))
     @test length(borders2D) == 16
     @test borders2D[1] == (CartesianIndex((1, 1)), (0.0, 0.0))
     @test borders2D[2] == (CartesianIndex(1, 2), (0.0, 0.2))
@@ -76,4 +79,6 @@ end
     @test STmesh1D.nodes == ([0.1, 0.30000000000000004, 0.5, 0.7000000000000001, 0.9, 1.1], [0.0, 0.1])
     @test STmesh1D.tag == mesh1D.tag
     @test nC(STmesh1D) == 5
+    @test size(STmesh1D, 1) == 5
+    @test size(STmesh1D, 2) == 1
 end
