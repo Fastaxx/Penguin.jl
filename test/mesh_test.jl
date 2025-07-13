@@ -23,8 +23,6 @@ end
     borders2D = mesh2D.tag.border_cells
     @test mesh2D.centers == ([0.0, 0.2, 0.4, 0.6000000000000001, 0.8], [0.0, 0.2, 0.4, 0.6000000000000001, 0.8])
     @test nC(mesh2D) == 25
-    println(size(mesh2D))
-    println(size(mesh2D.centers[1]))
     @test length(borders2D) == 16
     @test borders2D[1] == (CartesianIndex((1, 1)), (0.0, 0.0))
     @test borders2D[2] == (CartesianIndex(1, 2), (0.0, 0.2))

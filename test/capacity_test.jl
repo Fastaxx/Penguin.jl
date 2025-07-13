@@ -17,7 +17,7 @@ using SparseArrays
     end
 
     # Calculate capacities using both methods
-    geo_capacity = Capacity(circle_scalar, mesh, method="GeometricMoments")
+    geo_capacity = Capacity(circle_scalar, mesh, method="ImplicitIntegration")
     vofi_capacity = Capacity(circle_scalar, mesh, method="VOFI")
     
     # Volumes should be similar
@@ -96,8 +96,8 @@ end
     end
     
     # Calculate capacities using both methods
-    @time geo_capacity = Capacity(sphere, mesh, method="GeometricMoments")
-    @time vofi_capacity = Capacity(sphere, mesh, method="VOFI")
+    geo_capacity = Capacity(sphere, mesh, method="ImplicitIntegration")
+    vofi_capacity = Capacity(sphere, mesh, method="VOFI")
     
     # Compare with analytical values
     expected_volume = (4/3) * π * radius^3
@@ -296,8 +296,8 @@ end
     radius = 0.3
     LS(x,_=0) = abs(x - center) - radius
     
-    # Vector version for ImplicitIntegration
-    Φ(X) = abs(X[1] - center) - radius
+    # Scalar version for ImplicitIntegration
+    Φ(x,_=0) = abs(x - center) - radius
     
     capacity = Capacity(Φ, mesh, method="ImplicitIntegration")
     
@@ -340,8 +340,8 @@ end
     center_x, center_y = 0.5, 0.5
     radius = 0.3
     
-    # Vector version for ImplicitIntegration
-    Φ(X) = sqrt((X[1] - center_x)^2 + (X[2] - center_y)^2) - radius
+    # Scalar version for ImplicitIntegration
+    Φ(x,y,_=0) = sqrt((x - center_x)^2 + (y - center_y)^2) - radius
     
     capacity = Capacity(Φ, mesh, method="ImplicitIntegration")
     
@@ -383,8 +383,8 @@ end
     center_x, center_y, center_z = 0.5, 0.5, 0.5
     radius = 0.3
     
-    # Vector version for ImplicitIntegration
-    Φ(X) = sqrt((X[1] - center_x)^2 + (X[2] - center_y)^2 + (X[3] - center_z)^2) - radius
+    # Scalar version for ImplicitIntegration
+    Φ(x,y,z) = sqrt((x - center_x)^2 + (y - center_y)^2 + (z - center_z)^2) - radius
     
     capacity = Capacity(Φ, mesh, method="ImplicitIntegration")
     
@@ -424,11 +424,7 @@ end
     # Define a simple circle shape
     center_x, center_y = 0.5, 0.5
     radius = 0.3
-    
-    # Vector version for ImplicitIntegration
-    function single_circle(X)
-        return sqrt((X[1] - center_x)^2 + (X[2] - center_y)^2) - radius
-    end
+
     
     # Scalar version for VOFI
     function single_circle_scalar(x, y, _=0)
@@ -436,7 +432,7 @@ end
     end
     
     # Calculate capacities using both methods
-    implicit_capacity = Capacity(single_circle, mesh, method="ImplicitIntegration")
+    implicit_capacity = Capacity(single_circle_scalar, mesh, method="ImplicitIntegration")
     vofi_capacity = Capacity(single_circle_scalar, mesh, method="VOFI")
     
     # Volumes should be similar

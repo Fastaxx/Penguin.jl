@@ -1,6 +1,7 @@
 using Penguin
 using Test
 using SpecialFunctions
+using IterativeSolvers
 
 @testset "Convergence Test 1D" begin
     nx = 40
@@ -125,7 +126,7 @@ end
     solver = DiffusionUnsteadyDiph(Fluide_1, Fluide_2, bc_b, ic, Δt, u0, "CN")
     
     # Solve the problem
-    solve_DiffusionUnsteadyDiph!(solver, Fluide_1, Fluide_2, Δt, Tend, bc_b, ic, "CN"; method=Base.:\)
+    solve_DiffusionUnsteadyDiph!(solver, Fluide_1, Fluide_2, Δt, Tend, bc_b, ic, "CN"; method=IterativeSolvers.bicgstabl)
     
     # Analytical solutions
     function T1(x)
