@@ -13,7 +13,7 @@ using Test
     bc = Neumann(0.0)
     bc_10 = Dirichlet(10.0)
     bc_20 = Dirichlet(20.0)
-    bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:top => bc_10, :bottom => bc_20))
+    bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:left => bc_10, :right => bc_20))
     f(x,y,_=0) = 0.0
     D(x,y,_=0) = 1.0
     Fluide = Phase(capacity, operator, f, D)

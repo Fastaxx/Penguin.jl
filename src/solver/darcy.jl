@@ -4,7 +4,7 @@ function DarcyFlow(phase::Phase, bc_b::BorderConditions, bc_i::AbstractBoundary)
     println("- Steady problem")
     println("- Monophasic")
 
-    s = Solver(Steady, Monophasic, Diffusion, nothing, nothing, nothing, ConvergenceHistory(), [])
+    s = Solver(Steady, Monophasic, Diffusion, nothing, nothing, nothing, [], [])
 
     s.A = A_mono_stead_diff(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i)
     s.b = b_mono_stead_diff(phase.operator, phase.source, phase.capacity, bc_i)
@@ -49,7 +49,7 @@ function DarcyFlowUnsteady(phase::Phase, bc_b::BorderConditions, bc_i::AbstractB
     println("- Unsteady problem")
     println("- Monophasic")
 
-    s = Solver(Unsteady, Monophasic, Diffusion, nothing, nothing, nothing, ConvergenceHistory(), [])
+    s = Solver(Unsteady, Monophasic, Diffusion, nothing, nothing, nothing, [], [])
 
     s.A = A_mono_unstead_diff(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, Δt, scheme)
     s.b = b_mono_unstead_diff(phase.operator, phase.source, phase.Diffusion_coeff, phase.capacity, bc_i, Tᵢ, Δt, 0.0, scheme)

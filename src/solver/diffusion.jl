@@ -17,7 +17,7 @@ function DiffusionSteadyMono(phase::Phase, bc_b::BorderConditions, bc_i::Abstrac
     println("- Steady problem")
     println("- Diffusion problem")
     
-    s = Solver(Steady, Monophasic, Diffusion, nothing, nothing, nothing, ConvergenceHistory(), [])
+    s = Solver(Steady, Monophasic, Diffusion, nothing, nothing, nothing, [], [])
     
     s.A = A_mono_stead_diff(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i)
     s.b = b_mono_stead_diff(phase.operator, phase.source, phase.capacity, bc_i)
@@ -91,7 +91,7 @@ function DiffusionSteadyDiph(phase1::Phase, phase2::Phase, bc_b::BorderCondition
     println("- Steady problem")
     println("- Diffusion problem")
     
-    s = Solver(Steady, Diphasic, Diffusion, nothing, nothing, nothing, ConvergenceHistory(), [])
+    s = Solver(Steady, Diphasic, Diffusion, nothing, nothing, nothing, [], [])
     
     s.A = A_diph_stead_diff(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, bc_b, ic)
     s.b = b_diph_stead_diff(phase1.operator, phase2.operator, phase1.source, phase2.source, phase1.capacity, phase2.capacity, bc_b, ic)
@@ -195,7 +195,7 @@ function DiffusionUnsteadyMono(phase::Phase, bc_b::BorderConditions, bc_i::Abstr
     println("- Unsteady problem")
     println("- Diffusion problem")
     
-    s = Solver(Unsteady, Monophasic, Diffusion, nothing, nothing, nothing, ConvergenceHistory(), [])
+    s = Solver(Unsteady, Monophasic, Diffusion, nothing, nothing, nothing, [], [])
 
     if scheme == "CN"
         s.A = A_mono_unstead_diff(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, Δt, "CN")
@@ -322,7 +322,7 @@ function DiffusionUnsteadyDiph(phase1::Phase, phase2::Phase, bc_b::BorderConditi
     println("- Unsteady problem")
     println("- Diffusion problem")
     
-    s = Solver(Unsteady, Diphasic, Diffusion, nothing, nothing, nothing, ConvergenceHistory(), [])
+    s = Solver(Unsteady, Diphasic, Diffusion, nothing, nothing, nothing, [], [])
 
     if scheme == "CN"
         s.A = A_diph_unstead_diff(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Δt, "CN")
