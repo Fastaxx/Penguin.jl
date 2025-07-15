@@ -63,7 +63,11 @@ function remove_zero_rows_cols!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Floa
     # Find indices of non-zero rows and columns
     rows_idx = findall(row_sums .!= 0.0)
     cols_idx = findall(col_sums .!= 0.0)
-
+    
+    # For square matrices with periodic BCs, we need to ensure we keep the same indices
+    # for both rows and columns to maintain the structure of the constraints
+    common_idx = sort(Base.union(rows_idx, cols_idx))
+    
     # Create new matrix and RHS vector
     A = A[rows_idx, cols_idx]
     b = b[rows_idx]
