@@ -32,14 +32,30 @@ This step:
 
 ## Solving the System
 
-Solve the system directly by calling:
+You can solve the system using either the default iterative/direct solvers or with [LinearSolve.jl](https://github.com/SciML/LinearSolve.jl) algorithms.
+
+### Default (IterativeSolvers/Base)
 
 ```julia
 solve_DiffusionSteadyMono!(solver)
 ```
+
+### With LinearSolve.jl
+
+To use a LinearSolve.jl algorithm, pass the `algorithm` keyword argument:
+
+```julia
+using LinearSolve
+solve_DiffusionSteadyMono!(solver; algorithm=KrylovJL_GMRES())
+```
+or for a direct solver:
+```julia
+solve_DiffusionSteadyMono!(solver; algorithm=UMFPACKFactorization())
+```
+
 This routine:  
 1. Checks that the solver is properly initialized.  
-2. Invokes the internal `solve_system!` to compute the field values.  
+2. Invokes the internal `solve_system!` to compute the field values, using the specified algorithm if provided.  
 3. Stores the solution vector in `solver.x`.
 
 ## Accessing the Solution
@@ -59,5 +75,5 @@ ug = solver.x[end÷2+1:end]
 
 1. **Define Phase**: Collect capacity, operators, source function, and diffusion coefficient.  
 2. **Instantiate Solver**: Call `DiffusionSteadyMono` to prepare the linear system and boundary conditions.  
-3. **Solve**: Use `solve_DiffusionSteadyMono!` to fill `solver.x` with the steady-state solution.  
-4. **Extract Results**: Split `solver.x` into desired components for post-processing.  
+3. **Solve**: Use `solve_DiffusionSteadyMono!` to fill `solver.x` with the steady-state solution. Optionally, use the `algorithm` keyword for LinearSolve.jl support.  
+4. **Extract Results**: Split `solver.x` into desired components for post-

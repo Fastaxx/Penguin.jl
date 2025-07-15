@@ -1,4 +1,5 @@
 using Penguin
+using LinearSolve
 
 # Poisson equation inside a disk
 # Define the mesh
@@ -31,7 +32,7 @@ Fluide = Phase(capacity, operator, f, D)
 solver = DiffusionSteadyMono(Fluide, bc_b, bc)
 
 # Solve the system
-solve_DiffusionSteadyMono!(solver; method=Base.:\)
+solve_DiffusionSteadyMono!(solver, algorithm=KrylovJL_GMRES(), log=true)
 
 # Plot the solution
 plot_solution(solver, mesh, LS, capacity)

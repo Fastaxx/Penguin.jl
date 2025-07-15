@@ -57,12 +57,12 @@ function b_mono_stead_advdiff(operator::ConvectionOps, f, capacite::Capacity, bc
     return b
 end
 
-function solve_AdvectionDiffusionSteadyMono!(s::Solver; method::Function = gmres, kwargs...)
+function solve_AdvectionDiffusionSteadyMono!(s::Solver; method::Function = gmres, algorithm=nothing, kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
 
-    solve_system!(s; method, kwargs...)
+    solve_system!(s; method, algorithm=algorithm, kwargs...)
 end
 
 
@@ -140,12 +140,12 @@ function b_diph_stead_advdiff(operator1::ConvectionOps, operator2::ConvectionOps
     return b
 end
 
-function solve_AdvectionDiffusionSteadyDiph!(s::Solver; method::Function = gmres, kwargs...)
+function solve_AdvectionDiffusionSteadyDiph!(s::Solver; method::Function = gmres, algorithm=nothing, kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
 
-    solve_system!(s; method, kwargs...)
+    solve_system!(s; method, algorithm=algorithm, kwargs...)
 end
 
 
@@ -261,7 +261,7 @@ function b_mono_unstead_advdiff(operator::ConvectionOps, f, capacite::Capacity, 
     return b
 end
 
-function solve_AdvectionDiffusionUnsteadyMono!(s::Solver, phase::Phase, Δt::Float64, Tₑ, bc_b::BorderConditions, bc::AbstractBoundary, scheme::String; method::Function = gmres, kwargs...)
+function solve_AdvectionDiffusionUnsteadyMono!(s::Solver, phase::Phase, Δt::Float64, Tₑ, bc_b::BorderConditions, bc::AbstractBoundary, scheme::String; method::Function = gmres, algorithm=nothing, kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
@@ -269,7 +269,7 @@ function solve_AdvectionDiffusionUnsteadyMono!(s::Solver, phase::Phase, Δt::Flo
     # Solve for the initial time step
     t = 0.0
     println("Time: ", t)
-    solve_system!(s; method, kwargs...)
+    solve_system!(s; method, algorithm=algorithm, kwargs...)
 
     push!(s.states, s.x)
     println("Solver Extremum: ", maximum(abs.(s.x)))
@@ -281,7 +281,7 @@ function solve_AdvectionDiffusionUnsteadyMono!(s::Solver, phase::Phase, Δt::Flo
         s.b = b_mono_unstead_advdiff(phase.operator, phase.source, phase.capacity, bc, s.x, Δt, t, scheme)
         BC_border_mono!(s.A, s.b, bc_b, phase.capacity.mesh)
         
-        solve_system!(s; method, kwargs...)
+        solve_system!(s; method, algorithm=algorithm, kwargs...)
 
         push!(s.states, s.x)
         println("Solver Extremum: ", maximum(abs.(s.x)))
@@ -395,7 +395,7 @@ function b_diph_unstead_advdiff(operator1::ConvectionOps, operator2::ConvectionO
     return b
 end
 
-function solve_AdvectionDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phase2::Phase, Δt::Float64, Tₑ, bc_b::BorderConditions, ic::InterfaceConditions, scheme::String; method::Function = gmres, kwargs...)
+function solve_AdvectionDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phase2::Phase, Δt::Float64, Tₑ, bc_b::BorderConditions, ic::InterfaceConditions, scheme::String; method::Function = gmres, algorithm=nothing, kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
@@ -403,7 +403,7 @@ function solve_AdvectionDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phase2:
     # Solve for the initial time step
     t = 0.0
     println("Time: ", t)
-    solve_system!(s; method, kwargs...)
+    solve_system!(s; method, algorithm=algorithm, kwargs...)
 
     push!(s.states, s.x)
     Tᵢ = s.x
@@ -418,7 +418,7 @@ function solve_AdvectionDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phase2:
         s.b = b_diph_unstead_advdiff(phase1.operator, phase2.operator, phase1.source, phase2.source, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Tᵢ, Δt, t, scheme)
         BC_border_diph!(s.A, s.b, bc_b, phase2.capacity.mesh)
         
-        solve_system!(s; method, kwargs...)
+        solve_system!(s; method, algorithm=algorithm, kwargs...)
 
         push!(s.states, s.x)
         Tᵢ = s.x

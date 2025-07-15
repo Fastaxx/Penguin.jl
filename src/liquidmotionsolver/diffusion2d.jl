@@ -23,7 +23,8 @@ end
 function solve_MovingLiquidDiffusionUnsteadyMono2D!(s::Solver, phase::Phase, Interface_position, Hₙ⁰, sₙ, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, bc::AbstractBoundary, ic::InterfaceConditions, mesh, scheme::String; interpo="linear", Newton_params=(1000, 1e-10, 1e-10, 1.0), cfl_target=0.5,
     Δt_min=1e-4,
     Δt_max=1.0,
-    adaptive_timestep=true, method=IterativeSolvers.gmres, kwargs...)
+    adaptive_timestep=true, method=IterativeSolvers.gmres, 
+    algorithm=nothing, kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
@@ -91,7 +92,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono2D!(s::Solver, phase::Phase, Int
         iter += 1
 
         # 1) Solve the linear system
-        solve_system!(s; method=method, kwargs...)
+        solve_system!(s; method=method, algorithm=algorithm, kwargs...)
         Tᵢ = s.x
 
         # 2) Recompute heights
@@ -330,7 +331,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono2D!(s::Solver, phase::Phase, Int
             iter += 1
 
             # 1) Solve the linear system
-            solve_system!(s; method=method, kwargs...)
+            solve_system!(s; method=method, algorithm=algorithm, kwargs...)
             Tᵢ = s.x
 
             # 2) Recompute heights
@@ -680,7 +681,7 @@ end
 
 
 # Main solver function for the diphasic Stefan problem in 2D
-function solve_MovingLiquidDiffusionUnsteadyDiph2D!(s::Solver, phase1::Phase, phase2::Phase, Interface_position, Hₙ⁰,sₙ, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, ic::InterfaceConditions, mesh, scheme::String; interpo="quad", Newton_params=(1000, 1e-10, 1e-10, 1.0), method=IterativeSolvers.gmres, kwargs...)
+function solve_MovingLiquidDiffusionUnsteadyDiph2D!(s::Solver, phase1::Phase, phase2::Phase, Interface_position, Hₙ⁰,sₙ, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, ic::InterfaceConditions, mesh, scheme::String; interpo="quad", Newton_params=(1000, 1e-10, 1e-10, 1.0), method=IterativeSolvers.gmres, algorithm=nothin, kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
@@ -746,7 +747,7 @@ function solve_MovingLiquidDiffusionUnsteadyDiph2D!(s::Solver, phase1::Phase, ph
         iter += 1
 
         # 1) Solve the linear system
-        solve_system!(s; method=method, kwargs...)
+        solve_system!(s; method=method, algorithm=algorithm, kwargs...)
         Tᵢ = s.x
 
         # 2) Recompute heights for phase 1
@@ -991,7 +992,7 @@ function solve_MovingLiquidDiffusionUnsteadyDiph2D!(s::Solver, phase1::Phase, ph
             iter += 1
 
             # 1) Solve the linear system
-            solve_system!(s; method=method, kwargs...)
+            solve_system!(s; method=method, algorithm=algorithm, kwargs...)
             Tᵢ = s.x
 
             # 2) Recompute heights for phase 1

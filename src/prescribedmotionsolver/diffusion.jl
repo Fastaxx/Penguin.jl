@@ -215,7 +215,7 @@ function b_mono_unstead_diff_moving(operator::DiffusionOps, capacity::Capacity, 
     return [b1; b2]
 end
 
-function solve_MovingDiffusionUnsteadyMono!(s::Solver, phase::Phase, body::Function, Δt::Float64, Tₛ::Float64, Tₑ::Float64, bc_b::BorderConditions, bc::AbstractBoundary, mesh::AbstractMesh, scheme::String; method = IterativeSolvers.gmres, kwargs...)
+function solve_MovingDiffusionUnsteadyMono!(s::Solver, phase::Phase, body::Function, Δt::Float64, Tₛ::Float64, Tₑ::Float64, bc_b::BorderConditions, bc::AbstractBoundary, mesh::AbstractMesh, scheme::String; method = IterativeSolvers.gmres, algorithm=nothing, kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
@@ -229,7 +229,7 @@ function solve_MovingDiffusionUnsteadyMono!(s::Solver, phase::Phase, body::Funct
     # Solve system for the initial condition
     t=Tₛ
     println("Time : $(t)")
-    solve_system!(s; method, kwargs...)
+    solve_system!(s; method, algorithm=algorithm, kwargs...)
 
     push!(s.states, s.x)
     println("Solver Extremum : ", maximum(abs.(s.x)))
@@ -249,7 +249,7 @@ function solve_MovingDiffusionUnsteadyMono!(s::Solver, phase::Phase, body::Funct
         BC_border_mono!(s.A, s.b, bc_b, mesh)  
 
         # Solve system
-        solve_system!(s; method, kwargs...)
+        solve_system!(s; method, algorithm=algorithm, kwargs...)
 
         push!(s.states, s.x)
         println("Solver Extremum : ", maximum(abs.(s.x)))
@@ -492,7 +492,7 @@ function b_diph_unstead_diff_moving(operator1::DiffusionOps, operator2::Diffusio
 end
 
 
-function solve_MovingDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phase2::Phase, body::Function, body_c::Function, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, ic::InterfaceConditions, mesh::AbstractMesh, scheme::String; method = IterativeSolvers.gmres, kwargs...)
+function solve_MovingDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phase2::Phase, body::Function, body_c::Function, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, ic::InterfaceConditions, mesh::AbstractMesh, scheme::String; method = IterativeSolvers.gmres, algorithm=nothing, kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
@@ -506,7 +506,7 @@ function solve_MovingDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phase2::Ph
     # Solve system for the initial condition
     t=0.0
     println("Time : $(t)")
-    solve_system!(s; method, kwargs...)
+    solve_system!(s; method, algorithm=algorithm, kwargs...)
 
     push!(s.states, s.x)
     println("Solver Extremum : ", maximum(abs.(s.x)))
@@ -528,7 +528,7 @@ function solve_MovingDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phase2::Ph
         BC_border_diph!(s.A, s.b, bc_b, mesh)
 
         # Solve system
-        solve_system!(s; method, kwargs...)
+        solve_system!(s; method, algorithm=algorithm, kwargs...)
 
         push!(s.states, s.x)
         println("Solver Extremum : ", maximum(abs.(s.x)))

@@ -18,6 +18,7 @@ using Colors
 using Statistics
 using LibGEOS
 using GeoInterface
+using LinearSolve
 
 # Write your package code here.
 

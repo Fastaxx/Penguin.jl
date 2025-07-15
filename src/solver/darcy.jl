@@ -14,13 +14,12 @@ function DarcyFlow(phase::Phase, bc_b::BorderConditions, bc_i::AbstractBoundary)
     return s
 end
 
-function solve_DarcyFlow!(s::Solver; method::Function = gmres, kwargs...)
+function solve_DarcyFlow!(s::Solver; method::Function = gmres, algorithm=nothing, kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
 
-    solve_system!(s; method, kwargs...)
-
+    solve_system!(s; method, algorithm=algorithm, kwargs...)
     push!(s.states, s.x)
 end
 
@@ -58,7 +57,7 @@ function DarcyFlowUnsteady(phase::Phase, bc_b::BorderConditions, bc_i::AbstractB
     return s
 end
 
-function solve_DarcyFlowUnsteady!(s::Solver, phase::Phase, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, bc_i::AbstractBoundary, scheme::String; method::Function = gmres, kwargs...)
+function solve_DarcyFlowUnsteady!(s::Solver, phase::Phase, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, bc_i::AbstractBoundary, scheme::String; method::Function = gmres, algorithm=nothing, kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
@@ -66,7 +65,7 @@ function solve_DarcyFlowUnsteady!(s::Solver, phase::Phase, Δt::Float64, Tₑ::F
     # Solve for the initial condition
     t=0.0
     println("Time: ", t)
-    solve_system!(s; method, kwargs...)
+    solve_system!(s; method, algorithm=algorithm, kwargs...)
 
     push!(s.states, s.x)
     println("Solver Extremum: ", maximum(abs.(s.x)))
@@ -82,7 +81,7 @@ function solve_DarcyFlowUnsteady!(s::Solver, phase::Phase, Δt::Float64, Tₑ::F
 
         BC_border_mono!(s.A, s.b, bc_b, phase.capacity.mesh)
 
-        solve_system!(s; method, kwargs...)
+        solve_system!(s; method, algorithm=algorithm, kwargs...)
 
         push!(s.states, s.x)
         println("Solver Extremum: ", maximum(abs.(s.x)))

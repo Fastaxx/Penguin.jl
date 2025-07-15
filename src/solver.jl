@@ -77,28 +77,71 @@ function remove_zero_rows_cols!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Floa
 end
 
 """
-    solve_system!(s::Solver; method::Function=gmres, kwargs...)
+    solve_with_linearsolve!(s::Solver, A, b, algorithm; kwargs...)
 
-Solve the system of equations stored in the `Solver` struct `s` using the specified method.
+Solve a linear system using LinearSolve.jl's framework.
+
+# Arguments
+- `s::Solver`: The Solver object to store results
+- `A`: The coefficient matrix
+- `b`: The right-hand side vector
+- `algorithm`: The LinearSolve.jl algorithm to use
+- `kwargs...`: Additional keyword arguments to pass to LinearSolve.solve
+
+# Returns
+- Solution vector
+"""
+function solve_with_linearsolve!(s::Solver, A, b, algorithm; kwargs...)
+    # Create the LinearProblem
+    prob = LinearSolve.LinearProblem(A, b)
+    
+    # Solve with the specified algorithm
+    kwargs_nt = (; kwargs...)
+    log = get(kwargs_nt, :log, false)
+    
+    if log
+        # Solve with logging enabled
+        sol = LinearSolve.solve(prob, algorithm; kwargs...)
+        
+        # Extract convergence history if available
+        if hasfield(typeof(sol), :stats)
+            push!(s.ch, sol.stats)
+        end
+        return sol.u
+    else
+        # Solve without logging
+        sol = LinearSolve.solve(prob, algorithm; kwargs...)
+        return sol.u
+    end
+end
+
+"""
+    solve_system!(s::Solver; method=gmres, algorithm=nothing, kwargs...)
+
+Solve the system of equations stored in the `Solver` struct `s`.
 
 # Arguments
 - `s::Solver`: The `Solver` struct containing the system of equations to solve.
-- `method::Function=gmres`: The method to use to solve the system of equations. Default is `gmres`.
+- `method::Function=gmres`: The method to use for iterative solving (from IterativeSolvers).
+- `algorithm=nothing`: The algorithm to use from LinearSolve.jl (if provided, takes precedence over method).
 - `kwargs...`: Additional keyword arguments to pass to the solver.
 """
-function solve_system!(s::Solver; method::Function=gmres, kwargs...)
+function solve_system!(s::Solver; method::Function=gmres, algorithm=nothing, kwargs...)
     # Compute the problem size
     n = size(s.A, 1)
 
     # Always remove zero rows and columns to improve conditioning and efficiency
     A_reduced, b_reduced, rows_idx, cols_idx = remove_zero_rows_cols!(s.A, s.b)
     
-    # Choose between using a direct solver (\) or an iterative solver
-    if method === Base.:\
-        # Solve the reduced system with direct solver
+    # Choose the solution method based on inputs
+    if algorithm !== nothing
+        # Use LinearSolve.jl if an algorithm is provided
+        x_reduced = solve_with_linearsolve!(s, A_reduced, b_reduced, algorithm; kwargs...)
+    elseif method === Base.:\
+        # Use direct solver
         x_reduced = A_reduced \ b_reduced
     else
-        # Use iterative solver on the reduced system
+        # Use iterative solver from IterativeSolvers
         kwargs_nt = (; kwargs...)
         log = get(kwargs_nt, :log, false)
         if log

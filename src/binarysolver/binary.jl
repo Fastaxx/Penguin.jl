@@ -479,6 +479,7 @@ function solve_DiffusionUnsteadyBinary!(
     mesh::AbstractMesh;
     Newton_params=(1000, 1e-8, 1e-8, 0.8),
     method=Base.:\,
+    algorithm=nothing,
     kwargs...
 )
     if s.A === nothing
@@ -523,7 +524,7 @@ function solve_DiffusionUnsteadyBinary!(
     println("Time: $(t)")
     
     # Get initial combined state
-    solve_system!(s; method=method, kwargs...)
+    solve_system!(s; method=method, algorithm=algorithm, kwargs...)
     u = s.x
     
     # Split into temperature and concentration components
@@ -596,7 +597,7 @@ function solve_DiffusionUnsteadyBinary!(
             BC_border_binary!(s.A, s.b, bc_bT, bc_bC, n)
             
             # 3. Solve the system
-            solve_system!(s; method=method, kwargs...)
+            solve_system!(s; method=method, algorithm=algorithm, kwargs...)
             u = s.x
             
             # Split into temperature and concentration

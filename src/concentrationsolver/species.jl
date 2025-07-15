@@ -324,6 +324,7 @@ function solve_DiffusionUnsteadyConcentration!(
     mesh::AbstractMesh;
     Newton_params=(1000, 1e-8, 1e-8, 0.8),
     method=Base.:\,
+    algorithm=nothing,
     kwargs...
 )
     if s.A === nothing
@@ -366,7 +367,7 @@ function solve_DiffusionUnsteadyConcentration!(
     println("Time: $(t)")
     
     # Get initial state
-    solve_system!(s; method=method, kwargs...)
+    solve_system!(s; method=method, algorithm=algorithm, kwargs...)
     u = s.x
     
     push!(s.states, u)
@@ -427,7 +428,7 @@ function solve_DiffusionUnsteadyConcentration!(
             BC_border_concentration!(s.A, s.b, bc_b, n)
             
             # 3. Solve the system
-            solve_system!(s; method=method, kwargs...)
+            solve_system!(s; method=method, algorithm=algorithm, kwargs...)
             u = s.x
             
             # Split into bulk and interface values
