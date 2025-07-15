@@ -241,7 +241,7 @@ end
         solver = DiffusionUnsteadyDiph(Fluide_1, Fluide_2, bc_b, ic, Δt, u0, "CN")
         
         # Solve the problem
-        solve_DiffusionUnsteadyDiph!(solver, Fluide_1, Fluide_2, Δt, Tend, bc_b, ic, "CN"; method=Base.:\)
+        solve_DiffusionUnsteadyDiph!(solver, Fluide_1, Fluide_2, Δt, Tend, bc_b, ic, "CN"; method=IterativeSolvers.gmres)
         
         # Check convergence
         (ana_sols, num_sols, global_errs, full_errs, cut_errs, empty_errs) = 

@@ -120,7 +120,7 @@ include("vizualize_mov.jl")
 export analyze_convergence_rates_newton, plot_timestep_history, plot_interface_evolution, plot_newton_residuals, analyze_interface_spectrum
 
 include("convergence.jl")
-export check_convergence, check_convergence_diph, check_convergence_spacetime
+export check_convergence, check_convergence_diph
 
 include("vtk.jl")
 export write_vtk
