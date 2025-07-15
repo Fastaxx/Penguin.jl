@@ -85,26 +85,29 @@ function solve_system!(s::Solver; method::Function=gmres, kwargs...)
     # Compute the problem size
     n = size(s.A, 1)
 
+    # Always remove zero rows and columns to improve conditioning and efficiency
+    A_reduced, b_reduced, rows_idx, cols_idx = remove_zero_rows_cols!(s.A, s.b)
+    
     # Choose between using a direct solver (\) or an iterative solver
     if method === Base.:\
-        # Remove zero rows and columns for direct solver
-        A_reduced, b_reduced, rows_idx, cols_idx = remove_zero_rows_cols!(s.A, s.b)
-        # Solve the reduced system
+        # Solve the reduced system with direct solver
         x_reduced = A_reduced \ b_reduced
-        # Reconstruct the full solution vector
-        s.x = zeros(n)
-        s.x[cols_idx] = x_reduced
     else
-        # Use iterative solver directly
+        # Use iterative solver on the reduced system
         kwargs_nt = (; kwargs...)
         log = get(kwargs_nt, :log, false)
         if log
             # If logging is enabled, we store the convergence history
-            s.x, s.ch = method(s.A, s.b; kwargs...)
+            x_reduced, ch = method(A_reduced, b_reduced; kwargs...)
+            push!(s.ch, ch)
         else
-            s.x = method(s.A, s.b; kwargs...)
+            x_reduced = method(A_reduced, b_reduced; kwargs...)
         end
     end
+    
+    # Reconstruct the full solution vector regardless of solver type
+    s.x = zeros(n)
+    s.x[cols_idx] = x_reduced
 end
 
 """
