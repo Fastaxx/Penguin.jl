@@ -251,7 +251,7 @@ function DiffusionUnsteadyConcentration(
     println("- Unsteady problem")
     println("- Interface concentration balance")
     
-    s = Solver(Unsteady, Diphasic, Diffusion, nothing, nothing, nothing, ConvergenceHistory(), [])
+    s = Solver(Unsteady, Diphasic, Diffusion, nothing, nothing, nothing, [], [])
     
     # Get dimensions and arrange initial conditions
     dims = phase1.operator.size

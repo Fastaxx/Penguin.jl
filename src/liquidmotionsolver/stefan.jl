@@ -185,7 +185,7 @@ function StefanMono2D(phase::Phase, bc_b::BorderConditions, bc_i::AbstractBounda
     println("- Unsteady problem")
     println("- Diffusion problem")
     
-    s = Solver(Unsteady, Monophasic, Diffusion, nothing, nothing, nothing, ConvergenceHistory(), [])    
+    s = Solver(Unsteady, Monophasic, Diffusion, nothing, nothing, nothing, [], [])    
     if scheme == "CN"
         s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, "CN")
         s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc_i, Tᵢ, Δt, 0.0, "CN")
@@ -981,7 +981,7 @@ function StefanDiph2D(phase1::Phase, phase2::Phase, bc_b::BorderConditions,
     println("- Unsteady problem")
     println("- Diffusion problem")
     
-    s = Solver(Unsteady, Diphasic, Diffusion, nothing, nothing, nothing, ConvergenceHistory(), [])
+    s = Solver(Unsteady, Diphasic, Diffusion, nothing, nothing, nothing, [], [])
     
     # Create initial matrix system based on selected scheme
     if scheme == "CN"

@@ -15,7 +15,7 @@ function AdvectionDiffusionSteadyMono(phase::Phase, bc_b::BorderConditions, bc_i
     println("- Steady problem")
     println("- Advection-Diffusion problem")
     
-    s = Solver(Steady, Monophasic, DiffusionAdvection, nothing, nothing, nothing, ConvergenceHistory(), [])
+    s = Solver(Steady, Monophasic, DiffusionAdvection, nothing, nothing, nothing, [], [])
     
     s.A = A_mono_stead_advdiff(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i)
     s.b = b_mono_stead_advdiff(phase.operator, phase.source, phase.capacity, bc_i)
@@ -84,7 +84,7 @@ function AdvectionDiffusionSteadyDiph(phase1::Phase, phase2::Phase, bc_b::Border
     println("- Steady problem")
     println("- Advection-Diffusion problem")
     
-    s = Solver(Steady, Diphasic, DiffusionAdvection, nothing, nothing, nothing, ConvergenceHistory(), [])
+    s = Solver(Steady, Diphasic, DiffusionAdvection, nothing, nothing, nothing, [], [])
     
     s.A = A_diph_stead_advdiff(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic)
     s.b = b_diph_stead_advdiff(phase1.operator, phase2.operator, phase1.source, phase2.source, phase1.capacity, phase2.capacity, ic)
@@ -169,7 +169,7 @@ function AdvectionDiffusionUnsteadyMono(phase::Phase, bc_b::BorderConditions, bc
     println("- Unsteady problem")
     println("- Advection-Diffusion problem")
     
-    s = Solver(Unsteady, Monophasic, DiffusionAdvection, nothing, nothing, nothing, ConvergenceHistory(), [])
+    s = Solver(Unsteady, Monophasic, DiffusionAdvection, nothing, nothing, nothing, [], [])
     
     s.A = A_mono_unstead_advdiff(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, Δt, scheme)
     s.b = b_mono_unstead_advdiff(phase.operator, phase.source, phase.capacity, bc_i, Tᵢ, Δt, 0.0, scheme)
@@ -311,7 +311,7 @@ function AdvectionDiffusionUnsteadyDiph(phase1::Phase, phase2::Phase, bc_b::Bord
     println("- Unsteady problem")
     println("- Advection-Diffusion problem")
     
-    s = Solver(Unsteady, Diphasic, DiffusionAdvection, nothing, nothing, nothing, ConvergenceHistory(), [])
+    s = Solver(Unsteady, Diphasic, DiffusionAdvection, nothing, nothing, nothing, [], [])
     
     s.A = A_diph_unstead_advdiff(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Δt, scheme)
     s.b = b_diph_unstead_advdiff(phase1.operator, phase2.operator, phase1.source, phase2.source, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Tᵢ, Δt, 0.0, scheme)

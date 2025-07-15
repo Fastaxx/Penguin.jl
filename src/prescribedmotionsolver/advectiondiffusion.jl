@@ -19,7 +19,7 @@ function MovingAdvDiffusionUnsteadyMono(phase::Phase, bc_b::BorderConditions, bc
     println("- Unsteady problem")
     println("- Advection-Diffusion problem")
     
-    s = Solver(Unsteady, Monophasic, DiffusionAdvection, nothing, nothing, nothing, ConvergenceHistory(), [])
+    s = Solver(Unsteady, Monophasic, DiffusionAdvection, nothing, nothing, nothing, [], [])
     
     if scheme == "CN"
         s.A = A_mono_unstead_advdiff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, "CN")
@@ -250,7 +250,7 @@ function MovingAdvDiffusionUnsteadyDiph(phase1::Phase, phase2::Phase, bc_b::Bord
     println("- Unsteady problem")
     println("- Advection-Diffusion problem")
     
-    s = Solver(Unsteady, Diphasic, DiffusionAdvection, nothing, nothing, nothing, ConvergenceHistory(), [])
+    s = Solver(Unsteady, Diphasic, DiffusionAdvection, nothing, nothing, nothing, [], [])
     
     if scheme == "CN"
         s.A = A_diph_unstead_advdiff_moving(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, "CN")

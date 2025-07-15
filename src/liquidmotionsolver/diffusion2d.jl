@@ -7,7 +7,7 @@ function MovingLiquidDiffusionUnsteadyMono2D(phase::Phase, bc_b::BorderCondition
     println("- Unsteady problem")
     println("- Diffusion problem")
     
-    s = Solver(Unsteady, Monophasic, Diffusion, nothing, nothing, nothing, ConvergenceHistory(), [])
+    s = Solver(Unsteady, Monophasic, Diffusion, nothing, nothing, nothing, [], [])
     
     if scheme == "CN"
         s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, "CN")

@@ -383,7 +383,7 @@ function DiffusionUnsteadyBinary(
     println("- Unsteady problem")
     println("- Coupling temperature and concentration")
     
-    s = Solver(Unsteady, Diphasic, Diffusion, nothing, nothing, nothing, ConvergenceHistory(), [])
+    s = Solver(Unsteady, Diphasic, Diffusion, nothing, nothing, nothing, [], [])
     
     # Default physical parameters if not provided
     m = 1.0  # Liquidus slope
