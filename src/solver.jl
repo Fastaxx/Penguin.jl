@@ -66,13 +66,14 @@ function remove_zero_rows_cols!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Floa
     
     # For square matrices with periodic BCs, we need to ensure we keep the same indices
     # for both rows and columns to maintain the structure of the constraints
-    common_idx = sort(Base.union(rows_idx, cols_idx))
+    # Before directly : A = A[rows_idx, cols_idx], b = b[rows_idx]
+    common_idx = intersect(rows_idx, cols_idx)
     
     # Create new matrix and RHS vector
-    A = A[rows_idx, cols_idx]
-    b = b[rows_idx]
+    A = A[common_idx, common_idx]
+    b = b[common_idx]
 
-    return A, b, rows_idx, cols_idx
+    return A, b, common_idx, common_idx
 end
 
 """
@@ -377,7 +378,7 @@ function apply_boundary_condition_fast!(A, b, li, pos, condition, boundary_key, 
         opposite_key = get_opposite_boundary(boundary_key)
         if haskey(bc_b.borders, opposite_key)
             corresponding_idx = find_corresponding_cell_optimized(li, boundary_key, mesh)
-            
+            A[li, :] .= 0.0
             # Apply periodic constraint: x_li - x_corresponding = 0
             A[li, li] += 1.0
             A[li, corresponding_idx] -= 1.0
@@ -387,10 +388,7 @@ function apply_boundary_condition_fast!(A, b, li, pos, condition, boundary_key, 
     elseif condition isa Neumann
         # TODO: Implement Neumann BC
         @warn "Neumann boundary conditions not yet implemented" maxlog=1
-        
-    elseif condition isa Robin
-        # TODO: Implement Robin BC  
-        @warn "Robin boundary conditions not yet implemented" maxlog=1
+
     end
 end
 
@@ -400,29 +398,29 @@ end
 Optimized calculation of corresponding periodic boundary cell.
 """
 function find_corresponding_cell_optimized(li::Int, boundary_key::Symbol, mesh::AbstractMesh)
-    if boundary_key == :left
-        # Left → Right: add width offset
-        return li + (length(mesh.centers[2]) - 1)
+    # Convert linear index to CartesianIndex for more reliable mapping
+    dims = [length(center)+1 for center in mesh.centers]
+    ci = CartesianIndices(Tuple(dims))[li]
+    
+    # Create the new CartesianIndex based on the boundary
+    new_ci = if boundary_key == :left
+        CartesianIndex(ci[1], dims[2])  # Map to rightmost column
     elseif boundary_key == :right
-        # Right → Left: subtract width offset
-        return li - (length(mesh.centers[2]) - 1)
+        CartesianIndex(ci[1], 1)  # Map to leftmost column
     elseif boundary_key == :bottom
-        # Bottom → Top: add height offset
-        return li + (length(mesh.centers[1]) - 1) * (length(mesh.centers[2]) + 1)
+        CartesianIndex(dims[1], ci[2])  # Map to top row
     elseif boundary_key == :top
-        # Top → Bottom: subtract height offset
-        return li - (length(mesh.centers[1]) - 1) * (length(mesh.centers[2]) + 1)
+        CartesianIndex(1, ci[2])  # Map to bottom row
     elseif boundary_key == :backward && length(mesh.centers) >= 3
-        # Backward → Forward: add depth offset
-        offset = (length(mesh.centers[3]) - 1) * (length(mesh.centers[1]) + 1) * (length(mesh.centers[2]) + 1)
-        return li + offset
+        CartesianIndex(ci[1], ci[2], dims[3])  # Map to forward face
     elseif boundary_key == :forward && length(mesh.centers) >= 3
-        # Forward → Backward: subtract depth offset
-        offset = (length(mesh.centers[3]) - 1) * (length(mesh.centers[1]) + 1) * (length(mesh.centers[2]) + 1)
-        return li - offset
+        CartesianIndex(ci[1], ci[2], 1)  # Map to backward face
     else
         error("Unknown boundary key: $boundary_key")
     end
+    
+    # Convert back to linear index
+    return LinearIndices(Tuple(dims))[new_ci]
 end
 
 """

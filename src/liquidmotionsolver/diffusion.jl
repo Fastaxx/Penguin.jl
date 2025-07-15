@@ -147,7 +147,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
         s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc, scheme)
         s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc, Tᵢ, Δt, t, scheme)
 
-        BC_border_mono!(s.A, s.b, bc_b, phase.capacity.mesh)
+        BC_border_mono!(s.A, s.b, bc_b, mesh)
 
         # 5) Update variables
         current_xf = new_xf
@@ -208,7 +208,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
         s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc, scheme)
         s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc, Tᵢ, Δt, 0.0, scheme)
 
-        BC_border_mono!(s.A, s.b, bc_b, phase.capacity.mesh)
+        BC_border_mono!(s.A, s.b, bc_b, mesh)
 
         err = Inf
         iter = 0
@@ -271,7 +271,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
             s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc, scheme)
             s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc, Tᵢ, Δt, t, scheme)
 
-            BC_border_mono!(s.A, s.b, bc_b, phase.capacity.mesh)
+            BC_border_mono!(s.A, s.b, bc_b, mesh) # use mesh instead of phase.capacity.mesh for BC
 
             # 5) Update variables
             current_xf = new_xf
@@ -652,7 +652,7 @@ function solve_MovingLiquidDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phas
         s.A = A_diph_unstead_diff_moving_stef(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, scheme)
         s.b = b_diph_unstead_diff_moving_stef(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, phase1.source, phase2.source, ic, Tᵢ, Δt, t, scheme)
 
-        BC_border_diph!(s.A, s.b, bc_b, phase1.capacity.mesh)
+        BC_border_diph!(s.A, s.b, bc_b, mesh)
 
         # 5) Update variables
         current_xf = new_xf
@@ -691,7 +691,7 @@ function solve_MovingLiquidDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phas
         s.A = A_diph_unstead_diff_moving_stef(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, scheme)
         s.b = b_diph_unstead_diff_moving_stef(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, phase1.source, phase2.source, ic, Tᵢ, Δt, 0.0, scheme)
 
-        BC_border_diph!(s.A, s.b, bc_b, phase1.capacity.mesh)
+        BC_border_diph!(s.A, s.b, bc_b, mesh)
 
         err = Inf
         iter = 0
@@ -769,7 +769,7 @@ function solve_MovingLiquidDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phas
             s.A = A_diph_unstead_diff_moving_stef(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, scheme)
             s.b = b_diph_unstead_diff_moving_stef(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, phase1.source, phase2.source, ic, Tᵢ, Δt, t, scheme)
 
-            BC_border_diph!(s.A, s.b, bc_b, phase1.capacity.mesh)
+            BC_border_diph!(s.A, s.b, bc_b, mesh) # use mesh instead of phase.capacity.mesh for BC
 
             # 5) Update variables
             current_xf = new_xf
