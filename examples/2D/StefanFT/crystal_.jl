@@ -10,7 +10,7 @@ using Statistics
 using FFTW
 using DSP
 using Roots
-using IntervalArithmetic
+
 ### 2D Test Case: Frank Sphere (Stefan Problem with Circular Interface)
 ### Ice crysyal decaying
 
@@ -88,12 +88,7 @@ create_crystal!(front, 0.0, 0.0, R0, 4, 0.1, nmarkers)
 
 # Définir le corps (body) en utilisant la SDF du front avec gestion des intervalles
 body = (x, y, t, _=0) -> -sdf(front, float(x), float(y))
-body = (x) -> begin
-    # Handle interval arithmetic by converting to floats
-    x1 = typeof(x[1]) <: IntervalArithmetic.Interval ? mid(x[1]) : float(x[1])
-    x2 = typeof(x[2]) <: IntervalArithmetic.Interval ? mid(x[2]) : float(x[2])
-    return -sdf(front, x1, x2)
-end
+
 # Define the Space-Time mesh
 #Δt = 0.5*(lx / nx)^2  # Time step size
 Δt = 0.01

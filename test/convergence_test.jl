@@ -2,6 +2,7 @@ using Penguin
 using Test
 using SpecialFunctions
 using IterativeSolvers
+using LinearSolve
 
 @testset "Convergence Test 1D" begin
     nx = 40
@@ -20,7 +21,7 @@ using IterativeSolvers
     D(x,y,z) = 1.0
     Fluide = Phase(capacity, operator, f, D)
     solver = DiffusionSteadyMono(Fluide, bc_b, bc)
-    solve_DiffusionSteadyMono!(solver; method=Base.:\)
+    solve_DiffusionSteadyMono!(solver; algorithm=UMFPACKFactorization(), log=true)
     u_analytic(x) = - (x-center)^3/6 - (center*(x-center)^2)/2 + radius^2/6 * (x-center) + center*radius^2/2
     u_ana, u_num, global_err, full_err, cut_err, empty_err = check_convergence(u_analytic, solver, capacity, 2, false)
     @test global_err < 1e-2
@@ -57,7 +58,7 @@ end
     operator = DiffusionOps(capacity)
     bc = Dirichlet(0.0)
     bc1 = Dirichlet(1.0)
-    bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:left => bc1, :right => bc1, :top => bc1, :bottom => bc1, :front => bc1, :back => bc1))
+    bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:left => bc1, :right => bc1, :top => bc1, :bottom => bc1, :forward => bc1, :backward => bc1))
     f(x,y,z) = 6.0
     D(x,y,z) = 1.0
     Fluide = Phase(capacity, operator, f, D)
