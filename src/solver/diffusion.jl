@@ -197,8 +197,13 @@ function DiffusionUnsteadyMono(phase::Phase, bc_b::BorderConditions, bc_i::Abstr
     
     s = Solver(Unsteady, Monophasic, Diffusion, nothing, nothing, nothing, [], [])
 
-    s.A = A_mono_unstead_diff(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, Δt, scheme)
-    s.b = b_mono_unstead_diff(phase.operator, phase.source, phase.Diffusion_coeff, phase.capacity, bc_i, Tᵢ, Δt, 0.0, scheme)
+    if scheme == "CN"
+        s.A = A_mono_unstead_diff(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, Δt, "CN")
+        s.b = b_mono_unstead_diff(phase.operator, phase.source, phase.Diffusion_coeff, phase.capacity, bc_i, Tᵢ, Δt, 0.0, "CN")
+    else
+        s.A = A_mono_unstead_diff(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, Δt, "BE")
+        s.b = b_mono_unstead_diff(phase.operator, phase.source, phase.Diffusion_coeff, phase.capacity, bc_i, Tᵢ, Δt, 0.0, "BE")
+    end
     BC_border_mono!(s.A, s.b, bc_b, phase.capacity.mesh)
 
     return s
@@ -214,12 +219,18 @@ function A_mono_unstead_diff(operator::DiffusionOps, capacite::Capacity, D, bc::
     # Preallocate the sparse matrix A with 2n rows and 2n columns
     A = spzeros(Float64, 2n, 2n)
 
-    # Compute blocks using theta scheme (theta=0.5 for CN, theta=1 for implicit Euler)
-    θ = scheme == "CN" ? 0.5 : 1.0
-    block1 = operator.V + θ * Δt * (Id * operator.G' * operator.Wꜝ * operator.G)
-    block2 = θ * Δt * (Id * operator.G' * operator.Wꜝ * operator.H)
-    block3 = θ * Δt * Iᵦ * operator.H' * operator.Wꜝ * operator.G
-    block4 = θ * Δt * Iᵦ * operator.H' * operator.Wꜝ * operator.H + θ * Δt * (Iₐ * Iᵧ)
+    # Compute blocks
+    if scheme=="CN"
+        block1 = operator.V + Δt / 2 * (Id * operator.G' * operator.Wꜝ * operator.G)
+        block2 = Δt / 2 * (Id * operator.G' * operator.Wꜝ * operator.H)
+        block3 = Δt/2 * Iᵦ * operator.H' * operator.Wꜝ * operator.G
+        block4 = Δt/2 * Iᵦ * operator.H' * operator.Wꜝ * operator.H + Δt/2 * (Iₐ * Iᵧ)
+    else
+        block1 = operator.V + Δt * (Id * operator.G' * operator.Wꜝ * operator.G)
+        block2 = Δt * (Id * operator.G' * operator.Wꜝ * operator.H)
+        block3 = Iᵦ * operator.H' * operator.Wꜝ * operator.G
+        block4 = Iᵦ * operator.H' * operator.Wꜝ * operator.H + (Iₐ * Iᵧ)
+    end
     
     A[1:n, 1:n] = block1
     A[1:n, n+1:2n] = block2
@@ -334,12 +345,17 @@ function A_diph_unstead_diff(operator1::DiffusionOps, operator2::DiffusionOps, c
     WG_G2 = operator2.Wꜝ * operator2.G
     WG_H2 = operator2.Wꜝ * operator2.H
 
-    θ = scheme == "CN" ? 0.5 : 1.0
-    block1 = operator1.V + θ * Δt * Id1 * operator1.G' * WG_G1
-    block2 = θ * Δt * Id1 * operator1.G' * WG_H1
-    block3 = operator2.V + θ * Δt * Id2 * operator2.G' * WG_G2
-    block4 = θ * Δt * Id2 * operator2.G' * WG_H2
-    
+    if scheme == "CN"
+        block1 = operator1.V + Δt / 2 * Id1 * operator1.G' * WG_G1
+        block2 = Δt / 2 * Id1 * operator1.G' * WG_H1
+        block3 = operator2.V + Δt / 2 * Id2 * operator2.G' * WG_G2
+        block4 = Δt / 2 * Id2 * operator2.G' * WG_H2
+    else
+        block1 = operator1.V + Δt * Id1 * operator1.G' * WG_G1
+        block2 = Δt * Id1 * operator1.G' * WG_H1
+        block3 = operator2.V + Δt * Id2 * operator2.G' * WG_G2
+        block4 = Δt * Id2 * operator2.G' * WG_H2
+    end
     block5 = Iᵦ1 * operator1.H' * WG_G1
     block6 = Iᵦ1 * operator1.H' * WG_H1
     block7 = Iᵦ2 * operator2.H' * WG_G2
