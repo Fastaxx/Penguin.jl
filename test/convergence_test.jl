@@ -69,6 +69,34 @@ end
     @test global_err < 1e-2
 end
 
+@testset "Convergence Test Unsteady Mono 1D" begin
+    nx = 40
+    lx = 4.0
+    x0 = 0.0
+    mesh = Penguin.Mesh((nx,), (lx,), (x0,))
+    center = 2.0
+    radius = 1.0
+    LS(x,_=0) = abs(x-center) - radius
+    capacity = Capacity(LS, mesh)
+    operator = DiffusionOps(capacity)
+    bc = Dirichlet(0.0)
+    bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:left => bc, :right => bc))
+    f(x,y,z,t) = 0.0
+    D(x,y,z) = 1.0
+    Fluide = Phase(capacity, operator, f, D)
+    u0ₒ = zeros(nx+1)
+    u0ᵧ = zeros(nx+1)
+    u0 = vcat(u0ₒ, u0ᵧ)
+    Δt = 0.25 * (lx/nx)^2
+    Tend = 0.01
+    solver = DiffusionUnsteadyMono(Fluide, bc_b, bc, Δt, u0, "BE")
+    solve_DiffusionUnsteadyMono!(solver, Fluide, Δt, Tend, bc_b, bc, "BE"; method=IterativeSolvers.gmres)
+    # Analytical solution for homogeneous Dirichlet and zero source: stays zero
+    u_analytic(x,t) = 0.0
+    u_ana, u_num, global_err, full_err, cut_err, empty_err = check_convergence((x)->u_analytic(x,Tend), solver, capacity, 2, false)
+    @test global_err < 1e-8
+end
+
 @testset "Convergence Test Diphasic 1D" begin
     # Define mesh
     nx = 100
@@ -124,10 +152,10 @@ end
     Tend = 0.5
     
     # Initialize solver
-    solver = DiffusionUnsteadyDiph(Fluide_1, Fluide_2, bc_b, ic, Δt, u0, "CN")
+    solver = DiffusionUnsteadyDiph(Fluide_1, Fluide_2, bc_b, ic, Δt, u0, "BE")
     
     # Solve the problem
-    solve_DiffusionUnsteadyDiph!(solver, Fluide_1, Fluide_2, Δt, Tend, bc_b, ic, "CN"; method=IterativeSolvers.bicgstabl)
+    solve_DiffusionUnsteadyDiph!(solver, Fluide_1, Fluide_2, Δt, Tend, bc_b, ic, "BE"; method=IterativeSolvers.bicgstabl)
     
     # Analytical solutions
     function T1(x)
