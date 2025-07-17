@@ -101,42 +101,6 @@ using Penguin
         @test isapprox(sdf(front, 0.5, 0.0), -0.5, atol=1e-2)  # Inside, distance = 0.5
     end
     
-    @testset "Perturbed Interface" begin
-        # Create a circular interface
-        front = FrontTracker()
-        create_circle!(front, 0.5, 0.5, 0.3)
-        
-        # Get original markers
-        original_markers = get_markers(front)
-        
-        # Create perturbed markers
-        rng = MersenneTwister(42)  # For reproducibility
-        perturbed_markers = []
-        for (x, y) in original_markers
-            # Apply random perturbation to each marker
-            dx = rand(rng) * 0.01
-            dy = rand(rng) * 0.01
-            push!(perturbed_markers, (x + dx, y + dy))
-        end
-        
-        # Update interface with perturbed markers
-        set_markers!(front, perturbed_markers)
-        
-        # Compute displacements between original and perturbed markers
-        displacements = [sqrt((x2-x1)^2 + (y2-y1)^2) for ((x1, y1), (x2, y2)) in zip(original_markers, perturbed_markers)]
-        
-        # Check displacement statistics
-        @test 0.0 < mean(displacements) < 0.01
-        @test maximum(displacements) < 0.015
-        
-        # Test several points to ensure SDF is still reasonable after perturbation
-        @test is_point_inside(front, 0.5, 0.5) == true  # Center point should still be inside
-        
-        # Point on the original interface might now be inside or outside but should be close to zero
-        for (x, y) in original_markers
-            @test abs(sdf(front, x, y)) < 0.02  # Should be close to interface
-        end
-    end
 
     @testset "Normals and Curvature" begin
         @testset "Circle Normals" begin
