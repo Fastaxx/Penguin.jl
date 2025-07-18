@@ -35,9 +35,9 @@ function analytical_temperature(r, t)
 end
 
 # Define the Space-Time mesh
-Δt = 0.5*(lx/nx)^2
+Δt = 1.0*(lx/nx)^2
 Tstart = 0.0
-Tend = 0.2
+Tend = 1.0
 STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt], tag=mesh.tag)
 
 # Define the capacity
@@ -71,6 +71,66 @@ solve_MovingDiffusionUnsteadyMono!(solver, Fluide, body, Δt, Tstart, Tend, bc_b
 
 # Plot the solution
 #plot_solution(solver, mesh, body, capacity; state_i=1)
+
+
+function plot_three_snapshots(solver, mesh, body, Tend; times=[0.0, Tend/2, Tend], filename="moving_heat_snapshots.pdf")
+    xi = mesh.centers[1]
+    yi = mesh.centers[2]
+    npts = (nx+1)*(ny+1)
+    center = [0.0, 0.0]
+    radius = 1.0
+    c = 1.56
+    Δx, Δy = lx/nx, ly/ny
+
+    # Find indices closest to requested times
+    Δt = solver.states |> length > 1 ? Tend/(length(solver.states)-1) : Tend
+    time_indices = [clamp(round(Int, t/Δt)+1, 1, length(solver.states)) for t in times]
+
+    # Temperature limits for consistent color scale
+    all_temps = Float64[]
+    for Tstate in solver.states
+        Tw = Tstate[1:npts]
+        Tw_mat = reshape(Tw, (nx+1, ny+1))[1:end-1, 1:end-1]
+        push!(all_temps, extrema(Tw_mat)...)
+    end
+    temp_limits = (minimum(all_temps), maximum(all_temps))
+
+    fig = Figure(size=(1200, 400))
+    hm = nothing
+    for (i, idx) in enumerate(time_indices)
+        ax = Axis(fig[1, i], 
+            title="t = $(round(times[i], digits=3))",
+            xlabel="x", ylabel="y",
+            aspect=DataAspect(),)
+        current_time = times[i]
+        body_end = (x, y,_=0) -> -(sqrt((x - center[1])^2 + (y - center[2])^2) - (radius + c * sqrt(current_time)))
+        capacity_end = Capacity(body_end, mesh; compute_centroids=false)
+        Tstate = solver.states[idx]
+        Tw = Tstate[1:npts]
+        Tw[capacity_end.cell_types .== 0] .= 1.0
+
+        Tmat = reshape(Tw, (nx+1, ny+1))[1:end-1, 1:end-1]
+        hm = heatmap!(ax, xi, yi, Tmat, colormap=:viridis, colorrange=temp_limits)
+
+        # Interface
+        n_interface_points = 100
+        theta = range(0, 2π, length=n_interface_points)
+        interface_radius = radius + c * sqrt(current_time)
+        adjusted_center_x = center[1] - Δx
+        adjusted_center_y = center[2] - Δy
+        interface_x = adjusted_center_x .+ interface_radius .* cos.(theta)
+        interface_y = adjusted_center_y .+ interface_radius .* sin.(theta)
+        lines!(ax, interface_x, interface_y, color=:white, linewidth=2)
+    end
+
+    Colorbar(fig[1, end+1], hm, label="Temperature")
+    save(filename, fig)
+    println("Saved 3-snapshot figure to $filename")
+    return fig
+end
+
+# Usage:
+plot_three_snapshots(solver, mesh, body, Tend)
 
 # Animation
 function create_moving_heat_animation(solver, mesh, body, Tend)
