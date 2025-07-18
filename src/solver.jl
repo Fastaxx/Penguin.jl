@@ -36,7 +36,7 @@ mutable struct Solver{TT<:TimeType, PT<:PhaseType, ET<:EquationType}
     A::Union{SparseMatrixCSC{Float64, Int}, Nothing}
     b::Union{Vector{Float64}, Nothing}
     x::Union{Vector{Float64}, Nothing}
-    ch::IterativeSolvers.ConvergenceHistory
+    ch::Vector{Any}  # Convergence history, if applicable
     states::Vector{Any}
 end
 
@@ -63,48 +63,99 @@ function remove_zero_rows_cols!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Floa
     # Find indices of non-zero rows and columns
     rows_idx = findall(row_sums .!= 0.0)
     cols_idx = findall(col_sums .!= 0.0)
-
+    
+    # For square matrices with periodic BCs, we need to ensure we keep the same indices
+    # for both rows and columns to maintain the structure of the constraints
+    # Before directly : A = A[rows_idx, cols_idx], b = b[rows_idx]
+    common_idx = intersect(rows_idx, cols_idx)
+    
     # Create new matrix and RHS vector
-    A = A[rows_idx, cols_idx]
-    b = b[rows_idx]
+    A = A[common_idx, common_idx]
+    b = b[common_idx]
 
-    return A, b, rows_idx, cols_idx
+    return A, b, common_idx, common_idx
 end
 
 """
-    solve_system!(s::Solver; method::Function=gmres, kwargs...)
+    solve_with_linearsolve!(s::Solver, A, b, algorithm; kwargs...)
 
-Solve the system of equations stored in the `Solver` struct `s` using the specified method.
+Solve a linear system using LinearSolve.jl's framework.
+
+# Arguments
+- `s::Solver`: The Solver object to store results
+- `A`: The coefficient matrix
+- `b`: The right-hand side vector
+- `algorithm`: The LinearSolve.jl algorithm to use
+- `kwargs...`: Additional keyword arguments to pass to LinearSolve.solve
+
+# Returns
+- Solution vector
+"""
+function solve_with_linearsolve!(s::Solver, A, b, algorithm; kwargs...)
+    # Create the LinearProblem
+    prob = LinearSolve.LinearProblem(A, b)
+    
+    # Solve with the specified algorithm
+    kwargs_nt = (; kwargs...)
+    log = get(kwargs_nt, :log, false)
+    
+    if log
+        # Solve with logging enabled
+        sol = LinearSolve.solve(prob, algorithm; kwargs...)
+        
+        # Extract convergence history if available
+        if hasfield(typeof(sol), :stats)
+            push!(s.ch, sol.stats)
+        end
+        return sol.u
+    else
+        # Solve without logging
+        sol = LinearSolve.solve(prob, algorithm; kwargs...)
+        return sol.u
+    end
+end
+
+"""
+    solve_system!(s::Solver; method=gmres, algorithm=nothing, kwargs...)
+
+Solve the system of equations stored in the `Solver` struct `s`.
 
 # Arguments
 - `s::Solver`: The `Solver` struct containing the system of equations to solve.
-- `method::Function=gmres`: The method to use to solve the system of equations. Default is `gmres`.
+- `method::Function=gmres`: The method to use for iterative solving (from IterativeSolvers).
+- `algorithm=nothing`: The algorithm to use from LinearSolve.jl (if provided, takes precedence over method).
 - `kwargs...`: Additional keyword arguments to pass to the solver.
 """
-function solve_system!(s::Solver; method::Function=gmres, kwargs...)
+function solve_system!(s::Solver; method::Function=gmres, algorithm=nothing, kwargs...)
     # Compute the problem size
     n = size(s.A, 1)
 
-    # Choose between using a direct solver (\) or an iterative solver
-    if method === Base.:\
-        # Remove zero rows and columns for direct solver
-        A_reduced, b_reduced, rows_idx, cols_idx = remove_zero_rows_cols!(s.A, s.b)
-        # Solve the reduced system
+    # Always remove zero rows and columns to improve conditioning and efficiency
+    A_reduced, b_reduced, rows_idx, cols_idx = remove_zero_rows_cols!(s.A, s.b)
+    
+    # Choose the solution method based on inputs
+    if algorithm !== nothing
+        # Use LinearSolve.jl if an algorithm is provided
+        x_reduced = solve_with_linearsolve!(s, A_reduced, b_reduced, algorithm; kwargs...)
+    elseif method === Base.:\
+        # Use direct solver
         x_reduced = A_reduced \ b_reduced
-        # Reconstruct the full solution vector
-        s.x = zeros(n)
-        s.x[cols_idx] = x_reduced
     else
-        # Use iterative solver directly
+        # Use iterative solver from IterativeSolvers
         kwargs_nt = (; kwargs...)
         log = get(kwargs_nt, :log, false)
         if log
             # If logging is enabled, we store the convergence history
-            s.x, s.ch = method(s.A, s.b; kwargs...)
+            x_reduced, ch = method(A_reduced, b_reduced; kwargs...)
+            push!(s.ch, ch)
         else
-            s.x = method(s.A, s.b; kwargs...)
+            x_reduced = method(A_reduced, b_reduced; kwargs...)
         end
     end
+    
+    # Reconstruct the full solution vector regardless of solver type
+    s.x = zeros(n)
+    s.x[cols_idx] = x_reduced
 end
 
 """
@@ -143,253 +194,109 @@ function build_I_bc(operator::AbstractOperators,bc::AbstractBoundary)
 end
 
 """
+    get_all_coordinates(C_coords)
+
+Efficiently compute all coordinates at once using vectorized operations.
+"""
+function get_all_coordinates(C_coords)
+    n = length(C_coords)
+    
+    if length(C_coords[1]) == 1
+        # 1D case
+        return [(C_coords[i][1], 0.0, 0.0) for i in 1:n]
+    elseif length(C_coords[1]) == 2
+        # 2D case
+        return [(C_coords[i][1], C_coords[i][2], 0.0) for i in 1:n]
+    elseif length(C_coords[1]) == 3
+        # 3D case
+        return [(C_coords[i][1], C_coords[i][2], C_coords[i][3]) for i in 1:n]
+    elseif length(C_coords[1]) == 4
+        # 4D case (e.g., spacetime)
+        return [(C_coords[i][1], C_coords[i][2], C_coords[i][3], C_coords[i][4]) for i in 1:n]
+    else
+        error("Unsupported coordinate dimension: $(length(C_coords[1]))")
+    end
+end
+
+"""
     build_I_D(operator::AbstractOperators, D::Union{Float64,Function}, capacite::Capacity)
 
-Build the diffusion matrix Id for the given operator and diffusion coefficient.
-
-# Arguments
-- `operator::AbstractOperators`: The operators of the problem.
-- `D::Union{Float64,Function}`: The diffusion coefficient of the problem.
-- `capacite::Capacity`: The capacity of the problem.
-
-# Returns
-- `Id::SparseMatrixCSC{Float64, Int}`: The diffusion matrix Id.
+Optimized diffusion matrix construction without loops.
 """
 function build_I_D(operator::AbstractOperators, D::Union{Float64,Function}, capacite::Capacity)
     n = prod(operator.size)
-    Id = spdiagm(0 => ones(n))
-
+    
     if D isa Function
-        for i in 1:n
-            x, y, z = get_coordinates(i, capacite.C_ω)
-            Id[i, i] = D(x, y, z)
-        end
+        # Vectorized coordinate computation
+        coords = get_all_coordinates(capacite.C_ω)
+        diagonal_values = [D(coord...) for coord in coords]
+        return spdiagm(0 => diagonal_values)
     else
-        Id = D * Id
+        return D * I(n)
     end
-    return Id
 end
 
 """
     build_source(operator::AbstractOperators, f::Function, capacite::Capacity)
 
-Build the source term vector fₒ for the given operator and source term function.
-
-# Arguments
-- `operator::AbstractOperators`: The operators of the problem.
-- `f::Function`: The source term function of the problem.
-- `capacite::Capacity`: The capacity of the problem.
-
-# Returns
-- `fₒ::Vector{Float64}`: The source term vector fₒ.
+Optimized source term construction without loops.
 """
 function build_source(operator::AbstractOperators, f::Function, capacite::Capacity)
-    N = prod(operator.size)
-    fₒ = zeros(N)
-
-    # Compute the source term
-    for i in 1:N
-        x, y, z = get_coordinates(i, capacite.C_ω)
-        fₒ[i] = f(x, y, z)
-    end
-
-    return fₒ
+    coords = get_all_coordinates(capacite.C_ω)
+    return [f(coord...) for coord in coords]
 end
 
 """
-    build_source(operator::AbstractOperators, f, t, capacite::Capacity)
+    build_source(operator::AbstractOperators, f::Function, capacite::Capacity, t::Float64)
 
-Build the source term vector fₒ for the given operator, source term function and time t.
-
-# Arguments
-- `operator::AbstractOperators`: The operators of the problem.
-- `f`: The source term function of the problem.
-- `t::Float64`: The time at which to evaluate the source term.
-- `capacite::Capacity`: The capacity of the problem.
-
-# Returns
-- `fₒ::Vector{Float64}`: The source term vector fₒ.
+Optimized time-dependent source term construction.
 """
-function build_source(operator::AbstractOperators, f, t, capacite::Capacity)
-    N = prod(operator.size)
-    fₒ = zeros(N)
-
-    # Compute the source term
-    for i in 1:N
-        x, y, z = get_coordinates(i, capacite.C_ω)
-        fₒ[i] = f(x, y, z, t)
-    end
-
-    return fₒ
-end
-
-function get_coordinates(i, C_ω)
-    if length(C_ω[1]) == 1
-        x = C_ω[i][1]
-        return x, 0., 0.
-    elseif length(C_ω[1]) == 2
-        x, y = C_ω[i][1], C_ω[i][2]
-        return x, y, 0.
-    else
-        x, y, z = C_ω[i][1], C_ω[i][2], C_ω[i][3]
-        return x, y, z
-    end
+function build_source(operator::AbstractOperators, f::Function, t::Float64, capacite::Capacity)
+    coords = get_all_coordinates(capacite.C_ω)
+    return [f(coord..., t) for coord in coords]
 end
 
 """
     build_g_g(operator::AbstractOperators, bc::Union{AbstractBoundary, AbstractInterfaceBC}, capacite::Capacity)
 
-Build the boundary conditions vector gᵧ for the given operator and boundary conditions.
-
-# Arguments
-- `operator::AbstractOperators`: The operators of the problem.
-- `bc::Union{AbstractBoundary, AbstractInterfaceBC}`: The boundary conditions of the problem.
-- `capacite::Capacity`: The capacity of the problem.
-
-# Returns
-- `gᵧ::Vector{Float64}`: The boundary conditions vector gᵧ.
+Optimized boundary condition vector construction.
 """
 function build_g_g(operator::AbstractOperators, bc::Union{AbstractBoundary, AbstractInterfaceBC}, capacite::Capacity)
     n = prod(operator.size)
-    gᵧ = ones(n)
-
+    
     if bc.value isa Function
-        for i in 1:n
-            x, y, z = get_coordinates(i, capacite.C_γ)
-            gᵧ[i] = bc.value(x, y, z)
-        end
+        coords = get_all_coordinates(capacite.C_γ)
+        return [bc.value(coord...) for coord in coords]
     else
-        gᵧ = bc.value * gᵧ
+        return fill(bc.value, n)
     end
-    return gᵧ
 end
 
 """
-    build_g_g(operator::AbstractOperators, bc::Union{AbstractBoundary, AbstractInterfaceBC}, capacite::Capacity)
+    build_g_g(operator::AbstractOperators, bc::Union{AbstractBoundary, AbstractInterfaceBC}, capacite::Capacity, t::Float64)
 
-Build the boundary conditions vector gᵧ for the given operator and boundary conditions.
-
-# Arguments
-- `operator::AbstractOperators`: The operators of the problem.
-- `bc::Union{AbstractBoundary, AbstractInterfaceBC}`: The boundary conditions of the problem.
-- `capacite::Capacity`: The capacity of the problem.
-- `t::Float64`: The time at which to evaluate the boundary conditions.
-
-# Returns
-- `gᵧ::Vector{Float64}`: The boundary conditions vector gᵧ.
+Optimized time-dependent boundary condition vector construction.
 """
 function build_g_g(operator::AbstractOperators, bc::Union{AbstractBoundary, AbstractInterfaceBC}, capacite::Capacity, t::Float64)
     n = prod(operator.size)
-    gᵧ = ones(n)
-
+    
     if bc.value isa Function
-        for i in 1:n
-            x, y, z = get_coordinates(i, capacite.C_γ)
-            gᵧ[i] = bc.value(x, y, z, t)
+        coords = get_all_coordinates(capacite.C_γ)
+        # Try time-dependent first, fall back to time-independent
+        try
+            return [bc.value(coord..., t) for coord in coords]
+        catch MethodError
+            return [bc.value(coord...) for coord in coords]
         end
     else
-        gᵧ = bc.value * gᵧ
+        return fill(bc.value, n)
     end
-    return gᵧ
 end
 
 function build_g_g(operator::AbstractOperators, bc::GibbsThomson, capacite::Capacity)
     n = prod(operator.size)
     gᵧ = bc.Tm*ones(n) .- bc.ϵᵥ .* bc.vᵞ
     return gᵧ
-end
-
-"""
-    BC_border_mono!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Float64}, bc_b::BorderConditions, mesh::AbstractMesh)
-
-Apply the border conditions to the coefficient matrix `A` and the right-hand side vector `b`.
-
-# Arguments
-- `A::SparseMatrixCSC{Float64, Int}`: The coefficient matrix A of the equation system.
-- `b::Vector{Float64}`: The right-hand side vector b of the equation system.
-- `bc_b::BorderConditions`: The border conditions of the problem.
-- `mesh::AbstractMesh`: The mesh of the problem.
-"""
-function BC_border_mono!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Float64}, bc_b::BorderConditions, mesh::AbstractMesh)
-    # Identify border cells for each boundary key
-    left_cells = Vector{CartesianIndex}()
-    right_cells = Vector{CartesianIndex}()
-    top_cells = Vector{CartesianIndex}()
-    bottom_cells = Vector{CartesianIndex}()
-    forward_cells = Vector{CartesianIndex}()
-    backward_cells = Vector{CartesianIndex}()
-
-    # Collect sets of cell indices for each boundary
-    for (key, bc) in bc_b.borders
-        if key == :left
-            left_cells = [ci for (ci, pos) in mesh.tag.border_cells if ci[2] == 1]
-        elseif key == :right
-            right_cells = [ci for (ci, pos) in mesh.tag.border_cells if ci[2] == length(mesh.centers[2])]
-        elseif key == :top
-            top_cells = [ci for (ci, pos) in mesh.tag.border_cells if ci[1] == length(mesh.centers[1])]
-        elseif key == :bottom
-            bottom_cells = [ci for (ci, pos) in mesh.tag.border_cells if ci[1] == 1]
-        elseif key == :forward
-            forward_cells = [ci for (ci, pos) in mesh.tag.border_cells if ci[3] == length(mesh.centers[3])]
-        elseif key == :backward
-            backward_cells = [ci for (ci, pos) in mesh.tag.border_cells if ci[3] == 1]
-        end
-    end
-
-    # Apply boundary conditions
-    for (ci, pos) in mesh.tag.border_cells
-        condition = nothing
-        current_key = nothing
-
-        if ci in left_cells
-            condition = bc_b.borders[:left]
-            current_key = :left
-        elseif ci in right_cells
-            condition = bc_b.borders[:right]
-            current_key = :right
-        elseif ci in top_cells
-            condition = bc_b.borders[:top]
-            current_key = :top
-        elseif ci in bottom_cells
-            condition = bc_b.borders[:bottom]
-            current_key = :bottom
-        elseif ci in forward_cells
-            condition = bc_b.borders[:forward]
-            current_key = :forward
-        elseif ci in backward_cells
-            condition = bc_b.borders[:backward]
-            current_key = :backward
-        end
-
-        # Convert CartesianIndex to a linear index
-        li = cell_to_index(mesh, ci)
-
-        if condition isa Dirichlet
-            # Dirichlet: fix A[li, li] = 1 and set b[li] = boundary value
-            A[li, :] .= 0.0
-            A[li, li] = 1.0
-            b[li] = isa(condition.value, Function) ? condition.value(pos...) : condition.value
-
-        elseif condition isa Periodic
-            # Find the opposite boundary
-            opposite_key = get_opposite_boundary(current_key)
-            if !haskey(bc_b.borders, opposite_key)
-                error("Periodic boundary requires both boundaries to be specified")
-            end
-            corresponding_ci = find_corresponding_cell(ci, current_key, opposite_key, mesh)
-            corresponding_idx = cell_to_index(mesh, corresponding_ci)
-
-            # Enforce x_li - x_corresponding = 0
-            A[li, li] += 1.0
-            A[li, corresponding_idx] -= 1.0
-            b[li] = 0.0
-
-        elseif condition isa Neumann
-            # Not implemented yet
-        elseif condition isa Robin
-            # Not implemented yet
-        end
-    end
 end
 
 # Helper function to get the opposite boundary
@@ -436,98 +343,181 @@ function cell_to_index(mesh::Union{Mesh{3}, SpaceTimeMesh{3}}, cell::CartesianIn
 end
 
 """
-    BC_border_diph!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Float64}, bc_b::BorderConditions, mesh::AbstractMesh)
+    classify_boundary_cell_fast(ci::CartesianIndex, mesh::AbstractMesh)
 
-Apply the border conditions to the coefficient matrix `A` and the right-hand side vector `b` for diphasic problems.
-
-# Arguments
-- `A::SparseMatrixCSC{Float64, Int}`: The coefficient matrix A of the equation system.
-- `b::Vector{Float64}`: The right-hand side vector b of the equation system.
-- `bc_b::BorderConditions`: The border conditions of the problem.
-- `mesh::AbstractMesh`: The mesh of the problem.
+Efficiently classify which boundary a cell belongs to in O(1) time.
 """
-function BC_border_diph!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Float64}, bc_b::BorderConditions, mesh::AbstractMesh)
-    # Collect boundary cells by side
-    left_cells = Vector{CartesianIndex}()
-    right_cells = Vector{CartesianIndex}()
-    top_cells = Vector{CartesianIndex}()
-    bottom_cells = Vector{CartesianIndex}()
-    forward_cells = Vector{CartesianIndex}()
-    backward_cells = Vector{CartesianIndex}()
-
-    # For each boundary key, find matching cells
-    for (key, bc) in bc_b.borders
-        if key == :left
-            left_cells = [ci for (ci, pos) in mesh.tag.border_cells if ci[2] == 1]
-        elseif key == :right
-            right_cells = [ci for (ci, pos) in mesh.tag.border_cells if ci[2] == length(mesh.centers[2])]
-        elseif key == :top
-            top_cells = [ci for (ci, pos) in mesh.tag.border_cells if ci[1] == length(mesh.centers[1])]
-        elseif key == :bottom
-            bottom_cells = [ci for (ci, pos) in mesh.tag.border_cells if ci[1] == 1]
-        elseif key == :forward
-            forward_cells = [ci for (ci, pos) in mesh.tag.border_cells if ci[3] == length(mesh.centers[3])]
-        elseif key == :backward
-            backward_cells = [ci for (ci, pos) in mesh.tag.border_cells if ci[3] == 1]
+function classify_boundary_cell_fast(ci::CartesianIndex, mesh::AbstractMesh)
+    # Check boundaries based on position indices directly
+    ndims = length(mesh.centers)
+    
+    if ndims >= 2
+        # Check left/right boundaries
+        if ci[2] == 1
+            return :left
+        elseif ci[2] == length(mesh.centers[2])
+            return :right
         end
     end
+    
+    # Check bottom/top boundaries
+    if ci[1] == 1
+        return :bottom
+    elseif ci[1] == length(mesh.centers[1])
+        return :top
+    end
+    
+    if ndims >= 3
+        # Check backward/forward boundaries
+        if ci[3] == 1
+            return :backward
+        elseif ci[3] == length(mesh.centers[3])
+            return :forward
+        end
+    end
+    
+    error("Cell $ci is not on any boundary")
+end
 
-    # Calculate the size of a single phase block
-    # In diphasic problems, the structure is typically:
-    # [u1ₒ, u1ᵧ, u2ₒ, u2ᵧ] where each block has the same size
+"""
+    BC_border_mono_optimized!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Float64}, 
+                               bc_b::BorderConditions, mesh::AbstractMesh)
+
+Optimized boundary condition application with single pass through boundary cells.
+"""
+function BC_border_mono!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Float64}, 
+                                   bc_b::BorderConditions, mesh::AbstractMesh)
+    # Single pass through boundary cells - O(n) complexity
+    for (ci, pos) in mesh.tag.border_cells
+        # Classify boundary in O(1) time
+        boundary_key = classify_boundary_cell_fast(ci, mesh)
+        
+        # Get boundary condition (O(1) dictionary lookup)
+        condition = get(bc_b.borders, boundary_key, nothing)
+        isnothing(condition) && continue
+        
+        # Convert to linear index
+        li = cell_to_index(mesh, ci)
+        
+        # Apply boundary condition
+        apply_boundary_condition_fast!(A, b, li, pos, condition, boundary_key, bc_b, mesh)
+    end
+end
+
+"""
+    apply_boundary_condition_fast!(A, b, li, pos, condition, boundary_key, bc_b, mesh)
+
+Fast application of a single boundary condition.
+"""
+function apply_boundary_condition_fast!(A, b, li, pos, condition, boundary_key, bc_b, mesh)
+    if condition isa Dirichlet
+        # Dirichlet: A[li, li] = 1, b[li] = value
+        A[li, :] .= 0.0
+        A[li, li] = 1.0
+        b[li] = condition.value isa Function ? condition.value(pos...) : condition.value
+        
+    elseif condition isa Periodic
+        # Find corresponding cell efficiently
+        opposite_key = get_opposite_boundary(boundary_key)
+        if haskey(bc_b.borders, opposite_key)
+            corresponding_idx = find_corresponding_cell_optimized(li, boundary_key, mesh)
+            A[li, :] .= 0.0
+            # Apply periodic constraint: x_li - x_corresponding = 0
+            A[li, li] += 1.0
+            A[li, corresponding_idx] -= 1.0
+            b[li] = 0.0
+        end
+        
+    elseif condition isa Neumann
+        # TODO: Implement Neumann BC
+        @warn "Neumann boundary conditions not yet implemented" maxlog=1
+
+    end
+end
+
+"""
+    find_corresponding_cell_optimized(li::Int, boundary_key::Symbol, mesh::AbstractMesh)
+
+Optimized calculation of corresponding periodic boundary cell.
+"""
+function find_corresponding_cell_optimized(li::Int, boundary_key::Symbol, mesh::AbstractMesh)
+    # Convert linear index to CartesianIndex for more reliable mapping
+    dims = [length(center)+1 for center in mesh.centers]
+    ci = CartesianIndices(Tuple(dims))[li]
+    
+    # Create the new CartesianIndex based on the boundary
+    new_ci = if boundary_key == :left
+        CartesianIndex(ci[1], dims[2])  # Map to rightmost column
+    elseif boundary_key == :right
+        CartesianIndex(ci[1], 1)  # Map to leftmost column
+    elseif boundary_key == :bottom
+        CartesianIndex(dims[1], ci[2])  # Map to top row
+    elseif boundary_key == :top
+        CartesianIndex(1, ci[2])  # Map to bottom row
+    elseif boundary_key == :backward && length(mesh.centers) >= 3
+        CartesianIndex(ci[1], ci[2], dims[3])  # Map to forward face
+    elseif boundary_key == :forward && length(mesh.centers) >= 3
+        CartesianIndex(ci[1], ci[2], 1)  # Map to backward face
+    else
+        error("Unknown boundary key: $boundary_key")
+    end
+    
+    # Convert back to linear index
+    return LinearIndices(Tuple(dims))[new_ci]
+end
+
+"""
+    BC_border_diph_optimized!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Float64}, 
+                               bc_b::BorderConditions, mesh::AbstractMesh)
+
+Optimized diphasic boundary condition application with single pass.
+"""
+function BC_border_diph!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Float64}, 
+                                   bc_b::BorderConditions, mesh::AbstractMesh)
     phase_size = size(A, 1) ÷ 4
     
-    # Apply boundary conditions to both phases
-    for phase_idx in 0:1  # 0 = first phase, 1 = second phase
-        for (ci, pos) in mesh.tag.border_cells
-            condition = nothing
-            if ci in left_cells
-                condition = bc_b.borders[:left]
-            elseif ci in right_cells
-                condition = bc_b.borders[:right]
-            elseif ci in top_cells
-                condition = bc_b.borders[:top]
-            elseif ci in bottom_cells
-                condition = bc_b.borders[:bottom]
-            elseif ci in forward_cells
-                condition = bc_b.borders[:forward]
-            elseif ci in backward_cells
-                condition = bc_b.borders[:backward]
-            end
+    # Single pass through boundary cells
+    for (ci, pos) in mesh.tag.border_cells
+        boundary_key = classify_boundary_cell_fast(ci, mesh)
+        condition = get(bc_b.borders, boundary_key, nothing)
+        isnothing(condition) && continue
+        
+        li = cell_to_index(mesh, ci)
+        
+        # Apply to both phases efficiently
+        apply_diphasic_boundary_condition_fast!(A, b, li, pos, condition, phase_size)
+    end
+end
 
-            # Skip if no condition found
-            isnothing(condition) && continue
+"""
+    apply_diphasic_boundary_condition_fast!(A, b, li, pos, condition, phase_size)
 
-            # Convert cell index to linear index
-            li = cell_to_index(mesh, ci)
-            
-            # Apply phase offset for the bulk field (ω)
-            li_ω = li + phase_idx * 2 * phase_size
-            
-            # Apply phase offset for the interface field (γ)
-            li_γ = li + phase_size + phase_idx * 2 * phase_size
-
-            if condition isa Dirichlet
-                # Apply to bulk field (ω)
-                A[li_ω, :] .= 0.0
-                A[li_ω, li_ω] = 1.0
-                b[li_ω] = isa(condition.value, Function) ? condition.value(pos...) : condition.value
-                
-                # Apply to interface field (γ)
-                A[li_γ, :] .= 0.0
-                A[li_γ, li_γ] = 1.0
-                b[li_γ] = isa(condition.value, Function) ? condition.value(pos...) : condition.value
-
-            elseif condition isa Neumann
-                # Not implemented yet
-                # Would need to modify rows corresponding to both bulk and interface
-            elseif condition isa Robin
-                # Not implemented yet
-            elseif condition isa Periodic
-                # Would need to implement similarly to the monophasic case
-                # but applying to both phases
-            end
+Fast application of boundary conditions to both phases in diphasic problems.
+"""
+function apply_diphasic_boundary_condition_fast!(A, b, li, pos, condition, phase_size)
+    # Calculate indices for both phases and both fields (ω, γ)
+    li_ω1 = li                           # Phase 1 bulk
+    li_γ1 = li + phase_size              # Phase 1 interface  
+    li_ω2 = li + 2 * phase_size          # Phase 2 bulk
+    li_γ2 = li + 3 * phase_size          # Phase 2 interface
+    
+    value = condition.value isa Function ? condition.value(pos...) : condition.value
+    
+    if condition isa Dirichlet
+        # Apply Dirichlet to all four fields
+        for idx in [li_ω1, li_γ1, li_ω2, li_γ2]
+            A[idx, :] .= 0.0
+            A[idx, idx] = 1.0
+            b[idx] = value
         end
+        
+    elseif condition isa Periodic
+        # Apply periodic constraints to all four fields
+        # (Implementation would depend on specific periodic boundary logic)
+        @warn "Periodic BC for diphasic not fully implemented" maxlog=1
+        
+    elseif condition isa Neumann || condition isa Robin
+        @warn "Neumann/Robin BC for diphasic not yet implemented" maxlog=1
     end
 end
 

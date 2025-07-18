@@ -1,6 +1,8 @@
 using Penguin
 using Test
 using SpecialFunctions
+using IterativeSolvers
+using LinearSolve
 
 @testset "Convergence Test 1D" begin
     nx = 40
@@ -19,7 +21,7 @@ using SpecialFunctions
     D(x,y,z) = 1.0
     Fluide = Phase(capacity, operator, f, D)
     solver = DiffusionSteadyMono(Fluide, bc_b, bc)
-    solve_DiffusionSteadyMono!(solver; method=Base.:\)
+    solve_DiffusionSteadyMono!(solver; algorithm=UMFPACKFactorization(), log=true)
     u_analytic(x) = - (x-center)^3/6 - (center*(x-center)^2)/2 + radius^2/6 * (x-center) + center*radius^2/2
     u_ana, u_num, global_err, full_err, cut_err, empty_err = check_convergence(u_analytic, solver, capacity, 2, false)
     @test global_err < 1e-2
@@ -56,7 +58,7 @@ end
     operator = DiffusionOps(capacity)
     bc = Dirichlet(0.0)
     bc1 = Dirichlet(1.0)
-    bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:left => bc1, :right => bc1, :top => bc1, :bottom => bc1, :front => bc1, :back => bc1))
+    bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:left => bc1, :right => bc1, :top => bc1, :bottom => bc1, :forward => bc1, :backward => bc1))
     f(x,y,z) = 6.0
     D(x,y,z) = 1.0
     Fluide = Phase(capacity, operator, f, D)
@@ -65,6 +67,34 @@ end
     u_analytic(x,y,z) = 1.0 - (x-2)^2 - (y-2)^2 - (z-2)^2
     u_ana, u_num, global_err, full_err, cut_err, empty_err = check_convergence(u_analytic, solver, capacity, 2, false)
     @test global_err < 1e-2
+end
+
+@testset "Convergence Test Unsteady Mono 1D" begin
+    nx = 40
+    lx = 4.0
+    x0 = 0.0
+    mesh = Penguin.Mesh((nx,), (lx,), (x0,))
+    center = 2.0
+    radius = 1.0
+    LS(x,_=0) = abs(x-center) - radius
+    capacity = Capacity(LS, mesh)
+    operator = DiffusionOps(capacity)
+    bc = Dirichlet(0.0)
+    bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}(:left => bc, :right => bc))
+    f(x,y,z,t) = 0.0
+    D(x,y,z) = 1.0
+    Fluide = Phase(capacity, operator, f, D)
+    u0ₒ = zeros(nx+1)
+    u0ᵧ = zeros(nx+1)
+    u0 = vcat(u0ₒ, u0ᵧ)
+    Δt = 0.25 * (lx/nx)^2
+    Tend = 0.01
+    solver = DiffusionUnsteadyMono(Fluide, bc_b, bc, Δt, u0, "BE")
+    solve_DiffusionUnsteadyMono!(solver, Fluide, Δt, Tend, bc_b, bc, "BE"; method=IterativeSolvers.gmres)
+    # Analytical solution for homogeneous Dirichlet and zero source: stays zero
+    u_analytic(x,t) = 0.0
+    u_ana, u_num, global_err, full_err, cut_err, empty_err = check_convergence((x)->u_analytic(x,Tend), solver, capacity, 2, false)
+    @test global_err < 1e-8
 end
 
 @testset "Convergence Test Diphasic 1D" begin
@@ -122,10 +152,10 @@ end
     Tend = 0.5
     
     # Initialize solver
-    solver = DiffusionUnsteadyDiph(Fluide_1, Fluide_2, bc_b, ic, Δt, u0, "CN")
+    solver = DiffusionUnsteadyDiph(Fluide_1, Fluide_2, bc_b, ic, Δt, u0, "BE")
     
     # Solve the problem
-    solve_DiffusionUnsteadyDiph!(solver, Fluide_1, Fluide_2, Δt, Tend, bc_b, ic, "CN"; method=Base.:\)
+    solve_DiffusionUnsteadyDiph!(solver, Fluide_1, Fluide_2, Δt, Tend, bc_b, ic, "BE"; method=IterativeSolvers.bicgstabl)
     
     # Analytical solutions
     function T1(x)
@@ -240,7 +270,7 @@ end
         solver = DiffusionUnsteadyDiph(Fluide_1, Fluide_2, bc_b, ic, Δt, u0, "CN")
         
         # Solve the problem
-        solve_DiffusionUnsteadyDiph!(solver, Fluide_1, Fluide_2, Δt, Tend, bc_b, ic, "CN"; method=Base.:\)
+        solve_DiffusionUnsteadyDiph!(solver, Fluide_1, Fluide_2, Δt, Tend, bc_b, ic, "CN"; method=IterativeSolvers.gmres)
         
         # Check convergence
         (ana_sols, num_sols, global_errs, full_errs, cut_errs, empty_errs) = 

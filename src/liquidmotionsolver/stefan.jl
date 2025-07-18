@@ -185,7 +185,7 @@ function StefanMono2D(phase::Phase, bc_b::BorderConditions, bc_i::AbstractBounda
     println("- Unsteady problem")
     println("- Diffusion problem")
     
-    s = Solver(Unsteady, Monophasic, Diffusion, nothing, nothing, nothing, ConvergenceHistory(), [])    
+    s = Solver(Unsteady, Monophasic, Diffusion, nothing, nothing, nothing, [], [])    
     if scheme == "CN"
         s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, "CN")
         s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc_i, Tᵢ, Δt, 0.0, "CN")
@@ -204,7 +204,7 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
                             method=Base.:\, 
                             Newton_params=(100, 1e-6, 1e-6, 1.0),
                             jacobian_epsilon=1e-6, smooth_factor=0.5, window_size=10, 
-                            algorithm="LM", # "GN" pour Gauss-Newton ou "LM" pour Levenberg-Marquardt 
+                            gmorlm="LM", # "GN" pour Gauss-Newton ou "LM" pour Levenberg-Marquardt 
                             lm_init_lambda=1e-4, # Paramètre d'amortissement initial pour LM
                             lm_lambda_factor=10.0, # Facteur de multiplication/division pour lambda
                             lm_min_lambda=1e-10, # Lambda minimum
@@ -212,6 +212,7 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
                             enable_stencil_fusion=true, # Activer/désactiver la fusion des résidus
                             stencil_weights=nothing, # Poids optionnels pour le stencil (sinon uniforme)
                             fusion_strategy="3x3", # Nouvelle option: "3x3", "5x5"
+                            algorithm=nothing,
                             kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
@@ -381,7 +382,7 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
         # Gauss-Newton iterations
         for iter in 1:max_iter
             # 1. Solve temperature field with current interface position
-            solve_system!(s; method=method, kwargs...)
+            solve_system!(s; method=method, algorithm=algorithm, kwargs...)
             Tᵢ = s.x
             
             # Get capacity matrices
@@ -716,7 +717,7 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
             println("Matrix info: size(J)=$(size(J)), n_markers=$n_markers")
             println("Used marker indices: $(length(used_columns)) of $n_markers")
             
-            if uppercase(algorithm) == "LM"
+            if uppercase(gmorlm) == "LM"
                 println("Using Levenberg-Marquardt with adaptive damping")
                 
                 # Extraire la diagonale pour la régularisation LM
@@ -762,7 +763,7 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
             push!(position_increment_history, position_increment_norm)
             
             # Pour Levenberg-Marquardt, ajuster lambda en fonction de la convergence
-            if uppercase(algorithm) == "LM" && iter > 1
+            if uppercase(gmorlm) == "LM" && iter > 1
                 residual_norm = norm(F)
                 if residual_norm < prev_residual_norm
                     # Amélioration - réduire lambda
@@ -981,7 +982,7 @@ function StefanDiph2D(phase1::Phase, phase2::Phase, bc_b::BorderConditions,
     println("- Unsteady problem")
     println("- Diffusion problem")
     
-    s = Solver(Unsteady, Diphasic, Diffusion, nothing, nothing, nothing, ConvergenceHistory(), [])
+    s = Solver(Unsteady, Diphasic, Diffusion, nothing, nothing, nothing, [], [])
     
     # Create initial matrix system based on selected scheme
     if scheme == "CN"
@@ -1017,7 +1018,9 @@ function solve_StefanDiph2D!(s::Solver, phase1::Phase, phase2::Phase,
                             method=Base.:\, 
                             Newton_params=(100, 1e-6, 1e-6, 1.0),
                             jacobian_epsilon=1e-6, smooth_factor=0.5, 
-                            window_size=10, kwargs...)
+                            window_size=10, 
+                            algorithm=nothing,
+                            kwargs...)
                             
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
@@ -1098,7 +1101,7 @@ function solve_StefanDiph2D!(s::Solver, phase1::Phase, phase2::Phase,
         # Gauss-Newton iterations
         for iter in 1:max_iter
             # 1. Solve temperature field with current interface position
-            solve_system!(s; method=method, kwargs...)
+            solve_system!(s; method=method, algorithm=algorithm, kwargs...)
             Tᵢ = s.x
             
             # Separate solution components for each phase

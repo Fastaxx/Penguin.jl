@@ -7,7 +7,7 @@ The `Capacity` struct stores all the capacities of a system in N dimensions. It 
 You create a `Capacity` by providing:
 - A body function (SDF) capable of indicating whether points lie inside or outside the body.  
 - A `Mesh` corresponding to the computational domain.  
-- A `method` to compute the capacity. Currently, "VOFI" is available, while "ImplicitIntegration" is not yet fully implemented.
+- A `method` to compute the capacity. Currently, "VOFI" and "ImplicitIntegration" are fully implemented.
 
 Example:
 ```julia
@@ -22,8 +22,7 @@ lx = 4.
 x0 = 0.
 mesh = Mesh((nx,), (lx,), (x0,))
     
-# Vectorized or non-vectorized SDF
-Φ(X) = sqrt(X[1]^2) - 0.5
+# Define a signed distance function (SDF) for a 1D body
 LS(x, _=0) = sqrt(x^2) - 0.5
     
 capacity = Capacity(LS, mesh, method="VOFI")
@@ -39,10 +38,10 @@ lx, ly = 4., 4.
 x0, y0 = 0., 0.
 mesh = Mesh((nx, ny), (lx, ly), (x0, y0))
 
-Φ(X) = sqrt(X[1]^2 + X[2]^2) - 0.5
+# Define a signed distance function (SDF) for a 2D body
 LS(x, y, _=0) = sqrt(x^2 + y^2) - 0.5
     
-capacity = Capacity(LS, mesh, method="VOFI")
+capacity = Capacity(LS, mesh, method="ImplicitIntegration")
 ```
 In 2D, `Capacity` manages two matrices for each dimension (e.g., `Ax` and `Ay`).
 

@@ -129,31 +129,6 @@ function initialize_radial_velocity_field(nx, ny, lx, ly, x0, y0, center, magnit
     return uₒx, uₒy
 end
 
-function initialize_stokes_velocity_field(nx, ny, nz, lx, ly, lz, x0, y0, z0, a, u)
-    N = (nx + 1) * (ny + 1) * (nz + 1)
-    uₒx = zeros(N)
-    uₒy = zeros(N)
-    uₒz = zeros(N)
-    for k in 0:nz
-        z = z0 + k * (lz / nz)
-        for j in 0:ny
-            y = y0 + j * (ly / ny)
-            for i in 0:nx
-                x = x0 + i * (lx / nx)
-                idx = i + j * (nx + 1) + k * (nx + 1) * (ny + 1) + 1
-                w = x^2 + y^2 + z^2
-                sqrt_w = sqrt(w)
-                term_common = (3 * a * u * z) / (4 * sqrt_w)
-                term_factor = (a^2 / w^2) - (1 / w)
-                uₒx[idx] = term_common * term_factor * x
-                uₒy[idx] = term_common * term_factor * y
-                term_z = ((2 * a^2 + 3 * x^2 + 3 * y^2) / (3 * w)) - ((a^2 * (x^2 + y^2)) / w^2) - 2
-                uₒz[idx] = u + term_common * term_z
-            end
-        end
-    end
-    return uₒx, uₒy, uₒz
-end
 
 # Volume redefinition
 function volume_redefinition!(capacity::Capacity{1}, operator::AbstractOperators)

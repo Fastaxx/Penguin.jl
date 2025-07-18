@@ -17,7 +17,7 @@ function DiffusionSteadyMono(phase::Phase, bc_b::BorderConditions, bc_i::Abstrac
     println("- Steady problem")
     println("- Diffusion problem")
     
-    s = Solver(Steady, Monophasic, Diffusion, nothing, nothing, nothing, ConvergenceHistory(), [])
+    s = Solver(Steady, Monophasic, Diffusion, nothing, nothing, nothing, [], [])
     
     s.A = A_mono_stead_diff(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i)
     s.b = b_mono_stead_diff(phase.operator, phase.source, phase.capacity, bc_i)
@@ -57,7 +57,7 @@ function b_mono_stead_diff(operator::DiffusionOps, f::Function, capacite::Capaci
     return b
 end
 
-function solve_DiffusionSteadyMono!(s::Solver; method::Function = gmres, kwargs...)
+function solve_DiffusionSteadyMono!(s::Solver; method::Function = gmres, algorithm=nothing, kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
@@ -67,8 +67,8 @@ function solve_DiffusionSteadyMono!(s::Solver; method::Function = gmres, kwargs.
     println("- Steady problem")
     println("- Diffusion problem")
 
-    # Solve the system
-    solve_system!(s; method, kwargs...)
+    # Solve the system with the ability to use LinearSolve.jl
+    solve_system!(s; method=method, algorithm=algorithm, kwargs...)
 end
 
 
@@ -91,7 +91,7 @@ function DiffusionSteadyDiph(phase1::Phase, phase2::Phase, bc_b::BorderCondition
     println("- Steady problem")
     println("- Diffusion problem")
     
-    s = Solver(Steady, Diphasic, Diffusion, nothing, nothing, nothing, ConvergenceHistory(), [])
+    s = Solver(Steady, Diphasic, Diffusion, nothing, nothing, nothing, [], [])
     
     s.A = A_diph_stead_diff(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, bc_b, ic)
     s.b = b_diph_stead_diff(phase1.operator, phase2.operator, phase1.source, phase2.source, phase1.capacity, phase2.capacity, bc_b, ic)
@@ -160,7 +160,7 @@ function b_diph_stead_diff(operator1::DiffusionOps, operator2::DiffusionOps, f1,
     return b
 end
 
-function solve_DiffusionSteadyDiph!(s::Solver; method::Function = gmres, kwargs...)
+function solve_DiffusionSteadyDiph!(s::Solver; method::Function = gmres, algorithm=nothing, kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
@@ -171,7 +171,7 @@ function solve_DiffusionSteadyDiph!(s::Solver; method::Function = gmres, kwargs.
     println("- Diffusion problem")
 
     # Solve the system
-    solve_system!(s; method, kwargs...)
+    solve_system!(s; method, algorithm=algorithm, kwargs...)
 end
 
 
@@ -195,7 +195,7 @@ function DiffusionUnsteadyMono(phase::Phase, bc_b::BorderConditions, bc_i::Abstr
     println("- Unsteady problem")
     println("- Diffusion problem")
     
-    s = Solver(Unsteady, Monophasic, Diffusion, nothing, nothing, nothing, ConvergenceHistory(), [])
+    s = Solver(Unsteady, Monophasic, Diffusion, nothing, nothing, nothing, [], [])
 
     if scheme == "CN"
         s.A = A_mono_unstead_diff(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, Δt, "CN")
@@ -265,14 +265,14 @@ function b_mono_unstead_diff(operator::DiffusionOps, f, D, capacite::Capacity, b
 end
 
 
-function solve_DiffusionUnsteadyMono!(s::Solver, phase::Phase, Δt::Float64, Tₑ, bc_b::BorderConditions, bc::AbstractBoundary, scheme::String; method::Function = gmres, kwargs...)
+function solve_DiffusionUnsteadyMono!(s::Solver, phase::Phase, Δt::Float64, Tₑ, bc_b::BorderConditions, bc::AbstractBoundary, scheme::String; method::Function = gmres, algorithm=nothing, kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
 
     # Solve the system for the initial time with the initial scheme
     t = 0.0
-    solve_system!(s; method, kwargs...)
+    solve_system!(s; method, algorithm=algorithm, kwargs...)
 
     push!(s.states, s.x)
     println("Time: ", t)
@@ -291,7 +291,7 @@ function solve_DiffusionUnsteadyMono!(s::Solver, phase::Phase, Δt::Float64, T�
 
         BC_border_mono!(s.A, s.b, bc_b, phase.capacity.mesh)
         
-        solve_system!(s; method, kwargs...)
+        solve_system!(s; method, algorithm=algorithm, kwargs...)
 
         push!(s.states, s.x)
         println("Solver Extremum: ", maximum(abs.(s.x)))
@@ -322,15 +322,10 @@ function DiffusionUnsteadyDiph(phase1::Phase, phase2::Phase, bc_b::BorderConditi
     println("- Unsteady problem")
     println("- Diffusion problem")
     
-    s = Solver(Unsteady, Diphasic, Diffusion, nothing, nothing, nothing, ConvergenceHistory(), [])
+    s = Solver(Unsteady, Diphasic, Diffusion, nothing, nothing, nothing, [], [])
 
-    if scheme == "CN"
-        s.A = A_diph_unstead_diff(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Δt, "CN")
-        s.b = b_diph_unstead_diff(phase1.operator, phase2.operator, phase1.source, phase2.source, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Tᵢ, Δt, 0.0, "CN")
-    else
-        s.A = A_diph_unstead_diff(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Δt, "BE")
-        s.b = b_diph_unstead_diff(phase1.operator, phase2.operator, phase1.source, phase2.source, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Tᵢ, Δt, 0.0, "BE")
-    end
+    s.A = A_diph_unstead_diff(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Δt, scheme)
+    s.b = b_diph_unstead_diff(phase1.operator, phase2.operator, phase1.source, phase2.source, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Tᵢ, Δt, 0.0, scheme)
 
     BC_border_diph!(s.A, s.b, bc_b, phase2.capacity.mesh)
     return s
@@ -424,7 +419,7 @@ function b_diph_unstead_diff(operator1::DiffusionOps, operator2::DiffusionOps, f
     return b
 end
 
-function solve_DiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phase2::Phase, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, ic::InterfaceConditions, scheme::String; method::Function = gmres, kwargs...)
+function solve_DiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phase2::Phase, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, ic::InterfaceConditions, scheme::String; method::Function = gmres, algorithm=nothing, kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
@@ -432,7 +427,7 @@ function solve_DiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phase2::Phase, �
     t = 0.0
     println("Time: ", t)
     # Solve for the initial condition with the initial scheme
-    solve_system!(s; method, kwargs...)
+    solve_system!(s; method, algorithm=algorithm, kwargs...)
 
     push!(s.states, s.x)
     println("Solver Extremum: ", maximum(abs.(s.x)))
@@ -450,7 +445,7 @@ function solve_DiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phase2::Phase, �
 
         BC_border_diph!(s.A, s.b, bc_b, phase2.capacity.mesh)
         
-        solve_system!(s; method, kwargs...)
+        solve_system!(s; method, algorithm=algorithm, kwargs...)
 
         push!(s.states, s.x)
         println("Solver Extremum: ", maximum(abs.(s.x)))

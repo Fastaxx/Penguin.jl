@@ -1,6 +1,6 @@
 # Mesh Usage
 
-This page explains how to construct a `Mesh` in **Penguin.jl** when you specify the number of cells along each dimension, the overall domain lengths, and the origin coordinates. This form of initialization automatically computes the cell centers, nodes.
+This page explains how to construct a `Mesh` in **Penguin.jl** when you specify the number of cells along each dimension, the overall domain lengths, and the origin coordinates. This form of initialization automatically computes the cell centers, nodes, and border cells.
 
 ## Defining a Mesh with Counts and Domain Dimensions
 
@@ -43,7 +43,7 @@ println("Total number of cells: ", nC(mesh))
 You can also retrieve border cells, which are defined as those at the edges of the domain:
 
 ```julia
-borders = get_border_cells(mesh)
+borders = mesh.tag.border_cells
 println("Number of border cells: ", length(borders))
 ```
 

@@ -179,7 +179,7 @@ function run_mesh_convergence(
         mesh = Penguin.Mesh((nx, ny), (lx, ly), (x0, y0))
 
         # Define the body
-        circle = (x) -> (sqrt((x[1]-center[1])^2 + (x[2]-center[2])^2) - radius)
+        circle = (x,y) -> (sqrt((x-center[1])^2 + (y-center[2])^2) - radius)
 
         # Define capacity/operator
         capacity = Capacity(circle, mesh; method="ImplicitIntegration")

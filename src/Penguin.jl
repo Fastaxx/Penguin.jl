@@ -18,12 +18,12 @@ using Colors
 using Statistics
 using LibGEOS
 using GeoInterface
+using LinearSolve
 
 # Write your package code here.
 
 include("mesh.jl")
-export Mesh, get_border_cells, nC
-export SpaceTimeMesh
+export Dimension, Mesh, nC, SpaceTimeMesh
 
 include("front_tracking.jl")
 export FrontTracker, create_circle!, create_rectangle!, create_ellipse!, update_geometry!, create_crystal!
@@ -121,7 +121,7 @@ include("vizualize_mov.jl")
 export analyze_convergence_rates_newton, plot_timestep_history, plot_interface_evolution, plot_newton_residuals, analyze_interface_spectrum
 
 include("convergence.jl")
-export check_convergence, check_convergence_diph, check_convergence_spacetime
+export check_convergence, check_convergence_diph
 
 include("vtk.jl")
 export write_vtk

@@ -54,52 +54,6 @@ struct DiffusionOps{N} <: AbstractOperators where N
     size::NTuple{N, Int}
 end
 
-"""
-    function DiffusionOps(Capacity::AbstractCapacity)
-
-Compute the diffusion operators from a given capacity.
-
-# Arguments
-- `Capacity`: Capacity of the system.  
-
-# Returns
-- `DiffusionOps`: Diffusion operators for the system.
-"""
-function DiffusionOps(Capacity::AbstractCapacity)
-    mesh = Capacity.mesh
-    N = length(mesh.nodes)
-    if N == 1
-        nx = length(mesh.nodes[1])
-        G = ẟ_m(nx) * Capacity.B[1] # Gérer le periodicity
-        H = Capacity.A[1]*ẟ_m(nx) - ẟ_m(nx)*Capacity.B[1]
-        diagW = diag(blockdiag(Capacity.W[1]))
-        new_diagW = [val != 0 ? 1.0 / val : 1.0 for val in diagW]
-        Wꜝ = spdiagm(0 => new_diagW)
-        sizes = (nx,)
-    elseif N == 2
-        nx, ny = length(mesh.nodes[1]), length(mesh.nodes[2])
-        Dx_m = kron(I(ny), ẟ_m(nx))
-        Dy_m = kron(ẟ_m(ny), I(nx))
-        G = [Dx_m * Capacity.B[1]; Dy_m * Capacity.B[2]]
-        H = [Capacity.A[1]*Dx_m - Dx_m*Capacity.B[1]; Capacity.A[2]*Dy_m - Dy_m*Capacity.B[2]]
-        diagW = diag(blockdiag(Capacity.W[1], Capacity.W[2]))
-        new_diagW = [val != 0 ? 1.0 / val : 1.0 for val in diagW]
-        Wꜝ = spdiagm(0 => new_diagW)
-        sizes = (nx, ny)
-    elseif N == 3
-        nx, ny, nz = length(mesh.nodes[1]), length(mesh.nodes[2]), length(mesh.nodes[3])
-        Dx_m = kron(I(nz), kron(I(ny), ẟ_m(nx)))
-        Dy_m = kron(I(nz), kron(ẟ_m(ny), I(nx)))
-        Dz_m = kron(ẟ_m(nz), kron(I(ny), I(nx)))
-        G = [Dx_m * Capacity.B[1]; Dy_m * Capacity.B[2]; Dz_m * Capacity.B[3]]
-        H = [Capacity.A[1]*Dx_m - Dx_m*Capacity.B[1]; Capacity.A[2]*Dy_m - Dy_m*Capacity.B[2]; Capacity.A[3]*Dz_m - Dz_m*Capacity.B[3]]
-        diagW = diag(blockdiag(Capacity.W[1], Capacity.W[2], Capacity.W[3]))
-        new_diagW = [val != 0 ? 1.0 / val : 1.0 for val in diagW]
-        Wꜝ = spdiagm(0 => new_diagW)
-        sizes = (nx, ny, nz)
-    end
-    return DiffusionOps{N}(G, H, Wꜝ, Capacity.V, sizes)
-end
 
 """
     struct ConvectionOps{N} <: AbstractOperators where N
@@ -123,9 +77,112 @@ struct ConvectionOps{N} <: AbstractOperators where N
 end
 
 """
-    ConvectionOps(Capacity::AbstractCapacity, uₒ::AbstractVector, uᵧ::AbstractVector)
+    build_differential_operator(op_fn, mesh, dim)
 
-Constructs the convection operators for a given system.
+Build a dimension-specific differential operator for an N-dimensional mesh.
+
+# Arguments
+- `op_fn`: Function to generate the base differential operator (e.g., ẟ_m, δ_p, Σ_m)
+- `mesh`: The mesh containing dimensional information
+- `dim`: The dimension index to apply the operator to (1 for x, 2 for y, etc.)
+
+# Returns
+- A sparse matrix representing the operator in the full N-dimensional space
+"""
+function build_differential_operator(op_fn, mesh, dim)
+    N = length(mesh.nodes)
+    
+    # Get number of nodes in each dimension
+    node_counts = ntuple(i -> length(mesh.nodes[i]), N)
+    
+    # Special case for 1D
+    if N == 1
+        return op_fn(node_counts[1])
+    end
+    
+    # For each dimension, use either the operator or identity
+    operators = [i == dim ? op_fn(node_counts[i]) : I(node_counts[i]) for i in 1:N]
+    
+    # Build the kronecker product in reverse order (N to 1)
+    result = operators[N]
+    for i in (N-1):-1:1
+        result = kron(result, operators[i])
+    end
+    
+    return result
+end
+
+"""
+    compute_base_operators(Capacity)
+
+Compute the common operators used by both diffusion and convection.
+Extracts repeated code to avoid redundancy.
+
+# Arguments
+- `Capacity`: The capacity object containing mesh and capacity matrices
+
+# Returns
+- Tuple of (G, H, Wꜝ, dimensions, D_m, D_p, S_m, S_p) operators
+"""
+function compute_base_operators(Capacity)
+    mesh = Capacity.mesh
+    N = length(mesh.nodes)
+    
+    # Build base differential operators
+    D_m = [build_differential_operator(ẟ_m, mesh, d) for d in 1:N]
+    D_p = [build_differential_operator(δ_p, mesh, d) for d in 1:N]
+    S_m = [build_differential_operator(Σ_m, mesh, d) for d in 1:N]
+    S_p = [build_differential_operator(Σ_p, mesh, d) for d in 1:N]
+    
+    # Compute G and H matrices
+    G_parts = [D_m[d] * Capacity.B[d] for d in 1:N]
+    G = vcat(G_parts...)
+    
+    H_parts = [Capacity.A[d]*D_m[d] - D_m[d]*Capacity.B[d] for d in 1:N]
+    H = vcat(H_parts...)
+    
+    # Compute Wꜝ matrix with pre-allocation for better performance
+    W_blocks = [Capacity.W[d] for d in 1:N]
+    diagW = diag(blockdiag(W_blocks...))
+    
+    Wꜝ_data = Vector{Float64}(undef, length(diagW))
+    for i in 1:length(diagW)
+        Wꜝ_data[i] = diagW[i] != 0 ? 1.0 / diagW[i] : 1.0
+    end
+    Wꜝ = spdiagm(0 => Wꜝ_data)
+    
+    # Return node counts instead of cell counts (mesh.dims)
+    node_counts = ntuple(i -> length(mesh.nodes[i]), N)
+    
+    return G, H, Wꜝ, node_counts, D_m, D_p, S_m, S_p
+end
+
+"""
+    DiffusionOps(Capacity::AbstractCapacity)
+
+Compute diffusion operators from a given capacity.
+Dimension-agnostic implementation that works for any N.
+
+# Arguments
+- `Capacity`: Capacity of the system.
+
+# Returns
+- `DiffusionOps`: Diffusion operators for the system.
+"""
+function DiffusionOps(Capacity::AbstractCapacity)
+    # Use the shared base operator computation
+    G, H, Wꜝ, dims, _, _, _, _ = compute_base_operators(Capacity)
+    N = length(dims)
+    
+    return DiffusionOps{N}(G, H, Wꜝ, Capacity.V, dims)
+end
+
+"""
+    ConvectionOps(Capacity::AbstractCapacity, uₒ, uᵧ)
+
+Construct convection operators for a given system.
+Dimension-agnostic implementation that works for any N.
+
 # Arguments
 - `Capacity`: Capacity of the system.
 - `uₒ`: Bulk velocity
@@ -135,61 +192,19 @@ Constructs the convection operators for a given system.
 - `ConvectionOps`: Convection operators for the system.
 """
 function ConvectionOps(Capacity::AbstractCapacity, uₒ, uᵧ)
-    mesh = Capacity.mesh
-    N = length(mesh.nodes)
-    if N == 1
-        nx = length(mesh.nodes[1])
-        Cx = δ_p(nx) * spdiagm(0 => (Σ_m(nx) * Capacity.A[1] * uₒ[1])) * Σ_m(nx)
-        G = ẟ_m(nx) * Capacity.B[1] # Gérer le periodicity
-        H = Capacity.A[1]*ẟ_m(nx) - ẟ_m(nx)*Capacity.B[1]
-        Kx = spdiagm(0 => Σ_p(nx) * H' * uᵧ)
-        diagW = diag(blockdiag(Capacity.W[1]))
-        new_diagW = [val != 0 ? 1.0 / val : 1.0 for val in diagW]
-        Wꜝ = spdiagm(0 => new_diagW)
-        return ConvectionOps{N}((Cx,), (Kx,), G, H, Wꜝ, Capacity.V, (nx,))
-    elseif N == 2
-        nx, ny = length(mesh.nodes[1]), length(mesh.nodes[2])
-        Dx_m, Dy_m = kron(I(ny), ẟ_m(nx)), kron(ẟ_m(ny), I(nx))
-        Dx_p, Dy_p = kron(I(ny), δ_p(nx)), kron(δ_p(ny), I(nx))
-        Sx_p, Sy_p = kron(I(ny), Σ_p(nx)), kron(Σ_p(ny), I(nx))
-        Sx_m, Sy_m = kron(I(ny), Σ_m(nx)), kron(Σ_m(ny), I(nx))
-        G = [Dx_m * Capacity.B[1]; Dy_m * Capacity.B[2]]
-        Cx = Dx_p * spdiagm(0 => (Sx_m * Capacity.A[1] * uₒ[1])) * Sx_m
-        Cy = Dy_p * spdiagm(0 => (Sy_m * Capacity.A[2] * uₒ[2])) * Sy_m
-        #Cx = Dx_p * Capacity.A[1] * spdiagm(0 => (uₒ[1])) * Sx_p
-        #Cy = Dy_p * Capacity.A[2] * spdiagm(0 => (uₒ[2])) * Sy_p
-        H = [Capacity.A[1]*Dx_m - Dx_m*Capacity.B[1]; Capacity.A[2]*Dy_m - Dy_m*Capacity.B[2]]
-        Kx = spdiagm(0 => Sx_p * H' * uᵧ)
-        Ky = spdiagm(0 => Sy_p * H' * uᵧ)
-        #Kx = H' * spdiagm(0 => uᵧ)
-        #Ky = H' * spdiagm(0 => uᵧ)
-        diagW = diag(blockdiag(Capacity.W[1], Capacity.W[2]))
-        new_diagW = [val != 0 ? 1.0 / val : 1.0 for val in diagW]
-        Wꜝ = spdiagm(0 => new_diagW)
-        return ConvectionOps{N}((Cx, Cy), (Kx, Ky), G, H, Wꜝ, Capacity.V, (nx, ny))
-    elseif N == 3
-        nx, ny, nz = length(mesh.nodes[1]), length(mesh.nodes[2]), length(mesh.nodes[3])
-        Dx_m, Dy_m, Dz_m = kron(I(nz), kron(I(ny), ẟ_m(nx))), kron(I(nz), kron(ẟ_m(ny), I(nx))), kron(ẟ_m(nz), kron(I(ny), I(nx)))
-        Dx_p, Dy_p, Dz_p = kron(I(nz), kron(I(ny), δ_p(nx))), kron(I(nz), kron(δ_p(ny), I(nx))), kron(δ_p(nz), kron(I(ny), I(nx)))
-        Sx_m, Sy_m, Sz_m = kron(I(nz), kron(I(ny), Σ_m(nx))), kron(I(nz), kron(Σ_m(ny), I(nx))), kron(Σ_m(nz), kron(I(ny), I(nx)))
-        Sx_p, Sy_p, Sz_p = kron(I(nz), kron(I(ny), Σ_p(nx))), kron(I(nz), kron(Σ_p(ny), I(nx))), kron(Σ_p(nz), kron(I(ny), I(nx)))
-        G = [Dx_m * Capacity.B[1]; Dy_m * Capacity.B[2]; Dz_m * Capacity.B[3]]
-        Cx = Dx_p * spdiagm(0 => (Sx_m * Capacity.A[1] * uₒ[1])) * Sx_m
-        Cy = Dy_p * spdiagm(0 => (Sy_m * Capacity.A[2] * uₒ[2])) * Sy_m
-        Cz = Dz_p * spdiagm(0 => (Sz_m * Capacity.A[3] * uₒ[3])) * Sz_m
-        #Cx = Dx_p * Capacity.A[1] * spdiagm(0 => (uₒ[1])) * Sx_p
-        #Cy = Dy_p * Capacity.A[2] * spdiagm(0 => (uₒ[2])) * Sy_p
-        #Cz = Dz_p * Capacity.A[3] * spdiagm(0 => (uₒ[3])) * Sz_p
-        H = [Capacity.A[1]*Dx_m - Dx_m*Capacity.B[1]; Capacity.A[2]*Dy_m - Dy_m*Capacity.B[2]; Capacity.A[3]*Dz_m - Dz_m*Capacity.B[3]]
-        Kx = spdiagm(0 => Sx_p * H' * uᵧ)
-        Ky = spdiagm(0 => Sy_p * H' * uᵧ)
-        Kz = spdiagm(0 => Sz_p * H' * uᵧ)
-        #Kx = H' * spdiagm(0 => uᵧ)
-        #Ky = H' * spdiagm(0 => uᵧ)
-        #Kz = H' * spdiagm(0 => uᵧ)
-        diagW = diag(blockdiag(Capacity.W[1], Capacity.W[2], Capacity.W[3]))
-        new_diagW = [val != 0 ? 1.0 / val : 1.0 for val in diagW]
-        Wꜝ = spdiagm(0 => new_diagW)
-        return ConvectionOps{N}((Cx, Cy, Cz), (Kx, Ky, Kz), G, H, Wꜝ, Capacity.V, (nx, ny, nz))
-    end
+    # Use the shared base operator computation
+    G, H, Wꜝ, dims, D_m, D_p, S_m, S_p = compute_base_operators(Capacity)
+    N = length(dims)
+    
+    # Compute convection matrices for each dimension
+    C = ntuple(d -> 
+        D_p[d] * spdiagm(0 => (S_m[d] * Capacity.A[d] * uₒ[d])) * S_m[d], 
+    N)
+    
+    # Compute interface velocity matrices
+    K = ntuple(d -> 
+        spdiagm(0 => S_p[d] * H' * uᵧ), 
+    N)
+    
+    return ConvectionOps{N}(C, K, G, H, Wꜝ, Capacity.V, dims)
 end
