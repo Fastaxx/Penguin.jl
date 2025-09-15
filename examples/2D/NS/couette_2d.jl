@@ -42,10 +42,10 @@ operator_p  = DiffusionOps(capacity_p)
 # BCs
 ###########
 U0 = 1.0
-u_left  = Dirichlet((x, y)-> 1.0)
-u_right = Dirichlet((x, y)-> 0.0)
+u_left  = Dirichlet((x, y)-> U0 * (y - y0) / Ly)
+u_right = Dirichlet((x, y)-> U0 * (y - y0) / Ly)
 u_bot   = Dirichlet((x, y)-> 0.0)
-u_top   = Dirichlet((x, y)-> 0.0)
+u_top   = Dirichlet((x, y)-> U0)
 bc_u = BorderConditions(Dict(
     :left=>u_left, :right=>u_right, :bottom=>u_bot, :top=>u_top
 ))
@@ -64,8 +64,8 @@ fₚ = (x, y, z=0.0) -> 0.0
 μ = 1.0
 ρ = 1.0
 
-# Temporary: pass x-staggered operator until solver supports split ux/uy
-fluid = Fluid(capacity_ux, operator_ux, capacity_p, operator_p, μ, ρ, fᵤ, fₚ)
+# Fluid with per-component (ux, uy) capacities/operators
+fluid = Fluid((capacity_ux, capacity_uy), (operator_ux, operator_uy), capacity_p, operator_p, μ, ρ, fᵤ, fₚ)
 
 ###########
 # Initial guess
@@ -78,7 +78,7 @@ x0 = zeros(4*nu + np)
 # Solver and solve
 ###########
 solver = StokesMono(fluid, mesh_ux, mesh_p, bc_u, bc_p, u_bc; x0=x0)
-solve_StokesMono!(solver; method=bicgstabl, reltol=1e-12)
+solve_StokesMono!(solver; method=Base.:\)
 
 println("2D Couette solved. Unknowns = ", length(solver.x))
 

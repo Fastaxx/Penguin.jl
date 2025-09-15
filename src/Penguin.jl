@@ -50,7 +50,7 @@ export AbstractInterfaceBC, ScalarJump, FluxJump, BorderConditions, InterfaceCon
 export GibbsThomson
 
 include("phase.jl")
-export Phase
+export Phase, Fluid
 
 include("utils.jl")
 export initialize_temperature_uniform!, initialize_temperature_square!, initialize_temperature_circle!, initialize_temperature_function!
@@ -66,7 +66,7 @@ export Solver, solve_system!
 export build_I_bc, build_I_D, build_source, build_g_g
 export BC_border_mono!, BC_border_diph!
 export cfl_restriction
-export remove_zero_rows_cols!
+export remove_zero_rows_cols!, remove_zero_rows_cols_separate!
 
 include("solver/diffusion.jl")
 export DiffusionSteadyMono, solve_DiffusionSteadyMono!
@@ -125,4 +125,8 @@ export check_convergence, check_convergence_diph
 
 include("vtk.jl")
 export write_vtk
+
+# Stokes / Navier–Stokes (prototype)
+include("solver/stokes.jl")
+export StokesMono, solve_StokesMono!
 end

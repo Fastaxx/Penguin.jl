@@ -274,6 +274,9 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
     nx = length(mesh_u.nodes[1])
     ny = length(mesh_u.nodes[2])
     LI = LinearIndices((nx, ny))
+    # Apply at last interior velocity node (nx, ny) consistent with BC_border_mono!
+    iright = max(nx - 1, 1)
+    jtop   = max(ny - 1, 1)
 
     # Helper: evaluate Dirichlet value
     eval_val(bc, x, y) = (bc isa Dirichlet) ? (bc.value isa Function ? bc.value(x, y) : bc.value) : nothing
@@ -289,7 +292,7 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
 
     # Apply along each side
     # Bottom/top (vary along x)
-    for jside in ((1, bc_bottom), (ny, bc_top))
+    for jside in ((1, bc_bottom), (jtop, bc_top))
         j, bc = jside
         isnothing(bc) && continue
         for i in 1:nx
@@ -316,7 +319,7 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
     end
 
     # Left/right (vary along y)
-    for iside in ((1, bc_left), (nx, bc_right))
+    for iside in ((1, bc_left), (iright, bc_right))
         i, bc = iside
         isnothing(bc) && continue
         for j in 1:ny
@@ -357,7 +360,7 @@ function apply_velocity_dirichlet!(A::SparseMatrixCSC{Float64, Int}, b::Vector{F
 
     # Node coordinates
     xnodes = mesh_u.nodes[1]
-    iL, iR = 1, length(xnodes)
+    iL, iR = 1, max(length(xnodes) - 1, 1)
 
     # Helper to evaluate value at position
     function eval_value(bc, x)
@@ -368,7 +371,7 @@ function apply_velocity_dirichlet!(A::SparseMatrixCSC{Float64, Int}, b::Vector{F
     end
 
     vL = eval_value(left_bc,  xnodes[1])
-    vR = eval_value(right_bc, xnodes[end])
+    vR = eval_value(right_bc, xnodes[end-1])
 
     # Row indices: momentum rows are 1:nu, tie rows are nu+1:2nu
     if vL !== nothing
@@ -447,8 +450,8 @@ function solve_StokesMono!(s::StokesMono; method=Base.:\, algorithm=nothing, kwa
     # Re-assemble in case anything changed
     assemble_stokes!(s)
 
-    # Remove zero rows and columns (independently) to improve conditioning and allow direct solves
-    Ared, bred, rows_idx, cols_idx = remove_zero_rows_cols_separate!(s.A, s.b)
+    # Remove zero rows and columns using a common index set to keep A square
+    Ared, bred, keep_idx_rows, keep_idx_cols = remove_zero_rows_cols!(s.A, s.b)
 
     # Choose solver path
     xred = nothing
@@ -484,6 +487,6 @@ function solve_StokesMono!(s::StokesMono; method=Base.:\, algorithm=nothing, kwa
     # Reconstruct full solution in original column space
     N = size(s.A, 2)
     s.x = zeros(N)
-    s.x[cols_idx] = xred
+    s.x[keep_idx_cols] = xred
     return s
 end

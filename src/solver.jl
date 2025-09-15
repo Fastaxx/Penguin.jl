@@ -77,6 +77,34 @@ function remove_zero_rows_cols!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Floa
 end
 
 """
+    remove_zero_rows_cols_separate!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Float64}; atol::Float64=0.0)
+
+Remove zero (or near-zero) rows and columns independently and return separate mappings.
+
+# Arguments
+- `A`: Sparse matrix
+- `b`: RHS vector (trimmed using row indices)
+- `atol`: Absolute tolerance for zero detection (default 0.0)
+
+# Returns
+- `Atrim`: Trimmed matrix `A[rows_idx, cols_idx]`
+- `btrim`: Trimmed RHS `b[rows_idx]`
+- `rows_idx`: Kept row indices (original space)
+- `cols_idx`: Kept column indices (original space)
+"""
+function remove_zero_rows_cols_separate!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Float64}; atol::Float64=0.0)
+    row_sums = vec(sum(abs.(A), dims=2))
+    col_sums = vec(sum(abs.(A), dims=1))
+
+    rows_idx = findall(row_sums .> atol)
+    cols_idx = findall(col_sums .> atol)
+
+    Atrim = A[rows_idx, cols_idx]
+    btrim = b[rows_idx]
+    return Atrim, btrim, rows_idx, cols_idx
+end
+
+"""
     solve_with_linearsolve!(s::Solver, A, b, algorithm; kwargs...)
 
 Solve a linear system using LinearSolve.jl's framework.
@@ -429,8 +457,31 @@ function apply_boundary_condition_fast!(A, b, li, pos, condition, boundary_key, 
         end
         
     elseif condition isa Neumann
-        # TODO: Implement Neumann BC
-        @warn "Neumann boundary conditions not yet implemented" maxlog=1
+        # Simple 1D Neumann: (u_boundary - u_adjacent) / Δx = g
+        # This creates a first-order one-sided derivative constraint.
+        if length(mesh.centers) == 1
+            # Compute grid spacing from node coordinates
+            Δx = minimum(diff(mesh.nodes[1]))
+            # Determine adjacent interior index
+            dims = (length(mesh.centers[1])+1,)
+            if boundary_key == :bottom
+                li_adj = min(li+1, dims[1])
+            elseif boundary_key == :top
+                li_adj = max(li-1, 1)
+            else
+                # Fallback for unexpected labels in 1D
+                li_adj = boundary_key == :left ? min(li+1, dims[1]) : max(li-1, 1)
+            end
+
+            gval = condition.value isa Function ? condition.value(pos...) : condition.value
+
+            A[li, :] .= 0.0
+            A[li, li] =  1.0/Δx
+            A[li, li_adj] += -1.0/Δx
+            b[li] = gval
+        else
+            @warn "Neumann BC currently implemented for 1D only in BC_border_mono!" maxlog=1
+        end
 
     end
 end
@@ -602,4 +653,3 @@ function adapt_timestep(velocity_field, mesh, cfl_target, Δt_current, Δt_min, 
     
     return Δt_new, cfl_actual
 end
-
