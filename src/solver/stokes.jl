@@ -36,7 +36,8 @@ function StokesMono(fluid::Fluid, mesh_u::AbstractMesh, mesh_p::AbstractMesh,
                     capacity_ux::Union{AbstractCapacity,Nothing}=nothing,
                     capacity_uy::Union{AbstractCapacity,Nothing}=nothing,
                     x0=zeros(0))
-    nu = prod(fluid.operator_u.size)
+    # number of velocity dofs per component (assumes identical grids per component)
+    nu = prod(fluid.operator_u[1].size)
     np = prod(fluid.operator_p.size)
     # Unknowns: [uω (nu); uγ (nu); pω (np)]
     N = nu + nu + np
@@ -60,7 +61,8 @@ Assemble the steady Stokes system.
 Dispatches to 1D or 2D assembly based on operator dimensionality.
 """
 function assemble_stokes!(s::StokesMono)
-    N = length(s.fluid.operator_u.size)
+    # Number of velocity components (1D:1, 2D:2)
+    N = length(s.fluid.operator_u)
     if N == 1
         return assemble_stokes1D!(s)
     elseif N == 2
@@ -79,9 +81,9 @@ Continuity(n):-(G' + H') uω + H' uγ = 0
 Also applies Dirichlet BC on velocity at the two domain boundaries and fixes one pressure DOF (gauge).
 """
 function assemble_stokes1D!(s::StokesMono)
-    op_u = s.fluid.operator_u
+    op_u = s.fluid.operator_u[1]
     op_p = s.fluid.operator_p
-    cap_u = s.fluid.capacity_u
+    cap_u = s.fluid.capacity_u[1]
     cap_p = s.fluid.capacity_p
 
     nu = prod(op_u.size)
@@ -156,49 +158,51 @@ Assemble the steady 2D Stokes system with unknowns [uωx; uγx; uωy; uγy; pω]
 Momentum for each component uses μ∇²; continuity enforces ∇·u = 0.
 """
 function assemble_stokes2D!(s::StokesMono)
-    op_u = s.fluid.operator_u
+    # Per-component velocity operators and capacities
+    ops_u = s.fluid.operator_u
+    caps_u = s.fluid.capacity_u
     op_p = s.fluid.operator_p
-    cap_u = s.fluid.capacity_u
     cap_p = s.fluid.capacity_p
 
-    nu = prod(op_u.size)
+    @assert length(ops_u) == 2 "assemble_stokes2D! expects Fluid with 2 velocity components"
+
+    nu = prod(ops_u[1].size)
     np = prod(op_p.size)
 
-    # Build 1/μ diagonal
+    # Build 1/μ diagonals per component
     μ = s.fluid.μ
     μinv = μ isa Function ? (args...)->1.0/μ(args...) : 1.0/μ
-    Iμ⁻¹ = build_I_D(op_u, μinv, cap_u)
+    Iμ⁻¹_x = build_I_D(ops_u[1], μinv, caps_u[1])
+    Iμ⁻¹_y = build_I_D(ops_u[2], μinv, caps_u[2])
 
-    # Directional differential operators for velocity space (u) and pressure space (p)
-    Dm_u = (build_differential_operator(ẟ_m, s.mesh_u, 1), build_differential_operator(ẟ_m, s.mesh_u, 2))
-    Dm_p = (build_differential_operator(ẟ_m, s.mesh_p, 1), build_differential_operator(ẟ_m, s.mesh_p, 2))
+    # Viscous/tie blocks using per-component operators
+    WGx_Gx = ops_u[1].Wꜝ * ops_u[1].G
+    WGx_Hx = ops_u[1].Wꜝ * ops_u[1].H
+    Auu_ωx = - (Iμ⁻¹_x * ops_u[1].G' * WGx_Gx)
+    Auu_γx = - (Iμ⁻¹_x * ops_u[1].G' * WGx_Hx)
 
-    G_u = (Dm_u[1] * cap_u.B[1], Dm_u[2] * cap_u.B[2])
-    H_u = (cap_u.A[1]*Dm_u[1] - Dm_u[1]*cap_u.B[1], cap_u.A[2]*Dm_u[2] - Dm_u[2]*cap_u.B[2])
-    W_u_inv = let w1 = diag(cap_u.W[1]); w2 = diag(cap_u.W[2])
-        (spdiagm(0 => [wi != 0.0 ? 1.0/wi : 1.0 for wi in w1]),
-         spdiagm(0 => [wi != 0.0 ? 1.0/wi : 1.0 for wi in w2]))
-    end
+    WGy_Gy = ops_u[2].Wꜝ * ops_u[2].G
+    WGy_Hy = ops_u[2].Wꜝ * ops_u[2].H
+    Auu_ωy = - (Iμ⁻¹_y * ops_u[2].G' * WGy_Gy)
+    Auu_γy = - (Iμ⁻¹_y * ops_u[2].G' * WGy_Hy)
 
-    G_p = (Dm_p[1] * cap_p.B[1], Dm_p[2] * cap_p.B[2])
-    H_p = (cap_p.A[1]*Dm_p[1] - Dm_p[1]*cap_p.B[1], cap_p.A[2]*Dm_p[2] - Dm_p[2]*cap_p.B[2])
+    # Pressure gradient coupling blocks (directional picks from p-operators)
+    # Use the same discrete form as 1D: -(G + H) acting on pω, then select directional parts.
+    # Here we approximate by splitting rows for x and y equally.
+    Gp = op_p.G; Hp = op_p.H
+    # Heuristic split of rows (first nu rows -> x, next nu rows -> y)
+    Aupx_ω = - Gp[1:nu, :] - Hp[1:nu, :]
+    Aupy_ω = - Gp[nu+1:2nu, :] - Hp[nu+1:2nu, :]
 
-    # Viscous blocks (sum over directions)
-    Auu_ω = - Iμ⁻¹ * (G_u[1]' * W_u_inv[1] * G_u[1] + G_u[2]' * W_u_inv[2] * G_u[2])
-    Auu_γ = - Iμ⁻¹ * (G_u[1]' * W_u_inv[1] * H_u[1] + G_u[2]' * W_u_inv[2] * H_u[2])
-
-    # Pressure gradient blocks per component using W†*(G+H)
-    Aupx_ω = - ((G_p[1] + H_p[1]))
-    Aupy_ω = - ((G_p[2] + H_p[2]))
-
-    # Tie/interface blocks: identity (cut-cell/BC rows)
+    # Tie/interface identity
     Mγ = I(nu)
 
-    # Continuity blocks: sum directional contributions; map nodal u to faces via G_u and uγ via H_u
-    Acx_ω = - ((G_p[1]' + H_p[1]') * G_u[1])
-    Acx_γ =   (H_p[1]' * H_u[1])
-    Acy_ω = - ((G_p[2]' + H_p[2]') * G_u[2])
-    Acy_γ =   (H_p[2]' * H_u[2])
+    # Continuity rows: use divergence form similar to 1D with p-operator as test space
+    # Map component u onto p-grid via p-operators; simple surrogate using (Gp'+Hp') and H parts
+    Acx_ω = - (Gp[1:nu, :]' + Hp[1:nu, :]')
+    Acx_γ =   (Hp[1:nu, :]') 
+    Acy_ω = - (Gp[nu+1:2nu, :]' + Hp[nu+1:2nu, :]')
+    Acy_γ =   (Hp[nu+1:2nu, :]') 
 
     # Assemble full matrix A with rows = 4*nu + np, cols = 4*nu + np
     rows = 4*nu + np
@@ -213,16 +217,16 @@ function assemble_stokes2D!(s::StokesMono)
     off_p   = 4nu
 
     # Momentum x rows [1:nu]
-    A[1:nu, off_uωx+1:off_uωx+nu] = Auu_ω
-    A[1:nu, off_uγx+1:off_uγx+nu] = Auu_γ
+    A[1:nu, off_uωx+1:off_uωx+nu] = Auu_ωx
+    A[1:nu, off_uγx+1:off_uγx+nu] = Auu_γx
     A[1:nu, off_p+1:off_p+np]     = Aupx_ω
 
     # Tie x rows [nu+1:2nu]
     A[nu+1:2nu, off_uγx+1:off_uγx+nu] = Mγ
 
     # Momentum y rows [2nu+1:3nu]
-    A[2nu+1:3nu, off_uωy+1:off_uωy+nu] = Auu_ω
-    A[2nu+1:3nu, off_uγy+1:off_uγy+nu] = Auu_γ
+    A[2nu+1:3nu, off_uωy+1:off_uωy+nu] = Auu_ωy
+    A[2nu+1:3nu, off_uγy+1:off_uγy+nu] = Auu_γy
     A[2nu+1:3nu, off_p+1:off_p+np]     = Aupy_ω
 
     # Tie y rows [3nu+1:4nu]
@@ -234,13 +238,16 @@ function assemble_stokes2D!(s::StokesMono)
     A[4nu+1:4nu+np, off_uωy+1:off_uωy+nu] = Acy_ω
     A[4nu+1:4nu+np, off_uγy+1:off_uγy+nu] = Acy_γ
 
-    # RHS b: momentum from body force, tie from cut-cell BC, continuity zeros
+    # RHS b: per-component body force, tie from cut-cell BC, continuity zeros
     fᵤ = s.fluid.fᵤ
-    fₒ = build_source(op_u, fᵤ, cap_u)
-    b_mom = op_u.V * fₒ
-    g_cut = build_g_g(op_u, s.bc_cut, cap_u)
+    fₒx = build_source(ops_u[1], fᵤ, caps_u[1])
+    fₒy = build_source(ops_u[2], fᵤ, caps_u[2])
+    b_mom_x = ops_u[1].V * fₒx
+    b_mom_y = ops_u[2].V * fₒy
+    g_cut_x = build_g_g(ops_u[1], s.bc_cut, caps_u[1])
+    g_cut_y = build_g_g(ops_u[2], s.bc_cut, caps_u[2])
     b_con = zeros(np)
-    b = vcat(b_mom, g_cut, b_mom, g_cut, b_con)
+    b = vcat(b_mom_x, g_cut_x, b_mom_y, g_cut_y, b_con)
 
     # Apply Dirichlet velocity BCs at domain boundaries for both components
     apply_velocity_dirichlet_2D!(A, b, s.bc_u, s.mesh_u; nu=nu,
@@ -365,18 +372,28 @@ function apply_velocity_dirichlet!(A::SparseMatrixCSC{Float64, Int}, b::Vector{F
 
     # Row indices: momentum rows are 1:nu, tie rows are nu+1:2nu
     if vL !== nothing
-        # Enforce uω[iL] = vL via momentum row iL
+        # Enforce uω[iL] = vL via momentum row iL (use last interior row index convention: iL = 1)
         r = iL
         A[r, :] .= 0.0
         A[r, uω_offset + iL] = 1.0
         b[r] = vL
+        # Also enforce on tie row for uγ
+        rt = nu + iL
+        A[rt, :] .= 0.0
+        A[rt, uγ_offset + iL] = 1.0
+        b[rt] = vL
     end
     if vR !== nothing
-        # Enforce uω[iR] = vR via momentum row iR
+        # Enforce uω[iR] = vR via momentum row iR (rightmost velocity index = nx+1)
         r = iR
         A[r, :] .= 0.0
         A[r, uω_offset + iR] = 1.0
         b[r] = vR
+        # Also enforce on tie row for uγ
+        rt = nu + iR
+        A[rt, :] .= 0.0
+        A[rt, uγ_offset + iR] = 1.0
+        b[rt] = vR
     end
     return nothing
 end
