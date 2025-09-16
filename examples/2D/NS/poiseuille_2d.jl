@@ -16,7 +16,7 @@ Left/Right: enforce the fully developed parabolic profile to avoid incompatibili
 ###########
 # Grids
 ###########
-nx, ny = 64, 64
+nx, ny = 256, 256
 Lx, Ly = 2.0, 1.0
 x0, y0 = 0.0, 0.0
 
@@ -68,8 +68,14 @@ fₚ = (x, y, z=0.0) -> 0.0
 μ = 1.0
 ρ = 1.0
 
-# Fluid with per-component (ux, uy) capacities/operators
-fluid = Fluid((capacity_ux, capacity_uy), (operator_ux, operator_uy), capacity_p, operator_p, μ, ρ, fᵤ, fₚ)
+# Fluid with per-component (ux, uy) meshes/capacities/operators
+fluid = Fluid((mesh_ux, mesh_uy),
+              (capacity_ux, capacity_uy),
+              (operator_ux, operator_uy),
+              mesh_p,
+              capacity_p,
+              operator_p,
+              μ, ρ, fᵤ, fₚ)
 
 ###########
 # Initial guess
@@ -81,8 +87,8 @@ x0 = zeros(4*nu + np)
 ###########
 # Solver and solve
 ###########
-solver = StokesMono(fluid, mesh_ux, mesh_p, bc_u, bc_p, u_bc; x0=x0)
-solve_StokesMono!(solver; method=bicgstabl, reltol=1e-12)
+solver = StokesMono(fluid, bc_u, bc_p, u_bc; x0=x0)
+solve_StokesMono!(solver; method=Base.:\)
 
 println("2D Poiseuille solved. Unknowns = ", length(solver.x))
 
@@ -147,4 +153,3 @@ save("stokes2d_poiseuille_pressure.png", fig3)
 Uy_max = maximum(abs, Uy)
 P_std = std(P)
 println("Sanity: max |u_y| = ", Uy_max, ", std(p) = ", P_std)
-

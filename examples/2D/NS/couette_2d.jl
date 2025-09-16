@@ -64,9 +64,14 @@ fₚ = (x, y, z=0.0) -> 0.0
 μ = 1.0
 ρ = 1.0
 
-# Fluid with per-component (ux, uy) capacities/operators
-fluid = Fluid((capacity_ux, capacity_uy), (operator_ux, operator_uy), capacity_p, operator_p, μ, ρ, fᵤ, fₚ)
-
+# Fluid with per-component (ux, uy) meshes/capacities/operators
+fluid = Fluid((mesh_ux, mesh_uy),
+              (capacity_ux, capacity_uy),
+              (operator_ux, operator_uy),
+              mesh_p,
+              capacity_p,
+              operator_p,
+              μ, ρ, fᵤ, fₚ)
 ###########
 # Initial guess
 ###########
@@ -77,7 +82,7 @@ x0 = zeros(4*nu + np)
 ###########
 # Solver and solve
 ###########
-solver = StokesMono(fluid, mesh_ux, mesh_p, bc_u, bc_p, u_bc; x0=x0)
+solver = StokesMono(fluid, bc_u, bc_p, u_bc; x0=x0)
 solve_StokesMono!(solver; method=Base.:\)
 
 println("2D Couette solved. Unknowns = ", length(solver.x))
