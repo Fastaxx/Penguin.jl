@@ -19,11 +19,14 @@ end
 """
     struct Fluid{N}
 
-A fluid phase grouping velocity and pressure discretizations and material data
-for (incompressible) Stokes/Navier–Stokes formulations.
+A fluid phase grouping velocity and pressure discretizations, meshes, and
+material data for (incompressible) Stokes/Navier–Stokes formulations.
 
 # Fields
-- `capacity_u::NTuple{N,AbstractCapacity}`: Per-component capacities for the velocity field (e.g., (ux,) in 1D, (ux,uy) in 2D)
+- `mesh_u::NTuple{N,AbstractMesh}`: Per-component velocity meshes (e.g. `(mesh_u,)` in 1D,
+  `(mesh_ux, mesh_uy)` in 2D)
+- `mesh_p::AbstractMesh`: Pressure mesh (typically cell-centered)
+- `capacity_u::NTuple{N,AbstractCapacity}`: Per-component capacities for the velocity field
 - `operator_u::NTuple{N,AbstractOperators}`: Per-component operators for the velocity field
 - `capacity_p::AbstractCapacity`: Capacity for the pressure field
 - `operator_p::AbstractOperators`: Operators for the pressure field
@@ -33,6 +36,8 @@ for (incompressible) Stokes/Navier–Stokes formulations.
 - `fₚ::Function`: Mass source in continuity equation
 """
 struct Fluid{N}
+    mesh_u::NTuple{N,AbstractMesh}
+    mesh_p::AbstractMesh
     capacity_u::NTuple{N,AbstractCapacity}
     operator_u::NTuple{N,AbstractOperators}
     capacity_p::AbstractCapacity
@@ -44,16 +49,21 @@ struct Fluid{N}
 end
 
 # Convenience constructors
-Fluid(cap_u::AbstractCapacity,
+Fluid(mesh_u::AbstractMesh,
+      cap_u::AbstractCapacity,
       op_u::AbstractOperators,
+      mesh_p::AbstractMesh,
       cap_p::AbstractCapacity,
       op_p::AbstractOperators,
-      μ, ρ, fᵤ, fₚ) = Fluid{1}((cap_u,), (op_u,), cap_p, op_p, μ, ρ, fᵤ, fₚ)
+      μ, ρ, fᵤ, fₚ) =
+    Fluid{1}((mesh_u,), mesh_p, (cap_u,), (op_u,), cap_p, op_p, μ, ρ, fᵤ, fₚ)
 
-function Fluid(cap_u::NTuple{N,AbstractCapacity},
+function Fluid(mesh_u::NTuple{N,AbstractMesh},
+               cap_u::NTuple{N,AbstractCapacity},
                op_u::NTuple{N,AbstractOperators},
+               mesh_p::AbstractMesh,
                cap_p::AbstractCapacity,
                op_p::AbstractOperators,
                μ, ρ, fᵤ, fₚ) where N
-    return Fluid{N}(cap_u, op_u, cap_p, op_p, μ, ρ, fᵤ, fₚ)
+    return Fluid{N}(mesh_u, mesh_p, cap_u, op_u, cap_p, op_p, μ, ρ, fᵤ, fₚ)
 end

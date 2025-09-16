@@ -77,7 +77,7 @@ fₚ = (x, y=0.0, z=0.0) -> 0.0   # Mass source for continuity (usually 0)
 ###########
 # Assemble the phase object
 ###########
-fluid = Fluid(capacity_u, operator_u, capacity_p, operator_p, μ, ρ, fᵤ, fₚ)
+fluid = Fluid(mesh_u, capacity_u, operator_u, mesh_p, capacity_p, operator_p, μ, ρ, fᵤ, fₚ)
 
 ###########
 # Initial conditions (placeholders)
@@ -100,7 +100,7 @@ x0 = vcat(u0_ω, u0_γ, p0_ω)
 ###########
 # Build and run the (stub) solver
 ###########
-solver = StokesMono(fluid, mesh_u, mesh_p, bc_u, bc_p, u_bc; x0=x0)
+solver = StokesMono(fluid, bc_u, bc_p, u_bc; x0=x0)
 solve_StokesMono!(solver)
 
 println(solver.x)

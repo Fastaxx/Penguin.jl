@@ -7,19 +7,9 @@ Actual discretization assembly (coupled momentum + continuity) will be added lat
 """
 mutable struct StokesMono
     fluid::Fluid
-    mesh_u::AbstractMesh
-    mesh_p::AbstractMesh
     bc_u::BorderConditions
     bc_p::BorderConditions
     bc_cut::AbstractBoundary  # cut-cell/interface BC for uγ
-
-    # Optional per-component (2D) data
-    mesh_ux::Union{AbstractMesh, Nothing}
-    mesh_uy::Union{AbstractMesh, Nothing}
-    op_ux::Union{AbstractOperators, Nothing}
-    op_uy::Union{AbstractOperators, Nothing}
-    cap_ux::Union{AbstractCapacity, Nothing}
-    cap_uy::Union{AbstractCapacity, Nothing}
 
     A::SparseMatrixCSC{Float64, Int}
     b::Vector{Float64}
@@ -27,28 +17,24 @@ mutable struct StokesMono
     ch::Vector{Any}
 end
 
-function StokesMono(fluid::Fluid, mesh_u::AbstractMesh, mesh_p::AbstractMesh,
-                    bc_u::BorderConditions, bc_p::BorderConditions, bc_cut::AbstractBoundary;
-                    mesh_ux::Union{AbstractMesh,Nothing}=nothing,
-                    mesh_uy::Union{AbstractMesh,Nothing}=nothing,
-                    operator_ux::Union{AbstractOperators,Nothing}=nothing,
-                    operator_uy::Union{AbstractOperators,Nothing}=nothing,
-                    capacity_ux::Union{AbstractCapacity,Nothing}=nothing,
-                    capacity_uy::Union{AbstractCapacity,Nothing}=nothing,
+function StokesMono(fluid::Fluid,
+                    bc_u::BorderConditions,
+                    bc_p::BorderConditions,
+                    bc_cut::AbstractBoundary;
                     x0=zeros(0))
-    # number of velocity dofs per component (assumes identical grids per component)
+    # Number of velocity dofs per component (assumes identical grids per component)
     nu = prod(fluid.operator_u[1].size)
     np = prod(fluid.operator_p.size)
-    # Unknowns: [uω (nu); uγ (nu); pω (np)]
-    N = nu + nu + np
+    ncomp = length(fluid.operator_u)
+    # Unknowns: [uω¹, uγ¹, ..., uωᴺ, uγᴺ, pω]
+    N = 2 * ncomp * nu + np
     x_init = length(x0) == N ? x0 : zeros(N)
 
     # Allocate empty system; assembled later
     A = spzeros(Float64, N, N)
     b = zeros(N)
 
-    s = StokesMono(fluid, mesh_u, mesh_p, bc_u, bc_p, bc_cut,
-                   mesh_ux, mesh_uy, operator_ux, operator_uy, capacity_ux, capacity_uy,
+    s = StokesMono(fluid, bc_u, bc_p, bc_cut,
                    A, b, x_init, Any[])
     assemble_stokes!(s)
     return s
@@ -141,10 +127,12 @@ function assemble_stokes1D!(s::StokesMono)
     b = vcat(b_mom, g_cut, b_con)
 
     # Apply Dirichlet velocity BC on uω at domain boundaries (1D)
-    apply_velocity_dirichlet!(A, b, s.bc_u, s.mesh_u; nu=nu, uω_offset=0, uγ_offset=nu)
+    apply_velocity_dirichlet!(A, b, s.bc_u, s.fluid.mesh_u[1];
+                              nu=nu, uω_offset=0, uγ_offset=nu)
 
     # Fix pressure gauge using left pressure Dirichlet if provided, otherwise p[1]=0
-    apply_pressure_gauge!(A, b, s.bc_p, s.mesh_p; p_offset=2nu, np=np, row_start=2nu+1)
+    apply_pressure_gauge!(A, b, s.bc_p, s.fluid.mesh_p;
+                          p_offset=2nu, np=np, row_start=2nu+1)
 
     s.A = A
     s.b = b
@@ -250,12 +238,14 @@ function assemble_stokes2D!(s::StokesMono)
     b = vcat(b_mom_x, g_cut_x, b_mom_y, g_cut_y, b_con)
 
     # Apply Dirichlet velocity BCs at domain boundaries for both components
-    apply_velocity_dirichlet_2D!(A, b, s.bc_u, s.mesh_u; nu=nu,
+    apply_velocity_dirichlet_2D!(A, b, s.bc_u, s.fluid.mesh_u;
+                                 nu=nu,
                                  uωx_off=off_uωx, uγx_off=off_uγx,
                                  uωy_off=off_uωy, uγy_off=off_uγy)
 
     # Fix pressure gauge or apply pressure Dirichlet at boundaries if provided
-    apply_pressure_gauge!(A, b, s.bc_p, s.mesh_p; p_offset=off_p, np=np, row_start=4nu+1)
+    apply_pressure_gauge!(A, b, s.bc_p, s.fluid.mesh_p;
+                          p_offset=off_p, np=np, row_start=4nu+1)
 
     s.A = A
     s.b = b
@@ -269,14 +259,23 @@ Apply Dirichlet BC for 2D velocity components on domain boundaries.
 Enforces values on both uω and uγ rows for each boundary node.
 """
 function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
-                                      bc_u::BorderConditions, mesh_u::AbstractMesh;
+                                      bc_u::BorderConditions,
+                                      mesh_u::NTuple{2,AbstractMesh};
                                       nu::Int, uωx_off::Int, uγx_off::Int, uωy_off::Int, uγy_off::Int)
-    nx = length(mesh_u.nodes[1])
-    ny = length(mesh_u.nodes[2])
-    LI = LinearIndices((nx, ny))
+    mesh_ux, mesh_uy = mesh_u
+    nx = length(mesh_ux.nodes[1]); ny = length(mesh_ux.nodes[2])
+    nx_y = length(mesh_uy.nodes[1]); ny_y = length(mesh_uy.nodes[2])
+    @assert nx == nx_y && ny == ny_y "Velocity component meshes must share grid dimensions"
+
+    LIx = LinearIndices((nx, ny))
+    LIy = LinearIndices((nx_y, ny_y))
+
     # Apply at last interior velocity node (nx, ny) consistent with BC_border_mono!
     iright = max(nx - 1, 1)
     jtop   = max(ny - 1, 1)
+
+    xs_x = mesh_ux.nodes[1]; ys_x = mesh_ux.nodes[2]
+    xs_y = mesh_uy.nodes[1]; ys_y = mesh_uy.nodes[2]
 
     # Helper: evaluate Dirichlet value
     eval_val(bc, x, y) = (bc isa Dirichlet) ? (bc.value isa Function ? bc.value(x, y) : bc.value) : nothing
@@ -287,58 +286,53 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
     bc_left   = get(bc_u.borders, :left, nothing)
     bc_right  = get(bc_u.borders, :right, nothing)
 
-    xs = mesh_u.nodes[1]
-    ys = mesh_u.nodes[2]
-
-    # Apply along each side
+    # Apply along each side for x and y components using their respective meshes
     # Bottom/top (vary along x)
     for jside in ((1, bc_bottom), (jtop, bc_top))
-        j, bc = jside
+        jx, bc = jside
         isnothing(bc) && continue
+        jy = jx  # meshes share sizes (asserted above)
         for i in 1:nx
-            x = xs[i]; y = ys[j]
-            vx = eval_val(bc, x, y)
-            vy = 0.0  # default if user did not provide vy; extend in future
+            vx = eval_val(bc, xs_x[i], ys_x[jx])
+            vy = bc isa Dirichlet ? 0.0 : nothing
             if vx !== nothing
-                li = LI[i, j]
-                # Momentum x row
-                r = li
-                A[r, :] .= 0.0; A[r, uωx_off + li] = 1.0; b[r] = vx
-                # Tie x row
-                rt = nu + li
-                A[rt, :] .= 0.0; A[rt, uγx_off + li] = 1.0; b[rt] = vx
+                lix = LIx[i, jx]
+                r = lix
+                A[r, :] .= 0.0; A[r, uωx_off + lix] = 1.0; b[r] = vx
+                rt = nu + lix
+                A[rt, :] .= 0.0; A[rt, uγx_off + lix] = 1.0; b[rt] = vx
             end
             if vy !== nothing
-                li = LI[i, j]
-                r = 2nu + li
-                A[r, :] .= 0.0; A[r, uωy_off + li] = 1.0; b[r] = vy
-                rt = 3nu + li
-                A[rt, :] .= 0.0; A[rt, uγy_off + li] = 1.0; b[rt] = vy
+                liy = LIy[i, jy]
+                r = 2nu + liy
+                A[r, :] .= 0.0; A[r, uωy_off + liy] = 1.0; b[r] = vy
+                rt = 3nu + liy
+                A[rt, :] .= 0.0; A[rt, uγy_off + liy] = 1.0; b[rt] = vy
             end
         end
     end
 
     # Left/right (vary along y)
     for iside in ((1, bc_left), (iright, bc_right))
-        i, bc = iside
+        ix, bc = iside
         isnothing(bc) && continue
+        iy = ix
         for j in 1:ny
-            x = xs[i]; y = ys[j]
-            vx = eval_val(bc, x, y)
-            vy = 0.0
+            vx = eval_val(bc, xs_x[ix], ys_x[j])
+            vy = bc isa Dirichlet ? 0.0 : nothing
             if vx !== nothing
-                li = LI[i, j]
-                r = li
-                A[r, :] .= 0.0; A[r, uωx_off + li] = 1.0; b[r] = vx
-                rt = nu + li
-                A[rt, :] .= 0.0; A[rt, uγx_off + li] = 1.0; b[rt] = vx
+                lix = LIx[ix, j]
+                r = lix
+                A[r, :] .= 0.0; A[r, uωx_off + lix] = 1.0; b[r] = vx
+                rt = nu + lix
+                A[rt, :] .= 0.0; A[rt, uγx_off + lix] = 1.0; b[rt] = vx
             end
             if vy !== nothing
-                li = LI[i, j]
-                r = 2nu + li
-                A[r, :] .= 0.0; A[r, uωy_off + li] = 1.0; b[r] = vy
-                rt = 3nu + li
-                A[rt, :] .= 0.0; A[rt, uγy_off + li] = 1.0; b[rt] = vy
+                liy = LIy[iy, j]
+                r = 2nu + liy
+                A[r, :] .= 0.0; A[r, uωy_off + liy] = 1.0; b[r] = vy
+                rt = 3nu + liy
+                A[rt, :] .= 0.0; A[rt, uγy_off + liy] = 1.0; b[rt] = vy
             end
         end
     end
