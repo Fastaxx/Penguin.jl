@@ -41,3 +41,4 @@ simulation_results/
 examples/2D/StefanFT/tests/*
 *.pdf
 *.csv
+docs/devlog/

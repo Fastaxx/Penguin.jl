@@ -60,7 +60,7 @@ bc_uy = BorderConditions(Dict(
 ))
 
 # Pressure: gauge only (or set fixed value on one boundary if desired)
-bc_p = BorderConditions(Dict{Symbol,AbstractBoundary}())
+bc_p= BorderConditions(Dict())
 
 # Cut-cell / interface BC for uγ (not used here)
 u_bc = Dirichlet(0.0)

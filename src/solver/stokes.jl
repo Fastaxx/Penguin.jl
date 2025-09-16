@@ -18,6 +18,23 @@ mutable struct StokesMono{N}
     ch::Vector{Any}
 end
 
+@inline function enforce_dirichlet!(A::SparseMatrixCSC{Float64, Int}, b, row::Int, col::Int, value)
+    val = Float64(value)
+    for ptr in nzrange(A, col)
+        r = A.rowval[ptr]
+        r == row && continue
+        coeff = A.nzval[ptr]
+        if coeff != 0.0
+            b[r] -= coeff * val
+            A.nzval[ptr] = 0.0
+        end
+    end
+    A[row, :] .= 0.0
+    A[row, col] = 1.0
+    b[row] = val
+    return nothing
+end
+
 function StokesMono(fluid::Fluid{N},
                     bc_u::NTuple{N,BorderConditions},
                     bc_p::BorderConditions,
@@ -346,18 +363,20 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
             vx = eval_val(bcx, xs_x[i], ys_x[jx])
             vy = eval_val(bcy, xs_y[i], ys_y[jy])
             if vx !== nothing
+                vx = Float64(vx)
                 lix = LIx[i, jx]
                 r = row_uωx_off + lix
-                A[r, :] .= 0.0; A[r, uωx_off + lix] = 1.0; b[r] = vx
+                enforce_dirichlet!(A, b, r, uωx_off + lix, vx)
                 rt = row_uγx_off + lix
-                A[rt, :] .= 0.0; A[rt, uγx_off + lix] = 1.0; b[rt] = vx
+                enforce_dirichlet!(A, b, rt, uγx_off + lix, vx)
             end
             if vy !== nothing
+                vy = Float64(vy)
                 liy = LIy[i, jy]
                 r = row_uωy_off + liy
-                A[r, :] .= 0.0; A[r, uωy_off + liy] = 1.0; b[r] = vy
+                enforce_dirichlet!(A, b, r, uωy_off + liy, vy)
                 rt = row_uγy_off + liy
-                A[rt, :] .= 0.0; A[rt, uγy_off + liy] = 1.0; b[rt] = vy
+                enforce_dirichlet!(A, b, rt, uγy_off + liy, vy)
             end
         end
     end
@@ -371,18 +390,20 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
             vx = eval_val(bcx, xs_x[ix], ys_x[j])
             vy = eval_val(bcy, xs_y[iy], ys_y[j])
             if vx !== nothing
+                vx = Float64(vx)
                 lix = LIx[ix, j]
                 r = row_uωx_off + lix
-                A[r, :] .= 0.0; A[r, uωx_off + lix] = 1.0; b[r] = vx
+                enforce_dirichlet!(A, b, r, uωx_off + lix, vx)
                 rt = row_uγx_off + lix
-                A[rt, :] .= 0.0; A[rt, uγx_off + lix] = 1.0; b[rt] = vx
+                enforce_dirichlet!(A, b, rt, uγx_off + lix, vx)
             end
             if vy !== nothing
+                vy = Float64(vy)
                 liy = LIy[iy, j]
                 r = row_uωy_off + liy
-                A[r, :] .= 0.0; A[r, uωy_off + liy] = 1.0; b[r] = vy
+                enforce_dirichlet!(A, b, r, uωy_off + liy, vy)
                 rt = row_uγy_off + liy
-                A[rt, :] .= 0.0; A[rt, uγy_off + liy] = 1.0; b[rt] = vy
+                enforce_dirichlet!(A, b, rt, uγy_off + liy, vy)
             end
         end
     end
@@ -419,28 +440,20 @@ function apply_velocity_dirichlet!(A::SparseMatrixCSC{Float64, Int}, b::Vector{F
 
     # Row indices: momentum rows are 1:nu, tie rows are nu+1:2nu
     if vL !== nothing
+        vL = Float64(vL)
         # Enforce uω[iL] = vL via momentum row iL (use last interior row index convention: iL = 1)
         r = iL
-        A[r, :] .= 0.0
-        A[r, uω_offset + iL] = 1.0
-        b[r] = vL
-        # Also enforce on tie row for uγ
+        enforce_dirichlet!(A, b, r, uω_offset + iL, vL)
         rt = nu + iL
-        A[rt, :] .= 0.0
-        A[rt, uγ_offset + iL] = 1.0
-        b[rt] = vL
+        enforce_dirichlet!(A, b, rt, uγ_offset + iL, vL)
     end
     if vR !== nothing
+        vR = Float64(vR)
         # Enforce uω[iR] = vR via momentum row iR (rightmost velocity index = nx+1)
         r = iR
-        A[r, :] .= 0.0
-        A[r, uω_offset + iR] = 1.0
-        b[r] = vR
-        # Also enforce on tie row for uγ
+        enforce_dirichlet!(A, b, r, uω_offset + iR, vR)
         rt = nu + iR
-        A[rt, :] .= 0.0
-        A[rt, uγ_offset + iR] = 1.0
-        b[rt] = vR
+        enforce_dirichlet!(A, b, rt, uγ_offset + iR, vR)
     end
     return nothing
 end
