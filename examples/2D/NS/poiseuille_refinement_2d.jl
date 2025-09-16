@@ -3,7 +3,8 @@ using LinearAlgebra
 using CairoMakie
 
 # Mesh sizes to test
-resolutions = [(32, 32), (64, 64), (128, 128)]
+resolutions = [(16,16), (32,32), (64,64), (128,128), (256,256), (512,512)]
+
 
 # Domain dimensions
 Lx, Ly = 2.0, 1.0
@@ -97,5 +98,20 @@ end
 
 fig = Figure(resolution=(600, 450))
 ax = Axis(fig[1,1], xlabel="h", ylabel="L₂ error", title="Poiseuille refinement", xscale=log10, yscale=log10)
-scatterlines!(ax, spacings, results, marker=:circle)
+sorted = sortperm(spacings, rev=false)
+h_sorted = spacings[sorted]
+err_sorted = results[sorted]
+scatterlines!(ax, h_sorted, err_sorted, marker=:circle, label="error")
+
+if length(err_sorted) >= 2
+    reference_order = 2.0
+    reference_order_1 = 1.0
+    anchor_h = h_sorted[end]
+    anchor_err = err_sorted[end]
+    ref_values = anchor_err .* (h_sorted ./ anchor_h) .^ reference_order
+    ref_values_1 = anchor_err .* (h_sorted ./ anchor_h) .^ reference_order_1
+    lines!(ax, h_sorted, ref_values, linestyle=:dash, color=:gray, label="slope $(reference_order)")
+    lines!(ax, h_sorted, ref_values_1, linestyle=:dot, color=:black, label="slope $(reference_order_1)")
+end
+axislegend(ax, position=:lt)
 display(fig)

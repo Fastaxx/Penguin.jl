@@ -4,6 +4,7 @@ using SparseArrays
 using LinearAlgebra
 using IterativeSolvers
 using Statistics
+using LinearSolve
 
 """
 2D Stokes Poiseuille flow (steady): u = (Ux(y), 0), driven by pressure gradient.
@@ -16,7 +17,7 @@ Left/Right: enforce the fully developed parabolic profile to avoid incompatibili
 ###########
 # Grids
 ###########
-nx, ny = 256, 256
+nx, ny = 128, 128
 Lx, Ly = 2.0, 1.0
 x0, y0 = 0.0, 0.0
 
@@ -93,7 +94,7 @@ x0 = zeros(4*nu + np)
 # Solver and solve
 ###########
 solver = StokesMono(fluid, (bc_ux, bc_uy), bc_p, u_bc; x0=x0)
-solve_StokesMono!(solver; method=Base.:\)
+solve_StokesMono!(solver; algorithm=UMFPACKFactorization())
 
 println("2D Poiseuille solved. Unknowns = ", length(solver.x))
 
