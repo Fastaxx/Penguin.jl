@@ -23,11 +23,11 @@ function StokesMono(fluid::Fluid{N},
                     bc_p::BorderConditions,
                     bc_cut::AbstractBoundary;
                     x0=zeros(0)) where {N}
-    # Number of velocity dofs per component (assumes identical grids per component)
-    nu = prod(fluid.operator_u[1].size)
+    # Number of velocity dofs per component
+    nu_components = ntuple(i -> prod(fluid.operator_u[i].size), N)
     np = prod(fluid.operator_p.size)
     # Unknowns: [uω¹, uγ¹, ..., uωᴺ, uγᴺ, pω]
-    Ntot = 2 * N * nu + np
+    Ntot = 2 * sum(nu_components) + np
     x_init = length(x0) == Ntot ? x0 : zeros(Ntot)
 
     # Allocate empty system; assembled later
@@ -168,7 +168,10 @@ function assemble_stokes2D!(s::StokesMono)
 
     @assert length(ops_u) == 2 "assemble_stokes2D! expects Fluid with 2 velocity components"
 
-    nu = prod(ops_u[1].size)
+    nu_x = prod(ops_u[1].size)
+    nu_y = prod(ops_u[2].size)
+    nu_components = (nu_x, nu_y)
+    sum_nu = nu_x + nu_y
     np = prod(op_p.size)
 
     # Build 1/μ diagonals per component
@@ -189,56 +192,73 @@ function assemble_stokes2D!(s::StokesMono)
     Auu_γy = - (Iμ⁻¹_y * ops_u[2].G' * WGy_Hy)
 
     # Pressure gradient coupling blocks (directional picks from p-operators)
-    # Use the same discrete form as 1D: -(G + H) acting on pω, then select directional parts.
-    # Here we approximate by splitting rows for x and y equally.
+    # Use the same discrete form as 1D: -(G + H) acting on pω, partitioned per component.
     Gp = op_p.G; Hp = op_p.H
-    # Heuristic split of rows (first nu rows -> x, next nu rows -> y)
-    Aupx_ω = - Gp[1:nu, :] - Hp[1:nu, :]
-    Aupy_ω = - Gp[nu+1:2nu, :] - Hp[nu+1:2nu, :]
+    grad = Gp + Hp
+    total_grad_rows = size(grad, 1)
+    @assert total_grad_rows == sum(nu_components) "Pressure gradient rows ($(total_grad_rows)) must match total velocity DOFs ($(sum(nu_components)))."
+    row_sizes = collect(nu_components)
+    row_offsets = cumsum([0; row_sizes])
+    x_rows = row_offsets[1]+1:row_offsets[2]
+    y_rows = row_offsets[2]+1:row_offsets[3]
+    Aupx_ω = -grad[x_rows, :]
+    Aupy_ω = -grad[y_rows, :]
 
     # Tie/interface identity
-    Mγ = I(nu)
+    Mγx = I(nu_x)
+    Mγy = I(nu_y)
 
     # Continuity rows: use divergence form similar to 1D with p-operator as test space
-    # Map component u onto p-grid via p-operators; simple surrogate using (Gp'+Hp') and H parts
-    Acx_ω = - (Gp[1:nu, :]' + Hp[1:nu, :]')
-    Acx_γ =   (Hp[1:nu, :]') 
-    Acy_ω = - (Gp[nu+1:2nu, :]' + Hp[nu+1:2nu, :]')
-    Acy_γ =   (Hp[nu+1:2nu, :]') 
+    Gp_x = Gp[x_rows, :]
+    Hp_x = Hp[x_rows, :]
+    Gp_y = Gp[y_rows, :]
+    Hp_y = Hp[y_rows, :]
+    Acx_ω = - (Gp_x' + Hp_x')
+    Acx_γ =   (Hp_x')
+    Acy_ω = - (Gp_y' + Hp_y')
+    Acy_γ =   (Hp_y')
 
-    # Assemble full matrix A with rows = 4*nu + np, cols = 4*nu + np
-    rows = 4*nu + np
-    cols = 4*nu + np
+    # Assemble full matrix A
+    rows = 2 * sum_nu + np
+    cols = 2 * sum_nu + np
     A = spzeros(Float64, rows, cols)
 
     # Offsets
     off_uωx = 0
-    off_uγx = nu
-    off_uωy = 2nu
-    off_uγy = 3nu
-    off_p   = 4nu
+    off_uγx = nu_x
+    off_uωy = 2 * nu_x
+    off_uγy = 2 * nu_x + nu_y
+    off_p   = 2 * sum_nu
 
-    # Momentum x rows [1:nu]
-    A[1:nu, off_uωx+1:off_uωx+nu] = Auu_ωx
-    A[1:nu, off_uγx+1:off_uγx+nu] = Auu_γx
-    A[1:nu, off_p+1:off_p+np]     = Aupx_ω
+    # Row offsets
+    row_uωx = 0
+    row_uγx = nu_x
+    row_uωy = 2 * nu_x
+    row_uγy = 2 * nu_x + nu_y
+    row_con = 2 * sum_nu
 
-    # Tie x rows [nu+1:2nu]
-    A[nu+1:2nu, off_uγx+1:off_uγx+nu] = Mγ
+    # Momentum x rows [1:nu_x]
+    A[row_uωx+1:row_uωx+nu_x, off_uωx+1:off_uωx+nu_x] = Auu_ωx
+    A[row_uωx+1:row_uωx+nu_x, off_uγx+1:off_uγx+nu_x] = Auu_γx
+    A[row_uωx+1:row_uωx+nu_x, off_p+1:off_p+np]       = Aupx_ω
 
-    # Momentum y rows [2nu+1:3nu]
-    A[2nu+1:3nu, off_uωy+1:off_uωy+nu] = Auu_ωy
-    A[2nu+1:3nu, off_uγy+1:off_uγy+nu] = Auu_γy
-    A[2nu+1:3nu, off_p+1:off_p+np]     = Aupy_ω
+    # Tie x rows
+    A[row_uγx+1:row_uγx+nu_x, off_uγx+1:off_uγx+nu_x] = Mγx
 
-    # Tie y rows [3nu+1:4nu]
-    A[3nu+1:4nu, off_uγy+1:off_uγy+nu] = Mγ
+    # Momentum y rows
+    A[row_uωy+1:row_uωy+nu_y, off_uωy+1:off_uωy+nu_y] = Auu_ωy
+    A[row_uωy+1:row_uωy+nu_y, off_uγy+1:off_uγy+nu_y] = Auu_γy
+    A[row_uωy+1:row_uωy+nu_y, off_p+1:off_p+np]       = Aupy_ω
 
-    # Continuity rows [4nu+1:4nu+np]
-    A[4nu+1:4nu+np, off_uωx+1:off_uωx+nu] = Acx_ω
-    A[4nu+1:4nu+np, off_uγx+1:off_uγx+nu] = Acx_γ
-    A[4nu+1:4nu+np, off_uωy+1:off_uωy+nu] = Acy_ω
-    A[4nu+1:4nu+np, off_uγy+1:off_uγy+nu] = Acy_γ
+    # Tie y rows
+    A[row_uγy+1:row_uγy+nu_y, off_uγy+1:off_uγy+nu_y] = Mγy
+
+    # Continuity rows
+    con_rows = row_con+1:row_con+np
+    A[con_rows, off_uωx+1:off_uωx+nu_x] = Acx_ω
+    A[con_rows, off_uγx+1:off_uγx+nu_x] = Acx_γ
+    A[con_rows, off_uωy+1:off_uωy+nu_y] = Acy_ω
+    A[con_rows, off_uγy+1:off_uγy+nu_y] = Acy_γ
 
     # RHS b: per-component body force, tie from cut-cell BC, continuity zeros
     fᵤ = s.fluid.fᵤ
@@ -253,13 +273,15 @@ function assemble_stokes2D!(s::StokesMono)
 
     # Apply Dirichlet velocity BCs at domain boundaries for both components
     apply_velocity_dirichlet_2D!(A, b, s.bc_u[1], s.bc_u[2], s.fluid.mesh_u;
-                                 nu=nu,
-                                  uωx_off=off_uωx, uγx_off=off_uγx,
-                                  uωy_off=off_uωy, uγy_off=off_uγy)
+                                 nu_x=nu_x, nu_y=nu_y,
+                                 uωx_off=off_uωx, uγx_off=off_uγx,
+                                 uωy_off=off_uωy, uγy_off=off_uγy,
+                                 row_uωx_off=row_uωx, row_uγx_off=row_uγx,
+                                 row_uωy_off=row_uωy, row_uγy_off=row_uγy)
 
     # Fix pressure gauge or apply pressure Dirichlet at boundaries if provided
     apply_pressure_gauge!(A, b, s.bc_p, s.fluid.mesh_p;
-                          p_offset=off_p, np=np, row_start=4nu+1)
+                          p_offset=off_p, np=np, row_start=row_con+1)
 
     s.A = A
     s.b = b
@@ -267,7 +289,12 @@ function assemble_stokes2D!(s::StokesMono)
 end
 
 """
-    apply_velocity_dirichlet_2D!(A, b, bc_ux, bc_uy, mesh_u; nu, uωx_off, uγx_off, uωy_off, uγy_off)
+    apply_velocity_dirichlet_2D!(A, b, bc_ux, bc_uy, mesh_u;
+                                 nu_x, nu_y,
+                                 uωx_off, uγx_off,
+                                 uωy_off, uγy_off,
+                                 row_uωx_off, row_uγx_off,
+                                 row_uωy_off, row_uγy_off)
 
 Apply Dirichlet BC for 2D velocity components on their respective meshes.
 Enforces values on both uω and uγ rows for each component and boundary node.
@@ -276,7 +303,11 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
                                       bc_ux::BorderConditions,
                                       bc_uy::BorderConditions,
                                       mesh_u::NTuple{2,AbstractMesh};
-                                      nu::Int, uωx_off::Int, uγx_off::Int, uωy_off::Int, uγy_off::Int)
+                                      nu_x::Int, nu_y::Int,
+                                      uωx_off::Int, uγx_off::Int,
+                                      uωy_off::Int, uγy_off::Int,
+                                      row_uωx_off::Int, row_uγx_off::Int,
+                                      row_uωy_off::Int, row_uγy_off::Int)
     mesh_ux, mesh_uy = mesh_u
     nx = length(mesh_ux.nodes[1]); ny = length(mesh_ux.nodes[2])
     nx_y = length(mesh_uy.nodes[1]); ny_y = length(mesh_uy.nodes[2])
@@ -316,16 +347,16 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
             vy = eval_val(bcy, xs_y[i], ys_y[jy])
             if vx !== nothing
                 lix = LIx[i, jx]
-                r = lix
+                r = row_uωx_off + lix
                 A[r, :] .= 0.0; A[r, uωx_off + lix] = 1.0; b[r] = vx
-                rt = nu + lix
+                rt = row_uγx_off + lix
                 A[rt, :] .= 0.0; A[rt, uγx_off + lix] = 1.0; b[rt] = vx
             end
             if vy !== nothing
                 liy = LIy[i, jy]
-                r = 2nu + liy
+                r = row_uωy_off + liy
                 A[r, :] .= 0.0; A[r, uωy_off + liy] = 1.0; b[r] = vy
-                rt = 3nu + liy
+                rt = row_uγy_off + liy
                 A[rt, :] .= 0.0; A[rt, uγy_off + liy] = 1.0; b[rt] = vy
             end
         end
@@ -341,16 +372,16 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
             vy = eval_val(bcy, xs_y[iy], ys_y[j])
             if vx !== nothing
                 lix = LIx[ix, j]
-                r = lix
+                r = row_uωx_off + lix
                 A[r, :] .= 0.0; A[r, uωx_off + lix] = 1.0; b[r] = vx
-                rt = nu + lix
+                rt = row_uγx_off + lix
                 A[rt, :] .= 0.0; A[rt, uγx_off + lix] = 1.0; b[rt] = vx
             end
             if vy !== nothing
                 liy = LIy[iy, j]
-                r = 2nu + liy
+                r = row_uωy_off + liy
                 A[r, :] .= 0.0; A[r, uωy_off + liy] = 1.0; b[r] = vy
-                rt = 3nu + liy
+                rt = row_uγy_off + liy
                 A[rt, :] .= 0.0; A[rt, uγy_off + liy] = 1.0; b[rt] = vy
             end
         end
