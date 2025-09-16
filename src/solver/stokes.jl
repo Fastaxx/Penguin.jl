@@ -1,13 +1,14 @@
 """
     StokesMono
 
-Prototype solver scaffold for 1D monophasic Stokes (u, p) with separate grids.
+Prototype solver scaffold for monophasic Stokes (u, p) with separate grids.
+Velocity boundary conditions are provided per component (e.g., `(bc_ux, bc_uy)` in 2D).
 This is a placeholder: it builds a trivial identity system so examples can run.
 Actual discretization assembly (coupled momentum + continuity) will be added later.
 """
-mutable struct StokesMono
-    fluid::Fluid
-    bc_u::BorderConditions
+mutable struct StokesMono{N}
+    fluid::Fluid{N}
+    bc_u::NTuple{N, BorderConditions}
     bc_p::BorderConditions
     bc_cut::AbstractBoundary  # cut-cell/interface BC for uγ
 
@@ -17,27 +18,40 @@ mutable struct StokesMono
     ch::Vector{Any}
 end
 
-function StokesMono(fluid::Fluid,
-                    bc_u::BorderConditions,
+function StokesMono(fluid::Fluid{N},
+                    bc_u::NTuple{N,BorderConditions},
                     bc_p::BorderConditions,
                     bc_cut::AbstractBoundary;
-                    x0=zeros(0))
+                    x0=zeros(0)) where {N}
     # Number of velocity dofs per component (assumes identical grids per component)
     nu = prod(fluid.operator_u[1].size)
     np = prod(fluid.operator_p.size)
-    ncomp = length(fluid.operator_u)
     # Unknowns: [uω¹, uγ¹, ..., uωᴺ, uγᴺ, pω]
-    N = 2 * ncomp * nu + np
-    x_init = length(x0) == N ? x0 : zeros(N)
+    Ntot = 2 * N * nu + np
+    x_init = length(x0) == Ntot ? x0 : zeros(Ntot)
 
     # Allocate empty system; assembled later
-    A = spzeros(Float64, N, N)
-    b = zeros(N)
+    A = spzeros(Float64, Ntot, Ntot)
+    b = zeros(Ntot)
 
-    s = StokesMono(fluid, bc_u, bc_p, bc_cut,
-                   A, b, x_init, Any[])
+    s = StokesMono{N}(fluid, bc_u, bc_p, bc_cut,
+                      A, b, x_init, Any[])
     assemble_stokes!(s)
     return s
+end
+
+StokesMono(fluid::Fluid{1},
+           bc_u::BorderConditions,
+           bc_p::BorderConditions,
+           bc_cut::AbstractBoundary;
+           x0=zeros(0)) = StokesMono(fluid, (bc_u,), bc_p, bc_cut; x0=x0)
+
+function StokesMono(fluid::Fluid{N},
+                    bc_u_args::Vararg{BorderConditions,N};
+                    bc_p::BorderConditions,
+                    bc_cut::AbstractBoundary,
+                    x0=zeros(0)) where {N}
+    return StokesMono(fluid, Tuple(bc_u_args), bc_p, bc_cut; x0=x0)
 end
 
 """
@@ -127,7 +141,7 @@ function assemble_stokes1D!(s::StokesMono)
     b = vcat(b_mom, g_cut, b_con)
 
     # Apply Dirichlet velocity BC on uω at domain boundaries (1D)
-    apply_velocity_dirichlet!(A, b, s.bc_u, s.fluid.mesh_u[1];
+    apply_velocity_dirichlet!(A, b, s.bc_u[1], s.fluid.mesh_u[1];
                               nu=nu, uω_offset=0, uγ_offset=nu)
 
     # Fix pressure gauge using left pressure Dirichlet if provided, otherwise p[1]=0
@@ -238,10 +252,10 @@ function assemble_stokes2D!(s::StokesMono)
     b = vcat(b_mom_x, g_cut_x, b_mom_y, g_cut_y, b_con)
 
     # Apply Dirichlet velocity BCs at domain boundaries for both components
-    apply_velocity_dirichlet_2D!(A, b, s.bc_u, s.fluid.mesh_u;
+    apply_velocity_dirichlet_2D!(A, b, s.bc_u[1], s.bc_u[2], s.fluid.mesh_u;
                                  nu=nu,
-                                 uωx_off=off_uωx, uγx_off=off_uγx,
-                                 uωy_off=off_uωy, uγy_off=off_uγy)
+                                  uωx_off=off_uωx, uγx_off=off_uγx,
+                                  uωy_off=off_uωy, uγy_off=off_uγy)
 
     # Fix pressure gauge or apply pressure Dirichlet at boundaries if provided
     apply_pressure_gauge!(A, b, s.bc_p, s.fluid.mesh_p;
@@ -253,13 +267,14 @@ function assemble_stokes2D!(s::StokesMono)
 end
 
 """
-    apply_velocity_dirichlet_2D!(A, b, bc_u, mesh_u; nu, uωx_off, uγx_off, uωy_off, uγy_off)
+    apply_velocity_dirichlet_2D!(A, b, bc_ux, bc_uy, mesh_u; nu, uωx_off, uγx_off, uωy_off, uγy_off)
 
-Apply Dirichlet BC for 2D velocity components on domain boundaries.
-Enforces values on both uω and uγ rows for each boundary node.
+Apply Dirichlet BC for 2D velocity components on their respective meshes.
+Enforces values on both uω and uγ rows for each component and boundary node.
 """
 function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
-                                      bc_u::BorderConditions,
+                                      bc_ux::BorderConditions,
+                                      bc_uy::BorderConditions,
                                       mesh_u::NTuple{2,AbstractMesh};
                                       nu::Int, uωx_off::Int, uγx_off::Int, uωy_off::Int, uγy_off::Int)
     mesh_ux, mesh_uy = mesh_u
@@ -281,20 +296,24 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
     eval_val(bc, x, y) = (bc isa Dirichlet) ? (bc.value isa Function ? bc.value(x, y) : bc.value) : nothing
 
     # Gather BCs
-    bc_bottom = get(bc_u.borders, :bottom, nothing)
-    bc_top    = get(bc_u.borders, :top, nothing)
-    bc_left   = get(bc_u.borders, :left, nothing)
-    bc_right  = get(bc_u.borders, :right, nothing)
+    bcx_bottom = get(bc_ux.borders, :bottom, nothing)
+    bcy_bottom = get(bc_uy.borders, :bottom, nothing)
+    bcx_top    = get(bc_ux.borders, :top, nothing)
+    bcy_top    = get(bc_uy.borders, :top, nothing)
+    bcx_left   = get(bc_ux.borders, :left, nothing)
+    bcy_left   = get(bc_uy.borders, :left, nothing)
+    bcx_right  = get(bc_ux.borders, :right, nothing)
+    bcy_right  = get(bc_uy.borders, :right, nothing)
 
     # Apply along each side for x and y components using their respective meshes
     # Bottom/top (vary along x)
-    for jside in ((1, bc_bottom), (jtop, bc_top))
-        jx, bc = jside
-        isnothing(bc) && continue
+    for jside in ((1, bcx_bottom, bcy_bottom), (jtop, bcx_top, bcy_top))
+        jx, bcx, bcy = jside
+        isnothing(bcx) && isnothing(bcy) && continue
         jy = jx  # meshes share sizes (asserted above)
         for i in 1:nx
-            vx = eval_val(bc, xs_x[i], ys_x[jx])
-            vy = bc isa Dirichlet ? 0.0 : nothing
+            vx = eval_val(bcx, xs_x[i], ys_x[jx])
+            vy = eval_val(bcy, xs_y[i], ys_y[jy])
             if vx !== nothing
                 lix = LIx[i, jx]
                 r = lix
@@ -313,13 +332,13 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
     end
 
     # Left/right (vary along y)
-    for iside in ((1, bc_left), (iright, bc_right))
-        ix, bc = iside
-        isnothing(bc) && continue
+    for iside in ((1, bcx_left, bcy_left), (iright, bcx_right, bcy_right))
+        ix, bcx, bcy = iside
+        isnothing(bcx) && isnothing(bcy) && continue
         iy = ix
         for j in 1:ny
-            vx = eval_val(bc, xs_x[ix], ys_x[j])
-            vy = bc isa Dirichlet ? 0.0 : nothing
+            vx = eval_val(bcx, xs_x[ix], ys_x[j])
+            vy = eval_val(bcy, xs_y[iy], ys_y[j])
             if vx !== nothing
                 lix = LIx[ix, j]
                 r = lix

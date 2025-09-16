@@ -45,12 +45,17 @@ operator_p  = DiffusionOps(capacity_p)
 Umax = 1.0
 parabola = (x, y) -> 4Umax * (y - y0) * (Ly - (y - y0)) / (Ly^2)
 
-u_left  = Dirichlet(parabola)
-u_right = Dirichlet(parabola)
-u_bot   = Dirichlet((x, y)-> 0.0)
-u_top   = Dirichlet((x, y)-> 0.0)
-bc_u = BorderConditions(Dict(
-    :left=>u_left, :right=>u_right, :bottom=>u_bot, :top=>u_top
+ux_left  = Dirichlet(parabola)
+ux_right = Dirichlet(parabola)
+ux_bot   = Dirichlet((x, y)-> 0.0)
+ux_top   = Dirichlet((x, y)-> 0.0)
+bc_ux = BorderConditions(Dict(
+    :left=>ux_left, :right=>ux_right, :bottom=>ux_bot, :top=>ux_top
+))
+
+uy_zero = Dirichlet((x, y)-> 0.0)
+bc_uy = BorderConditions(Dict(
+    :left=>uy_zero, :right=>uy_zero, :bottom=>uy_zero, :top=>uy_zero
 ))
 
 # Pressure: gauge only (or set fixed value on one boundary if desired)
@@ -87,7 +92,7 @@ x0 = zeros(4*nu + np)
 ###########
 # Solver and solve
 ###########
-solver = StokesMono(fluid, bc_u, bc_p, u_bc; x0=x0)
+solver = StokesMono(fluid, (bc_ux, bc_uy), bc_p, u_bc; x0=x0)
 solve_StokesMono!(solver; method=Base.:\)
 
 println("2D Poiseuille solved. Unknowns = ", length(solver.x))
