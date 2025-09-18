@@ -11,7 +11,7 @@ cut-cell path. The cut/interface BC enforces u^γ = 0.
 ###########
 # Geometry
 ###########
-nx, ny = 128, 64
+nx, ny = 256, 128
 channel_length = 4.0
 channel_height = 1.0
 x0, y0 = -0.5, -0.5
@@ -136,3 +136,4 @@ contour!(ax_contours, xs, ys, speed; levels=10, color=:navy)
 contour!(ax_contours, xs, ys, [circle_body(x,y) for x in xs, y in ys]; levels=[0.0], color=:black, linewidth=2)
 
 display(fig)
+save("stokes2d_circle_flow.png", fig)
