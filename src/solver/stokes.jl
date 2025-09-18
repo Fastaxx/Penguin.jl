@@ -118,8 +118,8 @@ function assemble_stokes1D!(s::StokesMono)
     # Blocks for momentum (first n rows)
     Auu_ω = - (Iμ⁻¹ * op_u.G' * WG_uG)
     Auu_γ = - (Iμ⁻¹ * op_u.G' * WG_uH)
-    # Pressure gradient as adjoint of discrete divergence under W/V weights
-    Aup_ω = - ((op_p.G + op_p.H))
+    # Pressure gradient as adjoint of discrete divergence
+    Aup_ω =   ((op_p.G + op_p.H))
 
     # Blocks for cut-cell/interface BC on uγ (second n rows): I * uγ = g_cut
     Atu_ω =   spzeros(nu, nu)
@@ -218,8 +218,8 @@ function assemble_stokes2D!(s::StokesMono)
     row_offsets = cumsum([0; row_sizes])
     x_rows = row_offsets[1]+1:row_offsets[2]
     y_rows = row_offsets[2]+1:row_offsets[3]
-    Aupx_ω = -grad[x_rows, :]
-    Aupy_ω = -grad[y_rows, :]
+    Aupx_ω = grad[x_rows, :]
+    Aupy_ω = grad[y_rows, :]
 
     # Tie/interface identity
     Mγx = I(nu_x)

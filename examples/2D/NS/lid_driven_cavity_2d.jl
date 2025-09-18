@@ -145,3 +145,4 @@ lines!(ax_horiz, xs, v_center_horizontal)
 
 display(fig_profiles)
 save("stokes2d_lid_driven_cavity.png", fig)
+save("stokes2d_lidcavity_profile.png", fig_profiles)
