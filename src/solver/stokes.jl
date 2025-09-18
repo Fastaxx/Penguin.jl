@@ -162,7 +162,7 @@ function assemble_stokes1D!(s::StokesMono)
                               nu=nu, uω_offset=0, uγ_offset=nu)
 
     # Fix pressure gauge using left pressure Dirichlet if provided, otherwise p[1]=0
-    apply_pressure_gauge!(A, b, s.bc_p, s.fluid.mesh_p;
+    apply_pressure_gauge!(A, b, s.bc_p, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=2nu, np=np, row_start=2nu+1)
 
     s.A = A
@@ -297,7 +297,7 @@ function assemble_stokes2D!(s::StokesMono)
                                  row_uωy_off=row_uωy, row_uγy_off=row_uγy)
 
     # Fix pressure gauge or apply pressure Dirichlet at boundaries if provided
-    apply_pressure_gauge!(A, b, s.bc_p, s.fluid.mesh_p;
+    apply_pressure_gauge!(A, b, s.bc_p, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=off_p, np=np, row_start=row_con+1)
 
     s.A = A
@@ -459,13 +459,16 @@ function apply_velocity_dirichlet!(A::SparseMatrixCSC{Float64, Int}, b::Vector{F
 end
 
 """
-    apply_pressure_gauge!(A, b, bc_p, mesh_p; p_offset, np, row_start)
+    apply_pressure_gauge!(A, b, bc_p, mesh_p, capacity_p; p_offset, np, row_start)
 
-Fix one pressure dof: if left/right pressure Dirichlet exist, enforce them; otherwise set p[1]=0.
-Rows `row_start : row_start+np-1` are the continuity block.
+Fix one pressure dof: if left/right pressure Dirichlet exist, enforce them; otherwise
+set p=0 in the first fluid cell (based on capacity). Rows
+`row_start : row_start+np-1` belong to the continuity block.
 """
 function apply_pressure_gauge!(A::SparseMatrixCSC{Float64, Int}, b,
-                               bc_p::BorderConditions, mesh_p::AbstractMesh;
+                               bc_p::BorderConditions,
+                               mesh_p::AbstractMesh,
+                               capacity_p::AbstractCapacity;
                                p_offset::Int, np::Int, row_start::Int)
     # Determine gauge/Dirichlet values
     left_bc = get(bc_p.borders, :bottom, nothing)
@@ -489,15 +492,20 @@ function apply_pressure_gauge!(A::SparseMatrixCSC{Float64, Int}, b,
     rR = row_start + np - 1
 
     if vL !== nothing && vR !== nothing && np >= 2
-        A[rL, :] .= 0.0; A[rL, p_offset + 1]  = 1.0; b[rL] = vL
-        A[rR, :] .= 0.0; A[rR, p_offset + np] = 1.0; b[rR] = vR
+        A[rL, :] .= 0.0; A[rL, p_offset + 1]  = 1.0; b[rL] = Float64(vL)
+        A[rR, :] .= 0.0; A[rR, p_offset + np] = 1.0; b[rR] = Float64(vR)
     elseif vL !== nothing
-        A[rL, :] .= 0.0; A[rL, p_offset + 1] = 1.0; b[rL] = vL
+        A[rL, :] .= 0.0; A[rL, p_offset + 1] = 1.0; b[rL] = Float64(vL)
     elseif vR !== nothing
-        A[rR, :] .= 0.0; A[rR, p_offset + np] = 1.0; b[rR] = vR
+        A[rR, :] .= 0.0; A[rR, p_offset + np] = 1.0; b[rR] = Float64(vR)
     else
-        # No pressure Dirichlet; fix gauge p[1] = 0
-        A[rL, :] .= 0.0; A[rL, p_offset + 1] = 1.0; b[rL] = 0.0
+        diagV = diag(capacity_p.V)
+        tol = 1e-12
+        idx = findfirst(x -> x > tol, diagV)
+        gauge_col = p_offset + (idx === nothing ? 1 : idx)
+        A[rL, :] .= 0.0
+        A[rL, gauge_col] = 1.0
+        b[rL] = 0.0
     end
     return nothing
 end
