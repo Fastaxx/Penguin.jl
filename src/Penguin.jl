@@ -129,4 +129,7 @@ export write_vtk
 # Stokes / Navier–Stokes (prototype)
 include("solver/stokes.jl")
 export StokesMono, solve_StokesMono!, solve_StokesMono_unsteady!
+
+include("solver/stokes_diph.jl")
+export StokesDiph, solve_StokesDiph!
 end
