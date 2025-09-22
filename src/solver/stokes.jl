@@ -392,7 +392,7 @@ function assemble_stokes1D_unsteady!(s::StokesMono, data, Δt::Float64,
     b = vcat(rhs_mom, g_cut_next, zeros(np))
 
     apply_velocity_dirichlet!(A, b, s.bc_u[1], s.fluid.mesh_u[1];
-                              nu=nu, uω_offset=0, uγ_offset=nu)
+                              nu=nu, uω_offset=0, uγ_offset=nu, t=t_next)
 
     apply_pressure_gauge!(A, b, s.bc_p, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=2nu, np=np, row_start=2nu+1)
@@ -495,7 +495,8 @@ function assemble_stokes2D_unsteady!(s::StokesMono, data, Δt::Float64,
                                  uωx_off=off_uωx, uγx_off=off_uγx,
                                  uωy_off=off_uωy, uγy_off=off_uγy,
                                  row_uωx_off=row_uωx, row_uγx_off=row_uγx,
-                                 row_uωy_off=row_uωy, row_uγy_off=row_uγy)
+                                 row_uωy_off=row_uωy, row_uγy_off=row_uγy,
+                                 t=t_next)
 
     apply_pressure_gauge!(A, b, s.bc_p, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=off_p, np=np, row_start=row_con+1)
@@ -540,7 +541,8 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
                                       uωx_off::Int, uγx_off::Int,
                                       uωy_off::Int, uγy_off::Int,
                                       row_uωx_off::Int, row_uγx_off::Int,
-                                      row_uωy_off::Int, row_uγy_off::Int)
+                                      row_uωy_off::Int, row_uγy_off::Int,
+                                      t::Union{Nothing,Float64}=nothing)
     mesh_ux, mesh_uy = mesh_u
     nx = length(mesh_ux.nodes[1]); ny = length(mesh_ux.nodes[2])
     nx_y = length(mesh_uy.nodes[1]); ny_y = length(mesh_uy.nodes[2])
@@ -557,7 +559,17 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
     xs_y = mesh_uy.nodes[1]; ys_y = mesh_uy.nodes[2]
 
     # Helper: evaluate Dirichlet value
-    eval_val(bc, x, y) = (bc isa Dirichlet) ? (bc.value isa Function ? bc.value(x, y) : bc.value) : nothing
+    eval_val(bc, x, y) = (bc isa Dirichlet) ? (bc.value isa Function ? eval_boundary_func(bc.value, x, y) : bc.value) : nothing
+    eval_val(bc, x, y, t) = (bc isa Dirichlet) ? (bc.value isa Function ? bc.value(x, y, t) : bc.value) : nothing
+
+    # Helper to handle both time-dependent and time-independent boundary functions
+    function eval_boundary_func(f, x, y)
+        try
+            return f(x, y)  # Try 2-argument form first
+        catch MethodError
+            return f(x, y, 0.0)  # Fall back to 3-argument form with t=0
+        end
+    end
 
     # Gather BCs
     bcx_bottom = get(bc_ux.borders, :bottom, nothing)
@@ -576,8 +588,8 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
         isnothing(bcx) && isnothing(bcy) && continue
         jy = jx  # meshes share sizes (asserted above)
         for i in 1:nx
-            vx = eval_val(bcx, xs_x[i], ys_x[jx])
-            vy = eval_val(bcy, xs_y[i], ys_y[jy])
+            vx = t === nothing ? eval_val(bcx, xs_x[i], ys_x[jx]) : eval_val(bcx, xs_x[i], ys_x[jx], t)
+            vy = t === nothing ? eval_val(bcy, xs_y[i], ys_y[jy]) : eval_val(bcy, xs_y[i], ys_y[jy], t)
             if vx !== nothing
                 vx = Float64(vx)
                 lix = LIx[i, jx]
@@ -603,8 +615,8 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
         isnothing(bcx) && isnothing(bcy) && continue
         iy = ix
         for j in 1:ny
-            vx = eval_val(bcx, xs_x[ix], ys_x[j])
-            vy = eval_val(bcy, xs_y[iy], ys_y[j])
+            vx = t === nothing ? eval_val(bcx, xs_x[ix], ys_x[j]) : eval_val(bcx, xs_x[ix], ys_x[j], t)
+            vy = t === nothing ? eval_val(bcy, xs_y[iy], ys_y[j]) : eval_val(bcy, xs_y[iy], ys_y[j], t)
             if vx !== nothing
                 vx = Float64(vx)
                 lix = LIx[ix, j]
@@ -634,7 +646,8 @@ by replacing corresponding momentum and tie rows.
 """
 function apply_velocity_dirichlet!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Float64},
                                    bc_u::BorderConditions, mesh_u::AbstractMesh;
-                                   nu::Int, uω_offset::Int, uγ_offset::Int)
+                                   nu::Int, uω_offset::Int, uγ_offset::Int,
+                                   t::Union{Nothing,Float64}=nothing)
     # Determine boundary values
     left_bc  = get(bc_u.borders, :bottom, nothing)
     right_bc = get(bc_u.borders, :top, nothing)
@@ -648,7 +661,11 @@ function apply_velocity_dirichlet!(A::SparseMatrixCSC{Float64, Int}, b::Vector{F
         isnothing(bc) && return nothing
         bc isa Dirichlet || return nothing
         v = bc.value
-        return v isa Function ? v(x) : v
+        if v isa Function
+            return t === nothing ? v(x) : v(x, 0.0, t)  # 1D: y=0, but pass t if available
+        else
+            return v
+        end
     end
 
     vL = eval_value(left_bc,  xnodes[1])
