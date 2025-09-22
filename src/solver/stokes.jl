@@ -18,6 +18,127 @@ mutable struct StokesMono{N}
     ch::Vector{Any}
 end
 
+@inline function safe_build_source(op::AbstractOperators, f::Function, cap::Capacity, t::Union{Nothing,Float64})
+    if t === nothing
+        return build_source(op, f, cap)
+    end
+    try
+        return build_source(op, f, t, cap)
+    catch err
+        if err isa MethodError
+            return build_source(op, f, cap)
+        else
+            rethrow(err)
+        end
+    end
+end
+
+@inline function safe_build_g(op::AbstractOperators, bc::AbstractBoundary, cap::Capacity, t::Union{Nothing,Float64})
+    if t === nothing
+        return build_g_g(op, bc, cap)
+    end
+    try
+        return build_g_g(op, bc, cap, t)
+    catch err
+        if err isa MethodError
+            return build_g_g(op, bc, cap)
+        else
+            rethrow(err)
+        end
+    end
+end
+
+function stokes1D_blocks(s::StokesMono)
+    op_u = s.fluid.operator_u[1]
+    op_p = s.fluid.operator_p
+    cap_u = s.fluid.capacity_u[1]
+    cap_p = s.fluid.capacity_p
+
+    nu = prod(op_u.size)
+    np = prod(op_p.size)
+
+    μ = s.fluid.μ
+    μinv = μ isa Function ? (args...)->1.0/μ(args...) : 1.0/μ
+    Iμ⁻¹ = build_I_D(op_u, μinv, cap_u)
+
+    WG_uG = op_u.Wꜝ * op_u.G
+    WG_uH = op_u.Wꜝ * op_u.H
+
+    visc_uω = -(Iμ⁻¹ * op_u.G' * WG_uG)
+    visc_uγ = -(Iμ⁻¹ * op_u.G' * WG_uH)
+    grad = -((op_p.G + op_p.H))
+
+    div_uω = - (op_p.G' + op_p.H')
+    div_uγ =   (op_p.H')
+
+    ρ = s.fluid.ρ
+    Iρ = build_I_D(op_u, ρ, cap_u)
+    mass = Iρ * op_u.V
+
+    return (; nu, np, op_u, op_p, cap_u, cap_p,
+            visc_uω, visc_uγ, grad, div_uω, div_uγ,
+            tie = I(nu), mass, V = op_u.V)
+end
+
+function stokes2D_blocks(s::StokesMono)
+    ops_u = s.fluid.operator_u
+    caps_u = s.fluid.capacity_u
+    op_p = s.fluid.operator_p
+    cap_p = s.fluid.capacity_p
+
+    nu_x = prod(ops_u[1].size)
+    nu_y = prod(ops_u[2].size)
+    np = prod(op_p.size)
+
+    μ = s.fluid.μ
+    μinv = μ isa Function ? (args...)->1.0/μ(args...) : 1.0/μ
+    Iμ⁻¹_x = build_I_D(ops_u[1], μinv, caps_u[1])
+    Iμ⁻¹_y = build_I_D(ops_u[2], μinv, caps_u[2])
+
+    WGx_Gx = ops_u[1].Wꜝ * ops_u[1].G
+    WGx_Hx = ops_u[1].Wꜝ * ops_u[1].H
+    visc_x_ω = -(Iμ⁻¹_x * ops_u[1].G' * WGx_Gx)
+    visc_x_γ = -(Iμ⁻¹_x * ops_u[1].G' * WGx_Hx)
+
+    WGy_Gy = ops_u[2].Wꜝ * ops_u[2].G
+    WGy_Hy = ops_u[2].Wꜝ * ops_u[2].H
+    visc_y_ω = -(Iμ⁻¹_y * ops_u[2].G' * WGy_Gy)
+    visc_y_γ = -(Iμ⁻¹_y * ops_u[2].G' * WGy_Hy)
+
+    grad_full = (op_p.G + op_p.H)
+    total_grad_rows = size(grad_full, 1)
+    @assert total_grad_rows == nu_x + nu_y "Pressure gradient rows ($(total_grad_rows)) must match velocity DOFs ($(nu_x + nu_y))."
+
+    x_rows = 1:nu_x
+    y_rows = nu_x+1:nu_x+nu_y
+    grad_x = -grad_full[x_rows, :]
+    grad_y = -grad_full[y_rows, :]
+
+    Gp = op_p.G
+    Hp = op_p.H
+    Gp_x = Gp[x_rows, :]
+    Hp_x = Hp[x_rows, :]
+    Gp_y = Gp[y_rows, :]
+    Hp_y = Hp[y_rows, :]
+    div_x_ω = - (Gp_x' + Hp_x')
+    div_x_γ =   (Hp_x')
+    div_y_ω = - (Gp_y' + Hp_y')
+    div_y_γ =   (Hp_y')
+
+    ρ = s.fluid.ρ
+    mass_x = build_I_D(ops_u[1], ρ, caps_u[1]) * ops_u[1].V
+    mass_y = build_I_D(ops_u[2], ρ, caps_u[2]) * ops_u[2].V
+
+    return (; nu_x, nu_y, np,
+            op_ux = ops_u[1], op_uy = ops_u[2], op_p, cap_px = caps_u[1], cap_py = caps_u[2], cap_p,
+            visc_x_ω, visc_x_γ, visc_y_ω, visc_y_γ,
+            grad_x, grad_y,
+            div_x_ω, div_x_γ, div_y_ω, div_y_γ,
+            tie_x = I(nu_x), tie_y = I(nu_y),
+            mass_x, mass_y,
+            Vx = ops_u[1].V, Vy = ops_u[2].V)
+end
+
 @inline function enforce_dirichlet!(A::SparseMatrixCSC{Float64, Int}, b, row::Int, col::Int, value)
     val = Float64(value)
     for ptr in nzrange(A, col)
@@ -98,70 +219,36 @@ Continuity(n):-(G' + H') uω + H' uγ = 0
 Also applies Dirichlet BC on velocity at the two domain boundaries and fixes one pressure DOF (gauge).
 """
 function assemble_stokes1D!(s::StokesMono)
-    op_u = s.fluid.operator_u[1]
-    op_p = s.fluid.operator_p
-    cap_u = s.fluid.capacity_u[1]
-    cap_p = s.fluid.capacity_p
+    data = stokes1D_blocks(s)
+    nu = data.nu
+    np = data.np
 
-    nu = prod(op_u.size)
-    np = prod(op_p.size)
+    rows = 3 * nu
+    cols = 2 * nu + np
+    A = spzeros(Float64, rows, cols)
 
-    # Build 1/μ diagonal
-    μ = s.fluid.μ
-    μinv = μ isa Function ? (args...)->1.0/μ(args...) : 1.0/μ
-    Iμ⁻¹ = build_I_D(op_u, μinv, cap_u)
+    # Momentum block rows
+    A[1:nu, 1:nu]         = data.visc_uω
+    A[1:nu, nu+1:2nu]     = data.visc_uγ
+    A[1:nu, 2nu+1:2nu+np] = data.grad
 
-    # Convenience products
-    WG_uG = op_u.Wꜝ * op_u.G
-    WG_uH = op_u.Wꜝ * op_u.H
+    # Tie rows enforce uγ = g_cut
+    A[nu+1:2nu, 1:nu]   .= 0.0
+    A[nu+1:2nu, nu+1:2nu] = data.tie
 
-    # Blocks for momentum (first n rows)
-    Auu_ω = - (Iμ⁻¹ * op_u.G' * WG_uG)
-    Auu_γ = - (Iμ⁻¹ * op_u.G' * WG_uH)
-    # Pressure gradient as adjoint of discrete divergence
-    Aup_ω =   ((op_p.G + op_p.H))
-
-    # Blocks for cut-cell/interface BC on uγ (second n rows): I * uγ = g_cut
-    Atu_ω =   spzeros(nu, nu)
-    Atu_γ =   I(nu)
-    Atp_ω =   spzeros(nu, np)
-
-    # Blocks for continuity (third n rows)
-    Acu_ω = - (op_p.G' + op_p.H')
-    Acu_γ =   (op_p.H')
-    Acp_ω =   spzeros(np, np)
-
-    # Assemble full A with rows = 3*nu, cols = 2*nu + np
-    N = nu + nu + np
-    rows = 3*nu
-    A = spzeros(Float64, rows, N)
-    # Momentum rows
-    A[1:nu, 1:nu]           = Auu_ω
-    A[1:nu, nu+1:2nu]       = Auu_γ
-    A[1:nu, 2nu+1:2nu+np]   = Aup_ω
-    # Tie rows
-    A[nu+1:2nu, 1:nu]       = Atu_ω
-    A[nu+1:2nu, nu+1:2nu]   = Atu_γ
-    A[nu+1:2nu, 2nu+1:2nu+np] = Atp_ω
     # Continuity rows
-    A[2nu+1:3nu, 1:nu]      = Acu_ω
-    A[2nu+1:3nu, nu+1:2nu]  = Acu_γ
-    # Note: continuity has no direct pressure term in this formulation
+    A[2nu+1:3nu, 1:nu]     = data.div_uω
+    A[2nu+1:3nu, nu+1:2nu] = data.div_uγ
 
-    # Assemble RHS b
-    fᵤ = s.fluid.fᵤ
-    fₒ = build_source(op_u, fᵤ, cap_u)
-    b_mom = op_u.V * fₒ
-    # Build cut-cell RHS from provided boundary condition (Dirichlet for now)
-    g_cut = build_g_g(op_u, s.bc_cut, cap_u)
-    b_con = zeros(nu)
+    f_vec = safe_build_source(data.op_u, s.fluid.fᵤ, data.cap_u, nothing)
+    b_mom = data.V * f_vec
+    g_cut = safe_build_g(data.op_u, s.bc_cut, data.cap_u, nothing)
+    b_con = zeros(np)
     b = vcat(b_mom, g_cut, b_con)
 
-    # Apply Dirichlet velocity BC on uω at domain boundaries (1D)
     apply_velocity_dirichlet!(A, b, s.bc_u[1], s.fluid.mesh_u[1];
                               nu=nu, uω_offset=0, uγ_offset=nu)
 
-    # Fix pressure gauge using left pressure Dirichlet if provided, otherwise p[1]=0
     apply_pressure_gauge!(A, b, s.bc_p, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=2nu, np=np, row_start=2nu+1)
 
@@ -177,114 +264,57 @@ Assemble the steady 2D Stokes system with unknowns [uωx; uγx; uωy; uγy; pω]
 Momentum for each component uses μ∇²; continuity enforces ∇·u = 0.
 """
 function assemble_stokes2D!(s::StokesMono)
-    # Per-component velocity operators and capacities
-    ops_u = s.fluid.operator_u
-    caps_u = s.fluid.capacity_u
-    op_p = s.fluid.operator_p
-    cap_p = s.fluid.capacity_p
-
-    @assert length(ops_u) == 2 "assemble_stokes2D! expects Fluid with 2 velocity components"
-
-    nu_x = prod(ops_u[1].size)
-    nu_y = prod(ops_u[2].size)
-    nu_components = (nu_x, nu_y)
+    data = stokes2D_blocks(s)
+    nu_x = data.nu_x
+    nu_y = data.nu_y
     sum_nu = nu_x + nu_y
-    np = prod(op_p.size)
+    np = data.np
 
-    # Build 1/μ diagonals per component
-    μ = s.fluid.μ
-    μinv = μ isa Function ? (args...)->1.0/μ(args...) : 1.0/μ
-    Iμ⁻¹_x = build_I_D(ops_u[1], μinv, caps_u[1])
-    Iμ⁻¹_y = build_I_D(ops_u[2], μinv, caps_u[2])
-
-    # Viscous/tie blocks using per-component operators
-    WGx_Gx = ops_u[1].Wꜝ * ops_u[1].G
-    WGx_Hx = ops_u[1].Wꜝ * ops_u[1].H
-    Auu_ωx = - (Iμ⁻¹_x * ops_u[1].G' * WGx_Gx)
-    Auu_γx = - (Iμ⁻¹_x * ops_u[1].G' * WGx_Hx)
-
-    WGy_Gy = ops_u[2].Wꜝ * ops_u[2].G
-    WGy_Hy = ops_u[2].Wꜝ * ops_u[2].H
-    Auu_ωy = - (Iμ⁻¹_y * ops_u[2].G' * WGy_Gy)
-    Auu_γy = - (Iμ⁻¹_y * ops_u[2].G' * WGy_Hy)
-
-    # Pressure gradient coupling blocks (directional picks from p-operators)
-    # Use the same discrete form as 1D: -(G + H) acting on pω, partitioned per component.
-    Gp = op_p.G; Hp = op_p.H
-    grad = Gp + Hp
-    total_grad_rows = size(grad, 1)
-    @assert total_grad_rows == sum(nu_components) "Pressure gradient rows ($(total_grad_rows)) must match total velocity DOFs ($(sum(nu_components)))."
-    row_sizes = collect(nu_components)
-    row_offsets = cumsum([0; row_sizes])
-    x_rows = row_offsets[1]+1:row_offsets[2]
-    y_rows = row_offsets[2]+1:row_offsets[3]
-    Aupx_ω = grad[x_rows, :]
-    Aupy_ω = grad[y_rows, :]
-
-    # Tie/interface identity
-    Mγx = I(nu_x)
-    Mγy = I(nu_y)
-
-    # Continuity rows: use divergence form similar to 1D with p-operator as test space
-    Gp_x = Gp[x_rows, :]
-    Hp_x = Hp[x_rows, :]
-    Gp_y = Gp[y_rows, :]
-    Hp_y = Hp[y_rows, :]
-    Acx_ω = - (Gp_x' + Hp_x')
-    Acx_γ =   (Hp_x')
-    Acy_ω = - (Gp_y' + Hp_y')
-    Acy_γ =   (Hp_y')
-
-    # Assemble full matrix A
     rows = 2 * sum_nu + np
     cols = 2 * sum_nu + np
     A = spzeros(Float64, rows, cols)
 
-    # Offsets
     off_uωx = 0
     off_uγx = nu_x
     off_uωy = 2 * nu_x
     off_uγy = 2 * nu_x + nu_y
     off_p   = 2 * sum_nu
 
-    # Row offsets
     row_uωx = 0
     row_uγx = nu_x
     row_uωy = 2 * nu_x
     row_uγy = 2 * nu_x + nu_y
     row_con = 2 * sum_nu
 
-    # Momentum x rows [1:nu_x]
-    A[row_uωx+1:row_uωx+nu_x, off_uωx+1:off_uωx+nu_x] = Auu_ωx
-    A[row_uωx+1:row_uωx+nu_x, off_uγx+1:off_uγx+nu_x] = Auu_γx
-    A[row_uωx+1:row_uωx+nu_x, off_p+1:off_p+np]       = Aupx_ω
+    # Momentum x-component rows
+    A[row_uωx+1:row_uωx+nu_x, off_uωx+1:off_uωx+nu_x] = data.visc_x_ω
+    A[row_uωx+1:row_uωx+nu_x, off_uγx+1:off_uγx+nu_x] = data.visc_x_γ
+    A[row_uωx+1:row_uωx+nu_x, off_p+1:off_p+np]       = data.grad_x
 
     # Tie x rows
-    A[row_uγx+1:row_uγx+nu_x, off_uγx+1:off_uγx+nu_x] = Mγx
+    A[row_uγx+1:row_uγx+nu_x, off_uγx+1:off_uγx+nu_x] = data.tie_x
 
-    # Momentum y rows
-    A[row_uωy+1:row_uωy+nu_y, off_uωy+1:off_uωy+nu_y] = Auu_ωy
-    A[row_uωy+1:row_uωy+nu_y, off_uγy+1:off_uγy+nu_y] = Auu_γy
-    A[row_uωy+1:row_uωy+nu_y, off_p+1:off_p+np]       = Aupy_ω
+    # Momentum y-component rows
+    A[row_uωy+1:row_uωy+nu_y, off_uωy+1:off_uωy+nu_y] = data.visc_y_ω
+    A[row_uωy+1:row_uωy+nu_y, off_uγy+1:off_uγy+nu_y] = data.visc_y_γ
+    A[row_uωy+1:row_uωy+nu_y, off_p+1:off_p+np]       = data.grad_y
 
     # Tie y rows
-    A[row_uγy+1:row_uγy+nu_y, off_uγy+1:off_uγy+nu_y] = Mγy
+    A[row_uγy+1:row_uγy+nu_y, off_uγy+1:off_uγy+nu_y] = data.tie_y
 
     # Continuity rows
     con_rows = row_con+1:row_con+np
-    A[con_rows, off_uωx+1:off_uωx+nu_x] = Acx_ω
-    A[con_rows, off_uγx+1:off_uγx+nu_x] = Acx_γ
-    A[con_rows, off_uωy+1:off_uωy+nu_y] = Acy_ω
-    A[con_rows, off_uγy+1:off_uγy+nu_y] = Acy_γ
+    A[con_rows, off_uωx+1:off_uωx+nu_x] = data.div_x_ω
+    A[con_rows, off_uγx+1:off_uγx+nu_x] = data.div_x_γ
+    A[con_rows, off_uωy+1:off_uωy+nu_y] = data.div_y_ω
+    A[con_rows, off_uγy+1:off_uγy+nu_y] = data.div_y_γ
 
-    # RHS b: per-component body force, tie from cut-cell BC, continuity zeros
-    fᵤ = s.fluid.fᵤ
-    fₒx = build_source(ops_u[1], fᵤ, caps_u[1])
-    fₒy = build_source(ops_u[2], fᵤ, caps_u[2])
-    b_mom_x = ops_u[1].V * fₒx
-    b_mom_y = ops_u[2].V * fₒy
-    g_cut_x = build_g_g(ops_u[1], s.bc_cut, caps_u[1])
-    g_cut_y = build_g_g(ops_u[2], s.bc_cut, caps_u[2])
+    fₒx = safe_build_source(data.op_ux, s.fluid.fᵤ, data.cap_px, nothing)
+    fₒy = safe_build_source(data.op_uy, s.fluid.fᵤ, data.cap_py, nothing)
+    b_mom_x = data.Vx * fₒx
+    b_mom_y = data.Vy * fₒy
+    g_cut_x = safe_build_g(data.op_ux, s.bc_cut, data.cap_px, nothing)
+    g_cut_y = safe_build_g(data.op_uy, s.bc_cut, data.cap_py, nothing)
     b_con = zeros(np)
     b = vcat(b_mom_x, g_cut_x, b_mom_y, g_cut_y, b_con)
 
@@ -302,6 +332,192 @@ function assemble_stokes2D!(s::StokesMono)
 
     s.A = A
     s.b = b
+    return nothing
+end
+
+@inline function scheme_to_theta(scheme::Symbol)
+    s = lowercase(String(scheme))
+    if s in ("cn", "crank_nicolson", "cranknicolson")
+        return 0.5
+    elseif s in ("be", "backward_euler", "implicit_euler")
+        return 1.0
+    else
+        error("Unsupported time scheme $(scheme). Use :CN or :BE.")
+    end
+end
+
+function assemble_stokes1D_unsteady!(s::StokesMono, data, Δt::Float64,
+                                     x_prev::AbstractVector{<:Real},
+                                     p_half_prev::AbstractVector{<:Real},
+                                     t_prev::Float64, t_next::Float64,
+                                     θ::Float64)
+    nu = data.nu
+    np = data.np
+
+    rows = 3 * nu
+    cols = 2 * nu + np
+    A = spzeros(Float64, rows, cols)
+
+    mass_dt = (1.0 / Δt) * data.mass
+    θc = 1.0 - θ
+
+    # Momentum block
+    A[1:nu, 1:nu]         = mass_dt - θ * data.visc_uω
+    A[1:nu, nu+1:2nu]     = -θ * data.visc_uγ
+    A[1:nu, 2nu+1:2nu+np] = data.grad
+
+    # Tie and continuity blocks
+    A[nu+1:2nu, 1:nu]       .= 0.0
+    A[nu+1:2nu, nu+1:2nu]   = data.tie
+    A[2nu+1:3nu, 1:nu]      = data.div_uω
+    A[2nu+1:3nu, nu+1:2nu]  = data.div_uγ
+
+    u_prev_ω = view(x_prev, 1:nu)
+    u_prev_γ = view(x_prev, nu+1:2nu)
+
+    f_prev = safe_build_source(data.op_u, s.fluid.fᵤ, data.cap_u, t_prev)
+    f_next = safe_build_source(data.op_u, s.fluid.fᵤ, data.cap_u, t_next)
+    load = data.V * (θ .* f_next .+ θc .* f_prev)
+
+    rhs_mom = mass_dt * u_prev_ω
+    rhs_mom .+= θc * (data.visc_uω * u_prev_ω + data.visc_uγ * u_prev_γ)
+
+    grad_prev_coeff = θ == 1.0 ? 0.0 : (1.0 - θ) / θ
+    if grad_prev_coeff != 0.0
+        rhs_mom .+= grad_prev_coeff * (data.grad * p_half_prev)
+    end
+
+    rhs_mom .+= load
+    g_cut_next = safe_build_g(data.op_u, s.bc_cut, data.cap_u, t_next)
+    b = vcat(rhs_mom, g_cut_next, zeros(np))
+
+    apply_velocity_dirichlet!(A, b, s.bc_u[1], s.fluid.mesh_u[1];
+                              nu=nu, uω_offset=0, uγ_offset=nu)
+
+    apply_pressure_gauge!(A, b, s.bc_p, s.fluid.mesh_p, s.fluid.capacity_p;
+                          p_offset=2nu, np=np, row_start=2nu+1)
+
+    s.A = A
+    s.b = b
+    return nothing
+end
+
+function assemble_stokes2D_unsteady!(s::StokesMono, data, Δt::Float64,
+                                     x_prev::AbstractVector{<:Real},
+                                     p_half_prev::AbstractVector{<:Real},
+                                     t_prev::Float64, t_next::Float64,
+                                     θ::Float64)
+    nu_x = data.nu_x
+    nu_y = data.nu_y
+    sum_nu = nu_x + nu_y
+    np = data.np
+
+    rows = 2 * sum_nu + np
+    cols = 2 * sum_nu + np
+    A = spzeros(Float64, rows, cols)
+
+    mass_x_dt = (1.0 / Δt) * data.mass_x
+    mass_y_dt = (1.0 / Δt) * data.mass_y
+    θc = 1.0 - θ
+
+    off_uωx = 0
+    off_uγx = nu_x
+    off_uωy = 2 * nu_x
+    off_uγy = 2 * nu_x + nu_y
+    off_p   = 2 * sum_nu
+
+    row_uωx = 0
+    row_uγx = nu_x
+    row_uωy = 2 * nu_x
+    row_uγy = 2 * nu_x + nu_y
+    row_con = 2 * sum_nu
+
+    # Momentum x-component
+    A[row_uωx+1:row_uωx+nu_x, off_uωx+1:off_uωx+nu_x] = mass_x_dt - θ * data.visc_x_ω
+    A[row_uωx+1:row_uωx+nu_x, off_uγx+1:off_uγx+nu_x] = -θ * data.visc_x_γ
+    A[row_uωx+1:row_uωx+nu_x, off_p+1:off_p+np]       = data.grad_x
+
+    # Tie x rows
+    A[row_uγx+1:row_uγx+nu_x, off_uγx+1:off_uγx+nu_x] = data.tie_x
+
+    # Momentum y-component
+    A[row_uωy+1:row_uωy+nu_y, off_uωy+1:off_uωy+nu_y] = mass_y_dt - θ * data.visc_y_ω
+    A[row_uωy+1:row_uωy+nu_y, off_uγy+1:off_uγy+nu_y] = -θ * data.visc_y_γ
+    A[row_uωy+1:row_uωy+nu_y, off_p+1:off_p+np]       = data.grad_y
+
+    # Tie y rows
+    A[row_uγy+1:row_uγy+nu_y, off_uγy+1:off_uγy+nu_y] = data.tie_y
+
+    # Continuity rows
+    con_rows = row_con+1:row_con+np
+    A[con_rows, off_uωx+1:off_uωx+nu_x] = data.div_x_ω
+    A[con_rows, off_uγx+1:off_uγx+nu_x] = data.div_x_γ
+    A[con_rows, off_uωy+1:off_uωy+nu_y] = data.div_y_ω
+    A[con_rows, off_uγy+1:off_uγy+nu_y] = data.div_y_γ
+
+    uωx_prev = view(x_prev, off_uωx+1:off_uωx+nu_x)
+    uγx_prev = view(x_prev, off_uγx+1:off_uγx+nu_x)
+    uωy_prev = view(x_prev, off_uωy+1:off_uωy+nu_y)
+    uγy_prev = view(x_prev, off_uγy+1:off_uγy+nu_y)
+
+    f_prev_x = safe_build_source(data.op_ux, s.fluid.fᵤ, data.cap_px, t_prev)
+    f_next_x = safe_build_source(data.op_ux, s.fluid.fᵤ, data.cap_px, t_next)
+    load_x = data.Vx * (θ .* f_next_x .+ θc .* f_prev_x)
+
+    f_prev_y = safe_build_source(data.op_uy, s.fluid.fᵤ, data.cap_py, t_prev)
+    f_next_y = safe_build_source(data.op_uy, s.fluid.fᵤ, data.cap_py, t_next)
+    load_y = data.Vy * (θ .* f_next_y .+ θc .* f_prev_y)
+
+    rhs_mom_x = mass_x_dt * uωx_prev
+    rhs_mom_x .+= θc * (data.visc_x_ω * uωx_prev + data.visc_x_γ * uγx_prev)
+
+    grad_prev_coeff = θ == 1.0 ? 0.0 : (1.0 - θ) / θ
+    if grad_prev_coeff != 0.0
+        rhs_mom_x .+= grad_prev_coeff * (data.grad_x * p_half_prev)
+    end
+
+    rhs_mom_x .+= load_x
+
+    rhs_mom_y = mass_y_dt * uωy_prev
+    rhs_mom_y .+= θc * (data.visc_y_ω * uωy_prev + data.visc_y_γ * uγy_prev)
+    if grad_prev_coeff != 0.0
+        rhs_mom_y .+= grad_prev_coeff * (data.grad_y * p_half_prev)
+    end
+    rhs_mom_y .+= load_y
+
+    g_cut_x = safe_build_g(data.op_ux, s.bc_cut, data.cap_px, t_next)
+    g_cut_y = safe_build_g(data.op_uy, s.bc_cut, data.cap_py, t_next)
+
+    b = vcat(rhs_mom_x, g_cut_x, rhs_mom_y, g_cut_y, zeros(np))
+
+    apply_velocity_dirichlet_2D!(A, b, s.bc_u[1], s.bc_u[2], s.fluid.mesh_u;
+                                 nu_x=nu_x, nu_y=nu_y,
+                                 uωx_off=off_uωx, uγx_off=off_uγx,
+                                 uωy_off=off_uωy, uγy_off=off_uγy,
+                                 row_uωx_off=row_uωx, row_uγx_off=row_uγx,
+                                 row_uωy_off=row_uωy, row_uγy_off=row_uγy)
+
+    apply_pressure_gauge!(A, b, s.bc_p, s.fluid.mesh_p, s.fluid.capacity_p;
+                          p_offset=off_p, np=np, row_start=row_con+1)
+
+    s.A = A
+    s.b = b
+    return nothing
+end
+
+function assemble_stokes_unsteady!(s::StokesMono, blocks, Δt::Float64,
+                                   x_prev::AbstractVector{<:Real},
+                                   p_half_prev::AbstractVector{<:Real},
+                                   t_prev::Float64, t_next::Float64,
+                                   θ::Float64)
+    N = length(s.fluid.operator_u)
+    if N == 1
+        assemble_stokes1D_unsteady!(s, blocks, Δt, x_prev, p_half_prev, t_prev, t_next, θ)
+    elseif N == 2
+        assemble_stokes2D_unsteady!(s, blocks, Δt, x_prev, p_half_prev, t_prev, t_next, θ)
+    else
+        error("Unsteady Stokes assembly not implemented for N=$(N)")
+    end
     return nothing
 end
 
@@ -470,63 +686,90 @@ function apply_pressure_gauge!(A::SparseMatrixCSC{Float64, Int}, b,
                                mesh_p::AbstractMesh,
                                capacity_p::AbstractCapacity;
                                p_offset::Int, np::Int, row_start::Int)
-    # Determine gauge/Dirichlet values
-    left_bc = get(bc_p.borders, :bottom, nothing)
-    right_bc = get(bc_p.borders, :top, nothing)
     xnodes = mesh_p.nodes[1]
-    vL = if (left_bc isa Dirichlet)
-        v = left_bc.value
-        v isa Function ? v(xnodes[1]) : v
-    else
-        nothing
-    end
-    vR = if (right_bc isa Dirichlet)
-        v = right_bc.value
-        v isa Function ? v(xnodes[end]) : v
-    else
-        nothing
+    ynodes = length(mesh_p.nodes) >= 2 ? mesh_p.nodes[2] : [0.0]
+    nx, ny = length(xnodes), length(ynodes)
+    LI = LinearIndices((nx, ny))
+
+    fixed = Dict{Int,Float64}()
+
+    eval_dirichlet(bc::AbstractBoundary, x, y) = bc isa Dirichlet ? begin
+        val = bc.value
+        if val isa Function
+            try
+                return val(x, y)
+            catch
+                try
+                    return val(x)
+                catch
+                    return val()
+                end
+            end
+        else
+            return val
+        end
+    end : nothing
+
+    for (side, bc) in bc_p.borders
+        bc isa Dirichlet || continue
+        if side == :left
+            for j in 1:ny
+                idx = LI[1, j]
+                val = eval_dirichlet(bc, xnodes[1], ynodes[j])
+                val === nothing && continue
+                fixed[idx] = Float64(val)
+            end
+        elseif side == :right
+            for j in 1:ny
+                idx = LI[nx, j]
+                val = eval_dirichlet(bc, xnodes[end], ynodes[j])
+                val === nothing && continue
+                fixed[idx] = Float64(val)
+            end
+        elseif side == :bottom && ny > 1
+            for i in 1:nx
+                idx = LI[i, 1]
+                val = eval_dirichlet(bc, xnodes[i], ynodes[1])
+                val === nothing && continue
+                fixed[idx] = Float64(val)
+            end
+        elseif side == :top && ny > 1
+            for i in 1:nx
+                idx = LI[i, ny]
+                val = eval_dirichlet(bc, xnodes[i], ynodes[end])
+                val === nothing && continue
+                fixed[idx] = Float64(val)
+            end
+        end
     end
 
-    # Row indices for continuity block
-    rL = row_start
-    rR = row_start + np - 1
-
-    if vL !== nothing && vR !== nothing && np >= 2
-        A[rL, :] .= 0.0; A[rL, p_offset + 1]  = 1.0; b[rL] = Float64(vL)
-        A[rR, :] .= 0.0; A[rR, p_offset + np] = 1.0; b[rR] = Float64(vR)
-    elseif vL !== nothing
-        A[rL, :] .= 0.0; A[rL, p_offset + 1] = 1.0; b[rL] = Float64(vL)
-    elseif vR !== nothing
-        A[rR, :] .= 0.0; A[rR, p_offset + np] = 1.0; b[rR] = Float64(vR)
+    if !isempty(fixed)
+        for (idx, val) in fixed
+            row = row_start + idx - 1
+            col = p_offset + idx
+            enforce_dirichlet!(A, b, row, col, val)
+        end
     else
         diagV = diag(capacity_p.V)
         tol = 1e-12
         idx = findfirst(x -> x > tol, diagV)
-        gauge_col = p_offset + (idx === nothing ? 1 : idx)
-        A[rL, :] .= 0.0
-        A[rL, gauge_col] = 1.0
-        b[rL] = 0.0
+        gauge_idx = idx === nothing ? 1 : idx
+        row = row_start + gauge_idx - 1
+        col = p_offset + gauge_idx
+        enforce_dirichlet!(A, b, row, col, 0.0)
     end
     return nothing
 end
 
-function solve_StokesMono!(s::StokesMono; method=Base.:\, algorithm=nothing, kwargs...)
-    println("[StokesMono] Assembling steady Stokes and solving (fully coupled)")
-    # Re-assemble in case anything changed
-    assemble_stokes!(s)
-
-    # Remove zero rows and columns using a common index set to keep A square
+function solve_stokes_linear_system!(s::StokesMono; method=Base.:\, algorithm=nothing, kwargs...)
     Ared, bred, keep_idx_rows, keep_idx_cols = remove_zero_rows_cols!(s.A, s.b)
 
-    # Choose solver path
     xred = nothing
     if algorithm !== nothing
-        # Use LinearSolve.jl algorithm if provided
         prob = LinearSolve.LinearProblem(Ared, bred)
         sol = LinearSolve.solve(prob, algorithm; kwargs...)
         xred = sol.u
     elseif method === Base.:\
-        # Direct factorization/backsolve with singular fallback
         try
             xred = Ared \ bred
         catch e
@@ -538,7 +781,6 @@ function solve_StokesMono!(s::StokesMono; method=Base.:\, algorithm=nothing, kwa
             end
         end
     else
-        # IterativeSolvers.jl method (e.g., gmres, bicgstab, bicgstabl)
         kwargs_nt = (; kwargs...)
         log = get(kwargs_nt, :log, false)
         if log
@@ -549,9 +791,87 @@ function solve_StokesMono!(s::StokesMono; method=Base.:\, algorithm=nothing, kwa
         end
     end
 
-    # Reconstruct full solution in original column space
     N = size(s.A, 2)
     s.x = zeros(N)
     s.x[keep_idx_cols] = xred
     return s
+end
+
+function solve_StokesMono!(s::StokesMono; method=Base.:\, algorithm=nothing, kwargs...)
+    println("[StokesMono] Assembling steady Stokes and solving (fully coupled)")
+    # Re-assemble in case anything changed
+    assemble_stokes!(s)
+    solve_stokes_linear_system!(s; method=method, algorithm=algorithm, kwargs...)
+    return s
+end
+
+"""
+    solve_StokesMono_unsteady!(s::StokesMono; Δt, T_end, scheme=:CN, method=Base, algorithm=nothing, store_states=true, kwargs...)
+
+Solve the unsteady Stokes problem using an implicit θ-scheme (Backward Euler or
+Crank–Nicolson). Returns the sampled times and solution snapshots when
+`store_states=true`.
+"""
+function solve_StokesMono_unsteady!(s::StokesMono; Δt::Float64, T_end::Float64,
+                                    scheme::Symbol=:CN, method=Base.:\,
+                                    algorithm=nothing, store_states::Bool=true,
+                                    kwargs...)
+    θ = scheme_to_theta(scheme)
+    N = length(s.fluid.operator_u)
+    blocks = if N == 1
+        stokes1D_blocks(s)
+    elseif N == 2
+        stokes2D_blocks(s)
+    else
+        error("StokesMono unsteady solver not implemented for N=$(N)")
+    end
+
+    if N == 1
+        p_offset = 2 * blocks.nu
+        np = blocks.np
+        Ntot = p_offset + np
+    else
+        p_offset = 2 * (blocks.nu_x + blocks.nu_y)
+        np = blocks.np
+        Ntot = p_offset + np
+    end
+
+    x_prev = if length(s.x) == Ntot
+        copy(s.x)
+    else
+        zeros(Ntot)
+    end
+
+    p_half_prev = zeros(np)
+    if length(s.x) == Ntot
+        p_half_prev .= s.x[p_offset+1:p_offset+np]
+    end
+
+    histories = store_states ? Vector{Vector{Float64}}() : Vector{Vector{Float64}}()
+    if store_states
+        push!(histories, copy(x_prev))
+    end
+    times = Float64[0.0]
+
+    t = 0.0
+    println("[StokesMono] Starting unsteady solve up to T=$(T_end) with Δt=$(Δt) and θ=$(θ)")
+    while t < T_end - 1e-12 * max(1.0, T_end)
+        dt_step = min(Δt, T_end - t)
+        t_next = t + dt_step
+
+        assemble_stokes_unsteady!(s, blocks, dt_step, x_prev, p_half_prev, t, t_next, θ)
+        solve_stokes_linear_system!(s; method=method, algorithm=algorithm, kwargs...)
+
+        x_prev = copy(s.x)
+        p_half_prev .= s.x[p_offset+1:p_offset+np]
+        push!(times, t_next)
+        if store_states
+            push!(histories, x_prev)
+        end
+        println("[StokesMono] t=$(round(t_next; digits=6)) max|state|=$(maximum(abs, x_prev))")
+
+        t = t_next
+    end
+
+    return times, histories
 end
