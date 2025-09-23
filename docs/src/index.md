@@ -10,6 +10,7 @@ Julia Implementation of Cut-Cell method for (now) :
 - Monophasic or Diphasic Problems
 - Darcy Flow Solver
 - Non-prescribed Interface motion (1D, 2D)
+- Fully-Coupled Stokes (mono) Solver
 
 Under development :
 - Non-prescribed Interface motion in 3D

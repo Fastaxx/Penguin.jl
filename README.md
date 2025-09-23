@@ -10,11 +10,13 @@ Cut-cell finite-volume solvers for heat and mass transfer with moving interfaces
 
 Penguin implements cut-cell/embedded-boundary discretizations, front-tracking utilities, and a set of steady/unsteady solvers for diffusion, advection–diffusion, Darcy flow, and Stefan-type phase change. It provides plotting/animation helpers and VTK export for post-processing.
 
+The repository now also ships a prototype fully coupled Stokes solver (monophasic and diphasic variants) together with several canonical 1D/2D examples (Poiseuille, Couette, lid-driven cavity, circle obstacle) and a manufactured Taylor–Green vortex convergence benchmark.
+
 ## Features
 
 - Scalar diffusion and advection–diffusion (steady/unsteady)
 - Diphasic/monophasic problems with interface capacities and jumps
-- Darcy flow (steady and unsteady)
+- Darcy flow (steady and unsteady) / Stokes flow (fully coupled, unsteady θ-scheme)
 - Solid- or liquid-moving configurations; non‑prescribed interface motion
 - Boundary conditions: Dirichlet, Neumann, Robin, Periodic
 - Front utilities: signed distance functions, circle/rectangle/ellipse/crystal generators, intersections, normals
@@ -91,15 +93,18 @@ Each folder contains self-contained scripts demonstrating setup, solve, and visu
 
 ## Status and Roadmap
 
-Implemented
+ Implemented
 - Diffusion and advection–diffusion (steady/unsteady)
 - Darcy flow (steady/unsteady)
 - Diphasic capacities and interface jump conditions
 - 1D/2D non‑prescribed interface motion (front tracking)
+- Fully coupled Stokes flow solver (1D/2D)
 
 In development
 - Interface tracking variants (VOF / LS / FT)
-- Fully coupled Navier–Stokes; streamfunction–vorticity; preconditioning
+- Streamfunction–vorticity; preconditioning
+- Add Navier (advection) term to Stokes solver (prototype currently solves unforced Stokes)
+- Multi-species transport
 
 ## Citing
 
