@@ -31,6 +31,7 @@ end
     include("solver_test.jl")
     include("solver/darcy_test.jl")
     include("solver/diffusion_test.jl")
+    include("solver/stokes_test.jl")
 end
 
 @testset "Convergence Test" begin
