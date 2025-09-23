@@ -35,12 +35,12 @@ operator_p  = DiffusionOps(capacity_p)
 # Boundary conditions
 ############
 Umax = 1.0
-parabola = (x, y) -> 4Umax * (y - y0) * (Ly - (y - y0)) / (Ly^2)
+parabola = (x, y, t) -> 4Umax * (y - y0) * (Ly - (y - y0)) / (Ly^2)
 
 ux_left  = Dirichlet(parabola)
 ux_right = Dirichlet(parabola)
-ux_bot   = Dirichlet((x, y) -> 0.0)
-ux_top   = Dirichlet((x, y) -> 0.0)
+ux_bot   = Dirichlet((x, y, t) -> 0.0)
+ux_top   = Dirichlet((x, y, t) -> 0.0)
 bc_ux = BorderConditions(Dict(
     :left => ux_left,
     :right => ux_right,
@@ -48,7 +48,7 @@ bc_ux = BorderConditions(Dict(
     :top => ux_top,
 ))
 
-uy_zero = Dirichlet((x, y) -> 0.0)
+uy_zero = Dirichlet((x, y, t) -> 0.0)
 bc_uy = BorderConditions(Dict(
     :left => uy_zero,
     :right => uy_zero,
@@ -111,7 +111,7 @@ LIux = LinearIndices((length(xs), length(ys)))
 
 icol = Int(cld(length(xs), 2))
 ux_profile = [uωx[LIux[icol, j]] for j in 1:length(ys)]
-ux_analytical = [parabola(0.0, y) for y in ys]
+ux_analytical = [parabola(0.0, y, 0.0) for y in ys]
 profile_err = ux_profile .- ux_analytical
 ℓ2_profile = sqrt(mean(abs2, profile_err))
 ℓinf_profile = maximum(abs, profile_err)
