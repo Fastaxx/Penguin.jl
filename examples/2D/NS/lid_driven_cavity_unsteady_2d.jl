@@ -42,12 +42,12 @@ operator_p  = DiffusionOps(capacity_p)
 ###########
 U_lid = 1.0
 
-ux_left   = Dirichlet((x, y) -> 0.0)
-ux_right  = Dirichlet((x, y) -> 0.0)
-ux_bottom = Dirichlet((x, y) -> 0.0)
-ux_top    = Dirichlet((x, y) -> U_lid)
+ux_left   = Dirichlet((x, y, t) -> 0.0)
+ux_right  = Dirichlet((x, y, t) -> 0.0)
+ux_bottom = Dirichlet((x, y, t) -> 0.0)
+ux_top    = Dirichlet((x, y, t) -> U_lid)
 
-uy_zero = Dirichlet((x, y) -> 0.0)
+uy_zero = Dirichlet((x, y, t) -> 0.0)
 
 bc_ux = BorderConditions(Dict(
     :left=>ux_left, :right=>ux_right, :bottom=>ux_bottom, :top=>ux_top
