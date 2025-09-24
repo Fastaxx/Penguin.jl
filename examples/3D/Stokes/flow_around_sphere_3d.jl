@@ -17,13 +17,15 @@ Sphere: centered, radius R.
 ###########
 # Geometry
 ###########
-Nx, Ny, Nz = 16, 8, 8           # Reasonable resolution; adjust for performance
+# Grid & domain (center sphere inside channel)
+Nx, Ny, Nz = 24, 16, 16   # adjust for desired resolution / performance
 Lx, Ly, Lz = 4.0, 1.0, 1.0
-x0, y0, z0 = -1.0, -1.0, -1.0
+x0, y0, z0 = -Lx/2, -Ly/2, -Lz/2   # domain centered at origin
 
-sphere_center = (1.0, 0.0, 0.0)
-R = 0.2
-sphere_body = (x, y, z, _t=0.0) -> R - sqrt((x - sphere_center[1])^2 + (y - sphere_center[2])^2 + (z - sphere_center[3])^2)
+sphere_center = (0.0, 0.0, 0.0)
+R = 0.20
+###########
+sphere_body = (x, y, z, _t=0.0) -> -1 #R - sqrt((x - sphere_center[1])^2 + (y - sphere_center[2])^2 + (z - sphere_center[3])^2)
 
 ###########
 # Meshes (staggered velocity, collocated pressure)
