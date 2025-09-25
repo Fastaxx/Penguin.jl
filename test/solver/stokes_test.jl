@@ -157,3 +157,77 @@ using LinearAlgebra
         @test norm(r, Inf) ≤ 1e-10
     end
 end
+
+@testset "Stokes Velocity BCs (Neumann/Periodic)" begin
+    @testset "1D Neumann zero-gradient => zero velocity" begin
+        nx = 32
+        Lx = 1.0
+        x0 = 0.0
+        mesh_p = Penguin.Mesh((nx,), (Lx,), (x0,))
+        dx = Lx / nx
+        mesh_u = Penguin.Mesh((nx,), (Lx,), (x0 - 0.5 * dx,))
+
+        body = (x, _=0.0) -> -1.0
+        capacity_u = Capacity(body, mesh_u)
+        capacity_p = Capacity(body, mesh_p)
+        operator_u = DiffusionOps(capacity_u)
+        operator_p = DiffusionOps(capacity_p)
+
+        u_left = Neumann(0.0)
+        u_right = Neumann(0.0)
+        bc_u = BorderConditions(Dict(:bottom => u_left, :top => u_right))
+
+        bc_p = BorderConditions(Dict{Symbol,AbstractBoundary}())
+        bc_cut = Dirichlet(0.0)
+
+        fᵤ = (x, y=0.0, z=0.0) -> 0.0
+        fₚ = (x, y=0.0, z=0.0) -> 0.0
+        μ = 1.0; ρ = 1.0
+        fluid = Fluid(mesh_u, capacity_u, operator_u, mesh_p, capacity_p, operator_p, μ, ρ, fᵤ, fₚ)
+
+        solver = StokesMono(fluid, bc_u, bc_p, bc_cut)
+        solve_StokesMono!(solver; method=Base.:\)
+        nu = prod(operator_u.size)
+        uω = solver.x[1:nu]
+        @test maximum(abs, uω) ≤ 1e-8
+    end
+
+    @testset "2D Periodic in x (ux)" begin
+        nx, ny = 16, 12
+        Lx, Ly = 2.0, 1.0
+        x0, y0 = 0.0, 0.0
+
+        mesh_p = Penguin.Mesh((nx, ny), (Lx, Ly), (x0, y0))
+        dx, dy = Lx / nx, Ly / ny
+        mesh_ux = Penguin.Mesh((nx, ny), (Lx, Ly), (x0 - 0.5 * dx, y0))
+        mesh_uy = Penguin.Mesh((nx, ny), (Lx, Ly), (x0, y0 - 0.5 * dy))
+
+        body = (x, y, _=0.0) -> -1.0
+        capacity_ux = Capacity(body, mesh_ux)
+        capacity_uy = Capacity(body, mesh_uy)
+        capacity_p = Capacity(body, mesh_p)
+        op_ux = DiffusionOps(capacity_ux)
+        op_uy = DiffusionOps(capacity_uy)
+        op_p  = DiffusionOps(capacity_p)
+
+        # Periodic left-right for ux; no-slip top/bottom
+        bc_ux = BorderConditions(Dict(:left => Periodic(), :right => Periodic(), :bottom => Dirichlet(0.0), :top => Dirichlet(0.0)))
+        bc_uy = BorderConditions(Dict(:left => Dirichlet(0.0), :right => Dirichlet(0.0), :bottom => Dirichlet(0.0), :top => Dirichlet(0.0)))
+        bc_p = BorderConditions(Dict{Symbol,AbstractBoundary}())
+        bc_cut = Dirichlet(0.0)
+
+        fᵤ = (x, y, z=0.0) -> 0.0
+        fₚ = (x, y, z=0.0) -> 0.0
+        μ = 1.0; ρ = 1.0
+        fluid = Fluid((mesh_ux, mesh_uy), (capacity_ux, capacity_uy), (op_ux, op_uy), mesh_p, capacity_p, op_p, μ, ρ, fᵤ, fₚ)
+
+        solver = StokesMono(fluid, bc_ux, bc_uy; bc_p=bc_p, bc_cut=bc_cut)
+        solve_StokesMono!(solver; method=Base.:\)
+
+        nu_x = prod(op_ux.size)
+        uωx = solver.x[1:nu_x]
+        Ux = reshape(uωx, op_ux.size)
+        # Check periodic equality between left (i=1) and right (i=end-1)
+        @test maximum(abs.(Ux[1, :] .- Ux[end-1, :])) ≤ 1e-8
+    end
+end

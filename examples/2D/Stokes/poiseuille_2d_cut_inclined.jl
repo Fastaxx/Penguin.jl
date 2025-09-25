@@ -27,7 +27,7 @@ Umax = 1.0
 ρ = 1.0
 
 # Angles to test (in degrees)
-angles_deg = [0, 15, 30, 45, 60, 75, 90]
+angles_deg = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45]
 angles_rad = [deg * π / 180 for deg in angles_deg]
 
 # Storage for results
@@ -330,7 +330,7 @@ fig_profiles = Figure(resolution=(1400, 1000))
 ax1 = Axis(fig_profiles[1,1:2], xlabel="Distance from bottom wall", ylabel="Velocity magnitude |u|", 
            title="Velocity Profiles Across Inclined Channels")
 
-colors = [:blue, :red, :green, :purple, :orange, :brown, :pink]
+colors = [:blue, :red, :green, :purple, :orange, :brown, :pink, :cyan, :magenta, :olive]
 for (i, pdata) in enumerate(profile_data)
     if !isempty(pdata[:coords])
         lines!(ax1, pdata[:coords], pdata[:u_mag_numerical], 
@@ -411,6 +411,11 @@ println("Error variation: $(maximum(l2_total_all) / minimum(l2_total_all))×")
 fig_heat = Figure(size=(1200, 900))
 ncols = 3
 nrows = ceil(Int, length(profile_data) / ncols)
+dx = Lx / nx
+dy = Ly / ny
+# mesh_ux was created with origin x0 - 0.5*dx, y0
+xs = [x0 - 0.5*dx + (i-1)*dx for i in 1:nx]
+ys = [y0 + (j-1)*dy for j in 1:ny]
 
 for (i, pdata) in enumerate(profile_data)
     row = div(i-1, ncols) + 1

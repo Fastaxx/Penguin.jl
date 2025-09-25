@@ -894,57 +894,172 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
     bcx_right  = get(bc_ux.borders, :right, nothing)
     bcy_right  = get(bc_uy.borders, :right, nothing)
 
-    # Apply along each side for x and y components using their respective meshes
+    # helpers for Neumann/Periodic
+    Δx = nx > 1 ? (xs_x[2] - xs_x[1]) : 1.0
+    Δy = ny > 1 ? (ys_x[2] - ys_x[1]) : 1.0
+
     # Bottom/top (vary along x)
-    for jside in ((1, bcx_bottom, bcy_bottom), (jtop, bcx_top, bcy_top))
-        jx, bcx, bcy = jside
+    for (jx, bcx, bcy, normal) in ((1, bcx_bottom, bcy_bottom, :bottom), (jtop, bcx_top, bcy_top, :top))
         isnothing(bcx) && isnothing(bcy) && continue
-        jy = jx  # meshes share sizes (asserted above)
+        jy = jx
         for i in 1:nx
-            vx = t === nothing ? eval_val(bcx, xs_x[i], ys_x[jx]) : eval_val(bcx, xs_x[i], ys_x[jx], t)
-            vy = t === nothing ? eval_val(bcy, xs_y[i], ys_y[jy]) : eval_val(bcy, xs_y[i], ys_y[jy], t)
-            if vx !== nothing
-                vx = Float64(vx)
+            # x-component
+            if bcx isa Dirichlet
+                vx = t === nothing ? eval_val(bcx, xs_x[i], ys_x[jx]) : eval_val(bcx, xs_x[i], ys_x[jx], t)
+                if vx !== nothing
+                    vx = Float64(vx)
+                    lix = LIx[i, jx]
+                    r = row_uωx_off + lix
+                    enforce_dirichlet!(A, b, r, uωx_off + lix, vx)
+                    rt = row_uγx_off + lix
+                    enforce_dirichlet!(A, b, rt, uγx_off + lix, vx)
+                end
+            elseif bcx isa Neumann
+                g = bcx.value isa Function ? (t === nothing ? bcx.value(xs_x[i], ys_x[jx]) : bcx.value(xs_x[i], ys_x[jx], t)) : bcx.value
                 lix = LIx[i, jx]
+                li_adj = normal === :bottom ? LIx[i, min(jx+1, ny)] : LIx[i, max(jx-1, 1)]
                 r = row_uωx_off + lix
-                enforce_dirichlet!(A, b, r, uωx_off + lix, vx)
+                A[r, :] .= 0.0
+                A[r, uωx_off + lix] =  1.0/Δy
+                A[r, uωx_off + li_adj] += -1.0/Δy
+                b[r] = Float64(g)
+            elseif bcx isa Periodic
+                lix = LIx[i, jx]
+                opp_j = (jx == 1) ? jtop : 1
+                lix_opp = LIx[i, opp_j]
+                # uω periodic
+                r = row_uωx_off + lix
+                A[r, :] .= 0.0
+                A[r, uωx_off + lix] = 1.0
+                A[r, uωx_off + lix_opp] -= 1.0
+                b[r] = 0.0
+                # uγ periodic
                 rt = row_uγx_off + lix
-                enforce_dirichlet!(A, b, rt, uγx_off + lix, vx)
+                A[rt, :] .= 0.0
+                A[rt, uγx_off + lix] = 1.0
+                A[rt, uγx_off + lix_opp] -= 1.0
+                b[rt] = 0.0
             end
-            if vy !== nothing
-                vy = Float64(vy)
+
+            # y-component
+            if bcy isa Dirichlet
+                vy = t === nothing ? eval_val(bcy, xs_y[i], ys_y[jy]) : eval_val(bcy, xs_y[i], ys_y[jy], t)
+                if vy !== nothing
+                    vy = Float64(vy)
+                    liy = LIy[i, jy]
+                    r = row_uωy_off + liy
+                    enforce_dirichlet!(A, b, r, uωy_off + liy, vy)
+                    rt = row_uγy_off + liy
+                    enforce_dirichlet!(A, b, rt, uγy_off + liy, vy)
+                end
+            elseif bcy isa Neumann
+                g = bcy.value isa Function ? (t === nothing ? bcy.value(xs_y[i], ys_y[jy]) : bcy.value(xs_y[i], ys_y[jy], t)) : bcy.value
                 liy = LIy[i, jy]
+                li_adj = normal === :bottom ? LIy[i, min(jy+1, ny)] : LIy[i, max(jy-1, 1)]
                 r = row_uωy_off + liy
-                enforce_dirichlet!(A, b, r, uωy_off + liy, vy)
+                A[r, :] .= 0.0
+                A[r, uωy_off + liy] =  1.0/Δy
+                A[r, uωy_off + li_adj] += -1.0/Δy
+                b[r] = Float64(g)
+            elseif bcy isa Periodic
+                liy = LIy[i, jy]
+                opp_j = (jy == 1) ? jtop : 1
+                liy_opp = LIy[i, opp_j]
+                # uω periodic
+                r = row_uωy_off + liy
+                A[r, :] .= 0.0
+                A[r, uωy_off + liy] = 1.0
+                A[r, uωy_off + liy_opp] -= 1.0
+                b[r] = 0.0
+                # uγ periodic
                 rt = row_uγy_off + liy
-                enforce_dirichlet!(A, b, rt, uγy_off + liy, vy)
+                A[rt, :] .= 0.0
+                A[rt, uγy_off + liy] = 1.0
+                A[rt, uγy_off + liy_opp] -= 1.0
+                b[rt] = 0.0
             end
         end
     end
 
     # Left/right (vary along y)
-    for iside in ((1, bcx_left, bcy_left), (iright, bcx_right, bcy_right))
-        ix, bcx, bcy = iside
+    for (ix, bcx, bcy, normal) in ((1, bcx_left, bcy_left, :left), (iright, bcx_right, bcy_right, :right))
         isnothing(bcx) && isnothing(bcy) && continue
         iy = ix
         for j in 1:ny
-            vx = t === nothing ? eval_val(bcx, xs_x[ix], ys_x[j]) : eval_val(bcx, xs_x[ix], ys_x[j], t)
-            vy = t === nothing ? eval_val(bcy, xs_y[iy], ys_y[j]) : eval_val(bcy, xs_y[iy], ys_y[j], t)
-            if vx !== nothing
-                vx = Float64(vx)
+            # x-component
+            if bcx isa Dirichlet
+                vx = t === nothing ? eval_val(bcx, xs_x[ix], ys_x[j]) : eval_val(bcx, xs_x[ix], ys_x[j], t)
+                if vx !== nothing
+                    vx = Float64(vx)
+                    lix = LIx[ix, j]
+                    r = row_uωx_off + lix
+                    enforce_dirichlet!(A, b, r, uωx_off + lix, vx)
+                    rt = row_uγx_off + lix
+                    enforce_dirichlet!(A, b, rt, uγx_off + lix, vx)
+                end
+            elseif bcx isa Neumann
+                g = bcx.value isa Function ? (t === nothing ? bcx.value(xs_x[ix], ys_x[j]) : bcx.value(xs_x[ix], ys_x[j], t)) : bcx.value
                 lix = LIx[ix, j]
+                li_adj = normal === :left ? LIx[min(ix+1, nx), j] : LIx[max(ix-1, 1), j]
                 r = row_uωx_off + lix
-                enforce_dirichlet!(A, b, r, uωx_off + lix, vx)
+                A[r, :] .= 0.0
+                A[r, uωx_off + lix] =  1.0/Δx
+                A[r, uωx_off + li_adj] += -1.0/Δx
+                b[r] = Float64(g)
+            elseif bcx isa Periodic
+                lix = LIx[ix, j]
+                opp_i = (ix == 1) ? iright : 1
+                lix_opp = LIx[opp_i, j]
+                # uω periodic
+                r = row_uωx_off + lix
+                A[r, :] .= 0.0
+                A[r, uωx_off + lix] = 1.0
+                A[r, uωx_off + lix_opp] -= 1.0
+                b[r] = 0.0
+                # uγ periodic
                 rt = row_uγx_off + lix
-                enforce_dirichlet!(A, b, rt, uγx_off + lix, vx)
+                A[rt, :] .= 0.0
+                A[rt, uγx_off + lix] = 1.0
+                A[rt, uγx_off + lix_opp] -= 1.0
+                b[rt] = 0.0
             end
-            if vy !== nothing
-                vy = Float64(vy)
+
+            # y-component
+            if bcy isa Dirichlet
+                vy = t === nothing ? eval_val(bcy, xs_y[iy], ys_y[j]) : eval_val(bcy, xs_y[iy], ys_y[j], t)
+                if vy !== nothing
+                    vy = Float64(vy)
+                    liy = LIy[iy, j]
+                    r = row_uωy_off + liy
+                    enforce_dirichlet!(A, b, r, uωy_off + liy, vy)
+                    rt = row_uγy_off + liy
+                    enforce_dirichlet!(A, b, rt, uγy_off + liy, vy)
+                end
+            elseif bcy isa Neumann
+                g = bcy.value isa Function ? (t === nothing ? bcy.value(xs_y[iy], ys_y[j]) : bcy.value(xs_y[iy], ys_y[j], t)) : bcy.value
                 liy = LIy[iy, j]
+                li_adj = normal === :left ? LIy[min(iy+1, nx), j] : LIy[max(iy-1, 1), j]
                 r = row_uωy_off + liy
-                enforce_dirichlet!(A, b, r, uωy_off + liy, vy)
+                A[r, :] .= 0.0
+                A[r, uωy_off + liy] =  1.0/Δx
+                A[r, uωy_off + li_adj] += -1.0/Δx
+                b[r] = Float64(g)
+            elseif bcy isa Periodic
+                liy = LIy[iy, j]
+                opp_i = (iy == 1) ? iright : 1
+                liy_opp = LIy[opp_i, j]
+                # uω periodic
+                r = row_uωy_off + liy
+                A[r, :] .= 0.0
+                A[r, uωy_off + liy] = 1.0
+                A[r, uωy_off + liy_opp] -= 1.0
+                b[r] = 0.0
+                # uγ periodic
                 rt = row_uγy_off + liy
-                enforce_dirichlet!(A, b, rt, uγy_off + liy, vy)
+                A[rt, :] .= 0.0
+                A[rt, uγy_off + liy] = 1.0
+                A[rt, uγy_off + liy_opp] -= 1.0
+                b[rt] = 0.0
             end
         end
     end
@@ -1131,13 +1246,14 @@ function apply_velocity_dirichlet!(A::SparseMatrixCSC{Float64, Int}, b::Vector{F
                                    bc_u::BorderConditions, mesh_u::AbstractMesh;
                                    nu::Int, uω_offset::Int, uγ_offset::Int,
                                    t::Union{Nothing,Float64}=nothing)
-    # Determine boundary values
-    left_bc  = get(bc_u.borders, :bottom, nothing)
-    right_bc = get(bc_u.borders, :top, nothing)
+    # Map to 1D-style labels stored in this code (:bottom,:top)
+    left_bc  = get(bc_u.borders, :bottom, get(bc_u.borders, :left, nothing))
+    right_bc = get(bc_u.borders, :top,    get(bc_u.borders, :right, nothing))
 
-    # Node coordinates
+    # Node coordinates and spacing
     xnodes = mesh_u.nodes[1]
     iL, iR = 1, max(length(xnodes) - 1, 1)
+    Δx = length(xnodes) > 1 ? (xnodes[2] - xnodes[1]) : 1.0
 
     # Helper to evaluate value at position
     function eval_value(bc, x)
@@ -1151,25 +1267,64 @@ function apply_velocity_dirichlet!(A::SparseMatrixCSC{Float64, Int}, b::Vector{F
         end
     end
 
-    vL = eval_value(left_bc,  xnodes[1])
-    vR = eval_value(right_bc, xnodes[end-1])
-
-    # Row indices: momentum rows are 1:nu, tie rows are nu+1:2nu
-    if vL !== nothing
-        vL = Float64(vL)
-        # Enforce uω[iL] = vL via momentum row iL (use last interior row index convention: iL = 1)
+    # Left boundary
+    if left_bc isa Dirichlet
+        vL = eval_value(left_bc,  xnodes[1])
+        if vL !== nothing
+            vL = Float64(vL)
+            r = iL
+            enforce_dirichlet!(A, b, r, uω_offset + iL, vL)
+            rt = nu + iL
+            enforce_dirichlet!(A, b, rt, uγ_offset + iL, vL)
+        end
+    elseif left_bc isa Neumann
+        g = left_bc.value isa Function ? (t === nothing ? left_bc.value(xnodes[1]) : left_bc.value(xnodes[1], 0.0, t)) : left_bc.value
         r = iL
-        enforce_dirichlet!(A, b, r, uω_offset + iL, vL)
+        A[r, :] .= 0.0
+        A[r, uω_offset + iL] =  1.0/Δx
+        A[r, uω_offset + min(iL+1, iR)] += -1.0/Δx
+        b[r] = Float64(g)
+    elseif left_bc isa Periodic
+        r = iL
+        A[r, :] .= 0.0
+        A[r, uω_offset + iL] = 1.0
+        A[r, uω_offset + iR] -= 1.0
+        b[r] = 0.0
         rt = nu + iL
-        enforce_dirichlet!(A, b, rt, uγ_offset + iL, vL)
+        A[rt, :] .= 0.0
+        A[rt, uγ_offset + iL] = 1.0
+        A[rt, uγ_offset + iR] -= 1.0
+        b[rt] = 0.0
     end
-    if vR !== nothing
-        vR = Float64(vR)
-        # Enforce uω[iR] = vR via momentum row iR (rightmost velocity index = nx+1)
+
+    # Right boundary
+    if right_bc isa Dirichlet
+        vR = eval_value(right_bc, xnodes[end-1])
+        if vR !== nothing
+            vR = Float64(vR)
+            r = iR
+            enforce_dirichlet!(A, b, r, uω_offset + iR, vR)
+            rt = nu + iR
+            enforce_dirichlet!(A, b, rt, uγ_offset + iR, vR)
+        end
+    elseif right_bc isa Neumann
+        g = right_bc.value isa Function ? (t === nothing ? right_bc.value(xnodes[end-1]) : right_bc.value(xnodes[end-1], 0.0, t)) : right_bc.value
         r = iR
-        enforce_dirichlet!(A, b, r, uω_offset + iR, vR)
+        A[r, :] .= 0.0
+        A[r, uω_offset + iR] =  1.0/Δx
+        A[r, uω_offset + max(iR-1, iL)] += -1.0/Δx
+        b[r] = Float64(g)
+    elseif right_bc isa Periodic
+        r = iR
+        A[r, :] .= 0.0
+        A[r, uω_offset + iR] = 1.0
+        A[r, uω_offset + iL] -= 1.0
+        b[r] = 0.0
         rt = nu + iR
-        enforce_dirichlet!(A, b, rt, uγ_offset + iR, vR)
+        A[rt, :] .= 0.0
+        A[rt, uγ_offset + iR] = 1.0
+        A[rt, uγ_offset + iL] -= 1.0
+        b[rt] = 0.0
     end
     return nothing
 end
