@@ -132,4 +132,7 @@ export StokesMono, solve_StokesMono!, solve_StokesMono_unsteady!
 
 include("solver/stokes_diph.jl")
 export StokesDiph, solve_StokesDiph!
+
+include("solver/navierstokes.jl")
+export NavierStokesMono, solve_NavierStokesMono_unsteady!, build_convection_operators
 end
