@@ -492,8 +492,8 @@ function assemble_stokes3D!(s::StokesMono)
     b_con = zeros(np)
     b = vcat(b_mom_x, g_cut_x, b_mom_y, g_cut_y, b_mom_z, g_cut_z, b_con)
 
-    apply_velocity_dirichlet_3D!(A, b,
-                                 s.bc_u[1], s.bc_u[2], s.bc_u[3], s.fluid.mesh_u;
+    # Apply Dirichlet velocity BCs at domain boundaries for all three components
+    apply_velocity_dirichlet_3D!(A, b, s.bc_u[1], s.bc_u[2], s.bc_u[3], s.fluid.mesh_u;
                                  nu_x=nu_x, nu_y=nu_y, nu_z=nu_z,
                                  uωx_off=off_uωx, uγx_off=off_uγx,
                                  uωy_off=off_uωy, uγy_off=off_uγy,
@@ -502,8 +502,9 @@ function assemble_stokes3D!(s::StokesMono)
                                  row_uωy_off=row_uωy, row_uγy_off=row_uγy,
                                  row_uωz_off=row_uωz, row_uγz_off=row_uγz)
 
-    #apply_pressure_gauge!(A, b, s.bc_p, s.fluid.mesh_p, s.fluid.capacity_p;
-    #                      p_offset=off_p, np=np, row_start=row_con+1)
+    # Fix pressure gauge or apply pressure Dirichlet at boundaries if provided
+    apply_pressure_gauge!(A, b, s.bc_p, s.fluid.mesh_p, s.fluid.capacity_p;
+                          p_offset=off_p, np=np, row_start=row_con+1)
 
     s.A = A
     s.b = b

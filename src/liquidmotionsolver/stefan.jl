@@ -177,6 +177,99 @@ function smooth_displacements!(displacements::Vector{Float64},
     return displacements
 end
 
+function compute_geometric_segment_displacements(front::FrontTracker,
+                                                 mesh::Penguin.Mesh{2},
+                                                 Vₙ::AbstractMatrix{<:Real},
+                                                 Vₙ₊₁::AbstractMatrix{<:Real},
+                                                 interface_flux::AbstractMatrix{<:Real},
+                                                 ρL::Real,
+                                                 α::Real)
+    intercept_jacobian, segments, _segment_normals, _segment_intercepts, segment_lengths =
+        compute_intercept_jacobian(mesh, front; density=1.0)
+
+    cells_idx = Tuple{Int, Int}[]
+    residual_values = Float64[]
+    segment_accumulator = zeros(Float64, length(segments))
+    segment_weights = zeros(Float64, length(segments))
+
+    ρL_val = Float64(ρL)
+    α_val = Float64(α)
+
+    for (cell, entries) in intercept_jacobian
+        if isempty(entries)
+            continue
+        end
+
+        i, j = cell
+        volume_change = Float64(Vₙ₊₁[i, j] - Vₙ[i, j])
+        flux = Float64(interface_flux[i, j])
+        residual = ρL_val * volume_change - flux
+
+        push!(cells_idx, cell)
+        push!(residual_values, residual)
+
+        Gₛ = residual / ρL_val
+        for (segment_idx, length) in entries
+            segment_length = max(Float64(length), 1e-12)
+            segment_accumulator[segment_idx] += Gₛ / segment_length
+            segment_weights[segment_idx] += 1.0 / segment_length
+        end
+    end
+
+    segment_displacements = zeros(Float64, length(segments))
+    for idx in eachindex(segment_displacements)
+        if segment_weights[idx] > 0
+            segment_displacements[idx] = α_val * (segment_accumulator[idx] / segment_weights[idx])
+        end
+    end
+
+    return segment_displacements, segment_lengths, cells_idx, residual_values
+end
+
+function segment_to_marker_displacements(segment_displacements::Vector{Float64},
+                                         segment_lengths::Vector{Float64},
+                                         markers::AbstractVector{<:Tuple{Float64,Float64}},
+                                         is_closed::Bool)
+    n_markers = length(markers)
+    n_segments = length(segment_displacements)
+    displacements = zeros(Float64, n_markers)
+
+    for i in 1:n_markers
+        prev_seg = i - 1
+        if prev_seg < 1
+            prev_seg = is_closed ? n_segments : 0
+        end
+
+        next_seg = i
+        if next_seg > n_segments
+            next_seg = is_closed ? 1 : 0
+        end
+
+        numerator = 0.0
+        denominator = 0.0
+
+        if prev_seg > 0 && segment_lengths[prev_seg] > 1e-14
+            len_prev = segment_lengths[prev_seg]
+            numerator += segment_displacements[prev_seg] / len_prev
+            denominator += 1.0 / len_prev
+        end
+
+        if next_seg > 0 && segment_lengths[next_seg] > 1e-14
+            len_next = segment_lengths[next_seg]
+            numerator += segment_displacements[next_seg] / len_next
+            denominator += 1.0 / len_next
+        end
+
+        if denominator > 0
+            displacements[i] = numerator / denominator
+        else
+            displacements[i] = 0.0
+        end
+    end
+
+    return displacements
+end
+
 function StefanMono2D(phase::Phase, bc_b::BorderConditions, bc_i::AbstractBoundary, Δt::Float64, Tᵢ::Vector{Float64}, mesh::AbstractMesh, scheme::String)
     println("Solver Creation:")
     println("- Stefan problem")
@@ -201,10 +294,10 @@ function StefanMono2D(phase::Phase, bc_b::BorderConditions, bc_i::AbstractBounda
 end
 
 function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::Float64, Tₛ::Float64, Tₑ::Float64, bc_b::BorderConditions, bc::AbstractBoundary, ic::InterfaceConditions, mesh::Penguin.Mesh{2}, scheme::String; 
-                            method=Base.:\, 
+                            method=Base.:\,
                             Newton_params=(100, 1e-6, 1e-6, 1.0),
-                            jacobian_epsilon=1e-6, smooth_factor=0.5, window_size=10, 
-                            gmorlm="LM", # "GN" pour Gauss-Newton ou "LM" pour Levenberg-Marquardt 
+                            jacobian_epsilon=1e-6, smooth_factor=0.5, window_size=10,
+                            gmorlm="LM", # "GN" pour Gauss-Newton ou "LM" pour Levenberg-Marquardt
                             lm_init_lambda=1e-4, # Paramètre d'amortissement initial pour LM
                             lm_lambda_factor=10.0, # Facteur de multiplication/division pour lambda
                             lm_min_lambda=1e-10, # Lambda minimum
@@ -893,14 +986,14 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
             save("marker_position_update.png", fig)
 
             # 7. Create space-time level set for capacity calculation
-            function body(x, y, t_local, _=0)
+            body = (x, y, t_local, _=0) -> begin
                 # Normalized time in [0,1]
                 τ = (t_local - tₙ) / Δt
 
                 # Linear interpolation between SDFs
                 sdf1 = -sdf(front, x, y)
                 sdf2 = -sdf(updated_front, x, y)
-                return (1-τ) * sdf1 + τ * sdf2
+                return (1 - τ) * sdf1 + τ * sdf2
             end
             
             # 8. Update space-time mesh and capacity
@@ -921,7 +1014,7 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
             # 10. Update phase for next iteration
             phase = phase_updated
 
-            body_2d(x,y,_=0) = body(x, y, tₙ₊₁)
+            body_2d = (x, y, _=0) -> body(x, y, tₙ₊₁)
             capacity_2d = Capacity(body_2d, mesh; compute_centroids=false)
             operator_2d = DiffusionOps(capacity_2d)
             phase_2d = Phase(capacity_2d, operator_2d, phase.source, phase.Diffusion_coeff)
@@ -966,6 +1059,256 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
         timestep += 1
     end
     
+    return s, residuals, xf_log, timestep_history, phase_2d, position_increments
+end
+
+function solve_StefanMono2D_geom!(s::Solver, phase::Phase, front::FrontTracker, Δt::Float64, Tₛ::Float64, Tₑ::Float64,
+                                  bc_b::BorderConditions, bc::AbstractBoundary, ic::InterfaceConditions,
+                                  mesh::Penguin.Mesh{2}, scheme::String;
+                                  method=Base.:\,
+                                  Newton_params=(100, 1e-6, 1e-6, 1.0),
+                                  smooth_factor=0.5,
+                                  window_size=10,
+                                  algorithm=nothing,
+                                  kwargs...)
+    if s.A === nothing
+        error("Solver is not initialized. Call a solver constructor first.")
+    end
+
+    println("Solving Stefan problem with Front Tracking (geometric update):")
+    println("- Monophasic problem")
+    println("- Phase change with moving interface")
+    println("- Unsteady problem")
+    println("- Diffusion problem")
+
+    max_iter, tol, reltol, α = Newton_params
+    ρL = ic.flux.value
+
+    t = Tₛ
+    residuals = Dict{Int, Vector{Float64}}()
+    xf_log = Dict{Int, Vector{Tuple{Float64, Float64}}}()
+    timestep_history = Tuple{Float64, Float64}[]
+    push!(timestep_history, (t, Δt))
+    position_increments = Dict{Int, Vector{Float64}}()
+
+    dims = phase.operator.size
+    len_dims = length(dims)
+    cap_index = len_dims
+    nx, ny, _ = dims
+
+    Tᵢ = s.x
+    push!(s.states, s.x)
+
+    markers = get_markers(front)
+    xf_log[1] = markers
+
+    timestep = 1
+    phase_2d = phase
+    last_displacements = nothing
+
+    residual_dir = joinpath(pwd(), "residuals_visualization")
+    if !isdir(residual_dir)
+        mkdir(residual_dir)
+    end
+
+    while t < Tₑ
+        markers = get_markers(front)
+        normals = compute_marker_normals(front, markers)
+
+        if last_displacements !== nothing && timestep > 1
+            extrapolation_factor = 0.8
+            println("Initializing interface using previous displacements (geometric extrapolation factor: $extrapolation_factor)")
+            n_markers = length(markers) - (front.is_closed ? 1 : 0)
+            new_markers = copy(markers)
+            for i in 1:n_markers
+                normal = normals[i]
+                new_markers[i] = (
+                    markers[i][1] + extrapolation_factor * last_displacements[i] * normal[1],
+                    markers[i][2] + extrapolation_factor * last_displacements[i] * normal[2]
+                )
+            end
+            if front.is_closed && !isempty(new_markers)
+                new_markers[end] = new_markers[1]
+            end
+            set_markers!(front, new_markers)
+            markers = get_markers(front)
+            normals = compute_marker_normals(front, markers)
+        end
+
+        t += Δt
+        tₙ = t - Δt
+        tₙ₊₁ = t
+        time_interval = [tₙ, tₙ₊₁]
+
+        n_markers = length(markers) - (front.is_closed ? 1 : 0)
+        if n_markers <= 0
+            error("Geometric update requires at least one marker on the front")
+        end
+        displacements = zeros(n_markers)
+        residual_norm_history = Float64[]
+        position_increment_history = Float64[]
+
+        for iter in 1:max_iter
+            solve_system!(s; method=method, algorithm=algorithm, kwargs...)
+            Tᵢ = s.x
+
+            V_matrices = phase.capacity.A[cap_index]
+            Vₙ₊₁_matrix = V_matrices[1:end÷2, 1:end÷2]
+            Vₙ_matrix = V_matrices[end÷2+1:end, end÷2+1:end]
+            Vₙ₊₁_matrix = reshape(diag(Vₙ₊₁_matrix), (nx, ny))
+            Vₙ_matrix = reshape(diag(Vₙ_matrix), (nx, ny))
+
+            W! = phase.operator.Wꜝ[1:end÷2, 1:end÷2]
+            G = phase.operator.G[1:end÷2, 1:end÷2]
+            H = phase.operator.H[1:end÷2, 1:end÷2]
+            Id = build_I_D(phase.operator, phase.Diffusion_coeff, phase.capacity)
+            Id = Id[1:end÷2, 1:end÷2]
+
+            Tₒ, Tᵧ = Tᵢ[1:end÷2], Tᵢ[end÷2+1:end]
+            interface_flux = Id * H' * W! * G * Tₒ + Id * H' * W! * H * Tᵧ
+            interface_flux_2d = reshape(interface_flux, (nx, ny))
+
+            markers_unique = markers[1:n_markers]
+            normals_unique = normals[1:n_markers]
+
+            segment_displacements, segment_lengths, cells_idx, residual_vector =
+                compute_geometric_segment_displacements(front, mesh, Vₙ_matrix, Vₙ₊₁_matrix, interface_flux_2d, ρL, α)
+
+            energy_residual_norm = isempty(residual_vector) ? 0.0 : norm(residual_vector)
+
+            marker_displacements = segment_to_marker_displacements(segment_displacements, segment_lengths,
+                                                                    markers_unique, front.is_closed)
+
+            if front.is_closed && !isempty(marker_displacements)
+                marker_displacements[end] = marker_displacements[1]
+            end
+
+            marker_displacements .*= -1.0
+            smooth_displacements!(marker_displacements, markers_unique, front.is_closed, smooth_factor, window_size)
+            displacements .= marker_displacements
+
+            displacement_residual_norm = norm(marker_displacements)
+            push!(residual_norm_history, displacement_residual_norm)
+
+            position_increment_norm = displacement_residual_norm
+            push!(position_increment_history, position_increment_norm)
+
+            max_disp = isempty(marker_displacements) ? 0.0 : maximum(abs.(marker_displacements))
+            println("Maximum displacement (geometric): $max_disp")
+
+            if !isempty(residual_vector)
+                residual_fig = plot_residual_heatmap(mesh, residual_vector, cells_idx, nothing, false)
+                timestamp = round(Int, time())
+                save(joinpath(residual_dir, "residual_timestep$(timestep)_iter$(iter)_$(timestamp).png"), residual_fig)
+                display(residual_fig)
+            else
+                println("No intersected cells for geometric update at iteration $iter")
+            end
+
+            println("Residual norm (geometric displacement) = $displacement_residual_norm | energy residual = $energy_residual_norm")
+
+            new_markers = copy(markers)
+            for i in 1:n_markers
+                normal = normals_unique[i]
+                new_markers[i] = (
+                    markers[i][1] + displacements[i] * normal[1],
+                    markers[i][2] + displacements[i] * normal[2]
+                )
+            end
+            if front.is_closed && !isempty(new_markers)
+                new_markers[end] = new_markers[1]
+            end
+
+            updated_front = FrontTracker(new_markers, front.is_closed)
+
+            if front.is_closed && !isempty(new_markers)
+                center_x = sum(m[1] for m in new_markers) / length(new_markers)
+                center_y = sum(m[2] for m in new_markers) / length(new_markers)
+                mean_radius = mean([sqrt((m[1] - center_x)^2 + (m[2] - center_y)^2) for m in new_markers])
+                println("Mean radius: $(round(mean_radius, digits=6))")
+            end
+
+            fig = Figure(size=(800, 700))
+            ax = Axis(fig[1, 1],
+                      title="Interface Position Update (geometric)",
+                      xlabel="x",
+                      ylabel="y",
+                      aspect=DataAspect())
+
+            temp_2d = reshape(Tₒ, (nx, ny))
+            hm = heatmap!(ax, mesh.nodes[1], mesh.nodes[2], temp_2d, colormap=:thermal)
+            Colorbar(fig[1, 2], hm, label="Temperature")
+
+            x_new = [m[1] for m in new_markers]
+            y_new = [m[2] for m in new_markers]
+            x_old = [m[1] for m in markers_unique]
+            y_old = [m[2] for m in markers_unique]
+            scatter!(ax, x_old, y_old, color=:blue, markersize=4)
+            lines!(ax, x_new, y_new, color=:red, linewidth=2)
+            scatter!(ax, x_new, y_new, color=:red, markersize=4)
+            display(fig)
+            save("marker_position_update.png", fig)
+
+            body = (x, y, t_local, _=0) -> begin
+                τ = (t_local - tₙ) / Δt
+                sdf1 = -sdf(front, x, y)
+                sdf2 = -sdf(updated_front, x, y)
+                return (1 - τ) * sdf1 + τ * sdf2
+            end
+
+            STmesh = Penguin.SpaceTimeMesh(mesh, time_interval, tag=mesh.tag)
+            capacity = Capacity(body, STmesh; compute_centroids=false)
+            operator = DiffusionOps(capacity)
+            phase_updated = Phase(capacity, operator, phase.source, phase.Diffusion_coeff)
+
+            s.A = A_mono_unstead_diff_moving(phase_updated.operator, phase_updated.capacity,
+                                            phase_updated.Diffusion_coeff, bc, scheme)
+            s.b = b_mono_unstead_diff_moving(phase_updated.operator, phase_updated.capacity,
+                                            phase_updated.Diffusion_coeff, phase_updated.source,
+                                            bc, Tᵢ, Δt, tₙ, scheme)
+
+            BC_border_mono!(s.A, s.b, bc_b, mesh)
+
+            phase = phase_updated
+
+            body_2d = (x, y, _=0) -> body(x, y, tₙ₊₁)
+            capacity_2d = Capacity(body_2d, mesh; compute_centroids=false)
+            operator_2d = DiffusionOps(capacity_2d)
+            phase_2d = Phase(capacity_2d, operator_2d, phase.source, phase.Diffusion_coeff)
+
+            if displacement_residual_norm < tol || (iter > 1 && abs(residual_norm_history[end] - residual_norm_history[end-1]) < reltol)
+                println("Converged after $iter iterations with residual $displacement_residual_norm and position increment $position_increment_norm")
+                break
+            end
+        end
+
+        residuals[timestep] = residual_norm_history
+        position_increments[timestep] = position_increment_history
+
+        new_markers = copy(markers)
+        for i in 1:n_markers
+            normal = normals[i]
+            new_markers[i] = (
+                markers[i][1] + displacements[i] * normal[1],
+                markers[i][2] + displacements[i] * normal[2]
+            )
+        end
+        if front.is_closed && !isempty(new_markers)
+            new_markers[end] = new_markers[1]
+        end
+
+        set_markers!(front, new_markers)
+        xf_log[timestep+1] = new_markers
+        push!(s.states, s.x)
+
+        println("Time: $(round(t, digits=6))")
+        println("Max temperature: $(maximum(abs.(s.x)))")
+
+        last_displacements = copy(displacements)
+        push!(timestep_history, (t, Δt))
+        timestep += 1
+    end
+
     return s, residuals, xf_log, timestep_history, phase_2d, position_increments
 end
 

@@ -1,6 +1,7 @@
 using Penguin
 using CairoMakie
 using LinearAlgebra
+using LinearSolve
 
 """
 Steady Stokes flow past a spherical obstacle embedded in a 3D channel.
@@ -18,14 +19,14 @@ Sphere: centered, radius R.
 # Geometry
 ###########
 # Grid & domain (center sphere inside channel)
-Nx, Ny, Nz = 24, 16, 16   # adjust for desired resolution / performance
+Nx, Ny, Nz = 24, 24, 16   # adjust for desired resolution / performance
 Lx, Ly, Lz = 4.0, 1.0, 1.0
 x0, y0, z0 = -Lx/2, -Ly/2, -Lz/2   # domain centered at origin
 
 sphere_center = (0.0, 0.0, 0.0)
 R = 0.20
 ###########
-sphere_body = (x, y, z, _t=0.0) -> -1 #R - sqrt((x - sphere_center[1])^2 + (y - sphere_center[2])^2 + (z - sphere_center[3])^2)
+sphere_body = (x, y, z, _t=0.0) -> -1.0 #R - sqrt((x - sphere_center[1])^2 + (y - sphere_center[2])^2 + (z - sphere_center[3])^2)
 
 ###########
 # Meshes (staggered velocity, collocated pressure)
@@ -41,10 +42,10 @@ mesh_uz = Penguin.Mesh((Nx, Ny, Nz), (Lx, Ly, Lz), (x0, y0, z0 - 0.5*Δz))
 ###########
 # Capacities & Operators
 ###########
-cap_ux = Capacity(sphere_body, mesh_ux; method="ImplicitIntegration")
-cap_uy = Capacity(sphere_body, mesh_uy; method="ImplicitIntegration")
-cap_uz = Capacity(sphere_body, mesh_uz; method="ImplicitIntegration")
-cap_p  = Capacity(sphere_body, mesh_p; method="ImplicitIntegration")
+cap_ux = Capacity(sphere_body, mesh_ux)
+cap_uy = Capacity(sphere_body, mesh_uy)
+cap_uz = Capacity(sphere_body, mesh_uz)
+cap_p  = Capacity(sphere_body, mesh_p)
 
 op_ux = DiffusionOps(cap_ux)
 op_uy = DiffusionOps(cap_uy)
@@ -124,7 +125,7 @@ xlen = 2*(nu_x+nu_y+nu_z) + np
 x0_vec = zeros(xlen)
 
 solver = StokesMono(fluid, (bc_ux, bc_uy, bc_uz), bc_p, bc_cut; x0=x0_vec)
-solve_StokesMono!(solver; method=Base.:\)
+solve_StokesMono!(solver; algorithm=UMFPACKFactorization())
 println("3D Stokes flow around sphere solved. Unknowns = ", length(solver.x))
 
 # Extract fields

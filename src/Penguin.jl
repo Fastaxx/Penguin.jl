@@ -106,6 +106,7 @@ export StefanMono2D, solve_StefanMono2D!
 export StefanDiph2D, solve_StefanDiph2D!
 export compute_volume_jacobian
 export solve_StefanMono2Dunclosed!
+export solve_StefanMono2D_geom!
 
 include("concentrationsolver/species.jl")
 export DiffusionUnsteadyConcentration, solve_DiffusionUnsteadyConcentration!
