@@ -234,6 +234,16 @@ end
     return nothing
 end
 
+@inline function enforce_zero_gradient!(A::SparseMatrixCSC{Float64, Int}, b,
+                                        row::Int, col_boundary::Int, col_adjacent::Int,
+                                        rhs_val::Float64=0.0)
+    A[row, :] .= 0.0
+    A[row, col_boundary] = 1.0
+    A[row, col_adjacent] -= 1.0
+    b[row] = rhs_val
+    return nothing
+end
+
 function StokesMono(fluid::Fluid{N},
                     bc_u::NTuple{N,BorderConditions},
                     bc_p::BorderConditions,
@@ -921,6 +931,11 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
                 A[r, uωx_off + lix] =  1.0/Δy
                 A[r, uωx_off + li_adj] += -1.0/Δy
                 b[r] = Float64(g)
+            elseif bcx isa Outflow
+                lix = LIx[i, jx]
+                neighbor = normal === :bottom ? LIx[i, min(jx+1, ny)] : LIx[i, max(jx-1, 1)]
+                enforce_zero_gradient!(A, b, row_uωx_off + lix, uωx_off + lix, uωx_off + neighbor)
+                enforce_zero_gradient!(A, b, row_uγx_off + lix, uγx_off + lix, uγx_off + neighbor)
             elseif bcx isa Periodic
                 lix = LIx[i, jx]
                 opp_j = (jx == 1) ? jtop : 1
@@ -959,6 +974,11 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
                 A[r, uωy_off + liy] =  1.0/Δy
                 A[r, uωy_off + li_adj] += -1.0/Δy
                 b[r] = Float64(g)
+            elseif bcy isa Outflow
+                liy = LIy[i, jy]
+                neighbor = normal === :bottom ? LIy[i, min(jy+1, ny)] : LIy[i, max(jy-1, 1)]
+                enforce_zero_gradient!(A, b, row_uωy_off + liy, uωy_off + liy, uωy_off + neighbor)
+                enforce_zero_gradient!(A, b, row_uγy_off + liy, uγy_off + liy, uγy_off + neighbor)
             elseif bcy isa Periodic
                 liy = LIy[i, jy]
                 opp_j = (jy == 1) ? jtop : 1
@@ -1004,6 +1024,11 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
                 A[r, uωx_off + lix] =  1.0/Δx
                 A[r, uωx_off + li_adj] += -1.0/Δx
                 b[r] = Float64(g)
+            elseif bcx isa Outflow
+                lix = LIx[ix, j]
+                neighbor = normal === :left ? LIx[min(ix+1, nx), j] : LIx[max(ix-1, 1), j]
+                enforce_zero_gradient!(A, b, row_uωx_off + lix, uωx_off + lix, uωx_off + neighbor)
+                enforce_zero_gradient!(A, b, row_uγx_off + lix, uγx_off + lix, uγx_off + neighbor)
             elseif bcx isa Periodic
                 lix = LIx[ix, j]
                 opp_i = (ix == 1) ? iright : 1
@@ -1042,6 +1067,11 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
                 A[r, uωy_off + liy] =  1.0/Δx
                 A[r, uωy_off + li_adj] += -1.0/Δx
                 b[r] = Float64(g)
+            elseif bcy isa Outflow
+                liy = LIy[iy, j]
+                neighbor = normal === :left ? LIy[min(iy+1, nx), j] : LIy[max(iy-1, 1), j]
+                enforce_zero_gradient!(A, b, row_uωy_off + liy, uωy_off + liy, uωy_off + neighbor)
+                enforce_zero_gradient!(A, b, row_uγy_off + liy, uγy_off + liy, uγy_off + neighbor)
             elseif bcy isa Periodic
                 liy = LIy[iy, j]
                 opp_i = (iy == 1) ? iright : 1
@@ -1282,6 +1312,10 @@ function apply_velocity_dirichlet!(A::SparseMatrixCSC{Float64, Int}, b::Vector{F
         A[r, uω_offset + iL] =  1.0/Δx
         A[r, uω_offset + min(iL+1, iR)] += -1.0/Δx
         b[r] = Float64(g)
+    elseif left_bc isa Outflow
+        neighbor = min(iL + 1, iR)
+        enforce_zero_gradient!(A, b, iL, uω_offset + iL, uω_offset + neighbor)
+        enforce_zero_gradient!(A, b, nu + iL, uγ_offset + iL, uγ_offset + neighbor)
     elseif left_bc isa Periodic
         r = iL
         A[r, :] .= 0.0
@@ -1312,6 +1346,10 @@ function apply_velocity_dirichlet!(A::SparseMatrixCSC{Float64, Int}, b::Vector{F
         A[r, uω_offset + iR] =  1.0/Δx
         A[r, uω_offset + max(iR-1, iL)] += -1.0/Δx
         b[r] = Float64(g)
+    elseif right_bc isa Outflow
+        neighbor = max(iR - 1, iL)
+        enforce_zero_gradient!(A, b, iR, uω_offset + iR, uω_offset + neighbor)
+        enforce_zero_gradient!(A, b, nu + iR, uγ_offset + iR, uγ_offset + neighbor)
     elseif right_bc isa Periodic
         r = iR
         A[r, :] .= 0.0
@@ -1374,9 +1412,16 @@ function apply_pressure_gauge!(A::SparseMatrixCSC{Float64, Int}, b,
     end
 
     function eval_dirichlet(bc::AbstractBoundary, coords::NTuple{N,Float64}) where {N}
-        bc isa Dirichlet || return nothing
-        val = bc.value
-        if val isa Function
+        if bc isa Dirichlet
+            val = bc.value
+        elseif bc isa Outflow
+            val = bc.pressure
+        else
+            return nothing
+        end
+        if val === nothing
+            return nothing
+        elseif val isa Function
             return call_boundary_value(val, coords)
         else
             return val
@@ -1388,7 +1433,9 @@ function apply_pressure_gauge!(A::SparseMatrixCSC{Float64, Int}, b,
 
     function apply_face!(dim::Int, fixed_idx::Int, bc::AbstractBoundary)
         dim <= nd || return false
-        bc isa Dirichlet || return false
+        if !(bc isa Dirichlet || (bc isa Outflow && bc.pressure !== nothing))
+            return false
+        end
         ranges = collect(ranges_full)
         ranges[dim] = fixed_idx:fixed_idx
         did_apply = false

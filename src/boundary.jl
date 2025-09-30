@@ -49,6 +49,21 @@ Structure to define periodic boundary conditions.
 struct Periodic <: AbstractBoundary
 end
 
+"""
+    Outflow(; pressure=nothing)
+
+Outflow boundary condition prescribing a zero normal gradient for velocity and
+an optional reference pressure. If `pressure` is provided (constant or
+function), it is imposed on the pressure field at the boundary; otherwise the
+pressure remains free and a gauge condition is still required elsewhere.
+"""
+struct Outflow <: AbstractBoundary
+    pressure::Union{Nothing,Float64,Function}
+    function Outflow(p::Union{Nothing,Float64,Function}=nothing)
+        new(p)
+    end
+end
+
 abstract type AbstractInterfaceBC end
 
 """

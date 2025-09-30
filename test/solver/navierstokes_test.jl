@@ -106,3 +106,15 @@ end
     @test res ≤ 1e-8
     @test maximum(abs, solver.x) > 0
 end
+
+@testset "Navier–Stokes outflow" begin
+    solver, data = build_simple_navierstokes()
+    solver.bc_u[1].borders[:right] = Outflow()
+    solver.bc_u[2].borders[:right] = Outflow()
+    solver.bc_p.borders[:right] = Outflow(0.0)
+    solver.x .= 0.0
+    _, iters, res = Penguin.solve_NavierStokesMono_steady!(solver; tol=1e-9, maxiter=5, nlsolve_method=:picard)
+    @test iters ≥ 1
+    @test res ≤ 1e-9
+    @test maximum(abs, solver.x) ≤ 1e-10
+end

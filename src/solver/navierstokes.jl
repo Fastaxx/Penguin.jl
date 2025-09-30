@@ -939,6 +939,17 @@ function apply_velocity_dirichlet_2D_newton!(A::SparseMatrixCSC{Float64, Int}, r
                     deltaγ = Float64(vx) - Float64(x_state[colγ])
                     enforce_dirichlet!(A, rhs, row_uγx_off + lix, colγ, deltaγ)
                 end
+            elseif bcx isa Outflow
+                lix = LIx[i, jx]
+                neighbor = jx == 1 ? LIx[i, min(jx+1, ny)] : LIx[i, max(jx-1, 1)]
+                col = uωx_off + lix
+                col_adj = uωx_off + neighbor
+                rhs_val = -(Float64(x_state[col]) - Float64(x_state[col_adj]))
+                enforce_zero_gradient!(A, rhs, row_uωx_off + lix, col, col_adj, rhs_val)
+                colγ = uγx_off + lix
+                colγ_adj = uγx_off + neighbor
+                rhs_gamma = -(Float64(x_state[colγ]) - Float64(x_state[colγ_adj]))
+                enforce_zero_gradient!(A, rhs, row_uγx_off + lix, colγ, colγ_adj, rhs_gamma)
             end
         end
         for i in 1:nx_y
@@ -953,6 +964,17 @@ function apply_velocity_dirichlet_2D_newton!(A::SparseMatrixCSC{Float64, Int}, r
                     deltaγ = Float64(vy) - Float64(x_state[colγ])
                     enforce_dirichlet!(A, rhs, row_uγy_off + liy, colγ, deltaγ)
                 end
+            elseif bcy isa Outflow
+                liy = LIy[i, jx]
+                neighbor = jx == 1 ? LIy[i, min(jx+1, ny)] : LIy[i, max(jx-1, 1)]
+                col = uωy_off + liy
+                col_adj = uωy_off + neighbor
+                rhs_val = -(Float64(x_state[col]) - Float64(x_state[col_adj]))
+                enforce_zero_gradient!(A, rhs, row_uωy_off + liy, col, col_adj, rhs_val)
+                colγ = uγy_off + liy
+                colγ_adj = uγy_off + neighbor
+                rhs_gamma = -(Float64(x_state[colγ]) - Float64(x_state[colγ_adj]))
+                enforce_zero_gradient!(A, rhs, row_uγy_off + liy, colγ, colγ_adj, rhs_gamma)
             end
         end
     end
@@ -971,6 +993,17 @@ function apply_velocity_dirichlet_2D_newton!(A::SparseMatrixCSC{Float64, Int}, r
                     deltaγ = Float64(vx) - Float64(x_state[colγ])
                     enforce_dirichlet!(A, rhs, row_uγx_off + lix, colγ, deltaγ)
                 end
+            elseif bcx isa Outflow
+                lix = LIx[ix, j]
+                neighbor = ix == 1 ? LIx[min(ix+1, nx), j] : LIx[max(ix-1, 1), j]
+                col = uωx_off + lix
+                col_adj = uωx_off + neighbor
+                rhs_val = -(Float64(x_state[col]) - Float64(x_state[col_adj]))
+                enforce_zero_gradient!(A, rhs, row_uωx_off + lix, col, col_adj, rhs_val)
+                colγ = uγx_off + lix
+                colγ_adj = uγx_off + neighbor
+                rhs_gamma = -(Float64(x_state[colγ]) - Float64(x_state[colγ_adj]))
+                enforce_zero_gradient!(A, rhs, row_uγx_off + lix, colγ, colγ_adj, rhs_gamma)
             end
         end
         for j in 1:ny_y
@@ -985,6 +1018,17 @@ function apply_velocity_dirichlet_2D_newton!(A::SparseMatrixCSC{Float64, Int}, r
                     deltaγ = Float64(vy) - Float64(x_state[colγ])
                     enforce_dirichlet!(A, rhs, row_uγy_off + liy, colγ, deltaγ)
                 end
+            elseif bcy isa Outflow
+                liy = LIy[ix, j]
+                neighbor = ix == 1 ? LIy[min(ix+1, nx), j] : LIy[max(ix-1, 1), j]
+                col = uωy_off + liy
+                col_adj = uωy_off + neighbor
+                rhs_val = -(Float64(x_state[col]) - Float64(x_state[col_adj]))
+                enforce_zero_gradient!(A, rhs, row_uωy_off + liy, col, col_adj, rhs_val)
+                colγ = uγy_off + liy
+                colγ_adj = uγy_off + neighbor
+                rhs_gamma = -(Float64(x_state[colγ]) - Float64(x_state[colγ_adj]))
+                enforce_zero_gradient!(A, rhs, row_uγy_off + liy, colγ, colγ_adj, rhs_gamma)
             end
         end
     end
@@ -1007,16 +1051,40 @@ function apply_pressure_gauge_newton!(A::SparseMatrixCSC{Float64,Int}, rhs::Vect
 
     ranges_full = ntuple(i -> 1:dims[i], nd)
 
+    firstn(coords::NTuple{N,Float64}, m::Int) where {N} = ntuple(i -> coords[i], m)
+    function call_boundary_value(f::Function, coords::NTuple{N,Float64}, t_input::Union{Nothing,Float64}) where {N}
+        for m in N:-1:0
+            args = m == 0 ? () : firstn(coords, m)
+            try
+                return f(args...)
+            catch err
+                err isa MethodError || rethrow(err)
+            end
+            if t_input !== nothing
+                try
+                    return f(args..., t_input)
+                catch err
+                    err isa MethodError || rethrow(err)
+                end
+            end
+        end
+        return nothing
+    end
+
     function eval_pressure_bc(bc::AbstractBoundary, coords::NTuple{N,Float64}) where {N}
-        bc isa Dirichlet || return nothing
-        val = bc.value
+        val = if bc isa Dirichlet
+            bc.value
+        elseif bc isa Outflow
+            bc.pressure
+        else
+            nothing
+        end
+        val === nothing && return nothing
         if val isa Function
             t_arg = t === nothing ? nothing : t
-            try
-                return Float64(val(coords...))
-            catch MethodError
-                return Float64(val(coords..., t_arg === nothing ? 0.0 : t_arg))
-            end
+            evaluated = call_boundary_value(val, coords, t_arg)
+            evaluated === nothing && return nothing
+            return Float64(evaluated)
         else
             return Float64(val)
         end
@@ -1024,7 +1092,9 @@ function apply_pressure_gauge_newton!(A::SparseMatrixCSC{Float64,Int}, rhs::Vect
 
     function apply_face!(dim::Int, fixed_idx::Int, bc::AbstractBoundary)
         dim <= nd || return
-        bc isa Dirichlet || return
+        if !(bc isa Dirichlet || (bc isa Outflow && bc.pressure !== nothing))
+            return
+        end
         ranges = collect(ranges_full)
         ranges[dim] = fixed_idx:fixed_idx
         for idx in Iterators.product(ranges...)

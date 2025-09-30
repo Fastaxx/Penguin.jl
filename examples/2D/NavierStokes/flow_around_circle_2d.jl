@@ -51,7 +51,7 @@ parabolic = (x, y, t=0.0) -> begin
 end
 
 ux_left   = Dirichlet((x, y, t=0.0) -> parabolic(x, y, t))
-ux_right  = Dirichlet((x, y, t=0.0) -> parabolic(x, y, t))
+ux_right  = Outflow()
 ux_bottom = Dirichlet((x, y, t=0.0) -> 0.0)
 ux_top    = Dirichlet((x, y, t=0.0) -> 0.0)
 

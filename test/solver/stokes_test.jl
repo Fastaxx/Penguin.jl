@@ -156,6 +156,61 @@ using LinearAlgebra
         r = Atrim * xtrim - btrim
         @test norm(r, Inf) ≤ 1e-10
     end
+
+    @testset "2D Outflow" begin
+        nx, ny = 16, 8
+        Lx, Ly = 1.0, 0.5
+        x0, y0 = 0.0, 0.0
+
+        mesh_p = Penguin.Mesh((nx, ny), (Lx, Ly), (x0, y0))
+        dx, dy = Lx / nx, Ly / ny
+        mesh_ux = Penguin.Mesh((nx, ny), (Lx, Ly), (x0 - 0.5 * dx, y0))
+        mesh_uy = Penguin.Mesh((nx, ny), (Lx, Ly), (x0, y0 - 0.5 * dy))
+
+        body = (x, y, _=0.0) -> -1.0
+        capacity_ux = Capacity(body, mesh_ux; compute_centroids=false)
+        capacity_uy = Capacity(body, mesh_uy; compute_centroids=false)
+        capacity_p  = Capacity(body, mesh_p; compute_centroids=false)
+
+        operator_ux = DiffusionOps(capacity_ux)
+        operator_uy = DiffusionOps(capacity_uy)
+        operator_p  = DiffusionOps(capacity_p)
+
+        bc_ux = BorderConditions(Dict(
+            :left   => Dirichlet(0.0),
+            :right  => Outflow(),
+            :bottom => Dirichlet(0.0),
+            :top    => Dirichlet(0.0),
+        ))
+
+        bc_uy = BorderConditions(Dict(
+            :left   => Dirichlet(0.0),
+            :right  => Outflow(),
+            :bottom => Dirichlet(0.0),
+            :top    => Dirichlet(0.0),
+        ))
+
+        bc_p = BorderConditions(Dict(:right => Outflow(0.0)))
+        bc_cut = Dirichlet(0.0)
+
+        μ = 1.0
+        ρ = 1.0
+        fᵤ = (x, y, z=0.0) -> 0.0
+        fₚ = (x, y, z=0.0) -> 0.0
+
+        fluid = Fluid((mesh_ux, mesh_uy),
+                      (capacity_ux, capacity_uy),
+                      (operator_ux, operator_uy),
+                      mesh_p,
+                      capacity_p,
+                      operator_p,
+                      μ, ρ, fᵤ, fₚ)
+
+        solver = StokesMono(fluid, (bc_ux, bc_uy), bc_p, bc_cut)
+        solve_StokesMono!(solver; method=Base.:\)
+
+        @test maximum(abs, solver.x) ≤ 1e-10
+    end
 end
 
 @testset "Stokes Velocity BCs (Neumann/Periodic)" begin
