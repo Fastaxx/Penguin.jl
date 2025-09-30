@@ -33,6 +33,7 @@ mutable struct NavierStokesMono{N}
     prev_conv::Union{Nothing,NTuple{N,Vector{Float64}}}
     last_conv_ops::Union{Nothing,NamedTuple}
     ch::Vector{Any}
+    residual_history::Vector{Float64}  # Store Picard iteration residuals
 end
 
 """
@@ -58,7 +59,7 @@ function NavierStokesMono(fluid::Fluid{N},
 
     return NavierStokesMono{N}(fluid, bc_u, bc_p, bc_cut,
                                convection, A, b, x_init,
-                               nothing, nothing, Any[])
+                               nothing, nothing, Any[], Float64[])
 end
 
 NavierStokesMono(fluid::Fluid{1},
@@ -173,19 +174,18 @@ function navierstokes2D_blocks(s::NavierStokesMono)
     np = prod(op_p.size)
 
     μ = s.fluid.μ
-    μinv = μ isa Function ? (args...)->1.0/μ(args...) : 1.0/μ
-    Iμ⁻¹_x = build_I_D(ops_u[1], μinv, caps_u[1])
-    Iμ⁻¹_y = build_I_D(ops_u[2], μinv, caps_u[2])
+    Iμ_x = build_I_D(ops_u[1], μ, caps_u[1])
+    Iμ_y = build_I_D(ops_u[2], μ, caps_u[2])
 
     WGx_Gx = ops_u[1].Wꜝ * ops_u[1].G
     WGx_Hx = ops_u[1].Wꜝ * ops_u[1].H
-    visc_x_ω = -(Iμ⁻¹_x * ops_u[1].G' * WGx_Gx)
-    visc_x_γ = -(Iμ⁻¹_x * ops_u[1].G' * WGx_Hx)
+    visc_x_ω = (Iμ_x * ops_u[1].G' * WGx_Gx)
+    visc_x_γ = (Iμ_x * ops_u[1].G' * WGx_Hx)
 
     WGy_Gy = ops_u[2].Wꜝ * ops_u[2].G
     WGy_Hy = ops_u[2].Wꜝ * ops_u[2].H
-    visc_y_ω = -(Iμ⁻¹_y * ops_u[2].G' * WGy_Gy)
-    visc_y_γ = -(Iμ⁻¹_y * ops_u[2].G' * WGy_Hy)
+    visc_y_ω = (Iμ_y * ops_u[2].G' * WGy_Gy)
+    visc_y_γ = (Iμ_y * ops_u[2].G' * WGy_Hy)
 
     grad_full = (op_p.G + op_p.H)
     total_grad_rows = size(grad_full, 1)
@@ -296,11 +296,6 @@ function compute_convection_vectors!(s::NavierStokesMono,
         bulk[idx] * qω_tuple[idx] - 0.5 * (K_adv[idx] * qω_tuple[idx] + K_advected[idx] * uω_adv_tuple[idx])
     end
 
-    K_gamma = ntuple(Val(N)) do i
-        idx = Int(i)
-        spdiagm(0 => uω_adv_tuple[idx]) * SplusHt[idx]
-    end
-
     s.last_conv_ops = (bulk=bulk,
                        K_adv=K_adv,
                        K_advected=K_advected,
@@ -308,7 +303,6 @@ function compute_convection_vectors!(s::NavierStokesMono,
                            idx = Int(i)
                            0.5 * (K_adv[idx] + K_advected[idx])
                        end,
-                       K_gamma=K_gamma,
                        SplusHt=SplusHt,
                        uω_adv=uω_adv_tuple,
                        uγ_adv=uγ_adv_tuple)
@@ -350,12 +344,12 @@ function assemble_navierstokes2D_unsteady!(s::NavierStokesMono, data, Δt::Float
     row_con = 2 * sum_nu
 
     # Momentum blocks
-    A[row_uωx+1:row_uωx+nu_x, off_uωx+1:off_uωx+nu_x] = mass_x_dt - θ * data.visc_x_ω
-    A[row_uωx+1:row_uωx+nu_x, off_uγx+1:off_uγx+nu_x] = -θ * data.visc_x_γ
+    A[row_uωx+1:row_uωx+nu_x, off_uωx+1:off_uωx+nu_x] = mass_x_dt + θ * data.visc_x_ω
+    A[row_uωx+1:row_uωx+nu_x, off_uγx+1:off_uγx+nu_x] = θ * data.visc_x_γ
     A[row_uωx+1:row_uωx+nu_x, off_p+1:off_p+np]       = data.grad_x
 
-    A[row_uωy+1:row_uωy+nu_y, off_uωy+1:off_uωy+nu_y] = mass_y_dt - θ * data.visc_y_ω
-    A[row_uωy+1:row_uωy+nu_y, off_uγy+1:off_uγy+nu_y] = -θ * data.visc_y_γ
+    A[row_uωy+1:row_uωy+nu_y, off_uωy+1:off_uωy+nu_y] = mass_y_dt + θ * data.visc_y_ω
+    A[row_uωy+1:row_uωy+nu_y, off_uγy+1:off_uγy+nu_y] = θ * data.visc_y_γ
     A[row_uωy+1:row_uωy+nu_y, off_p+1:off_p+np]       = data.grad_y
 
     # Tie rows
@@ -383,10 +377,10 @@ function assemble_navierstokes2D_unsteady!(s::NavierStokesMono, data, Δt::Float
     load_y = data.Vy * (θ .* f_next_y .+ θc .* f_prev_y)
 
     rhs_mom_x = mass_x_dt * Vector{Float64}(uωx_prev)
-    rhs_mom_x .+= θc * (data.visc_x_ω * Vector{Float64}(uωx_prev) + data.visc_x_γ * Vector{Float64}(uγx_prev))
+    rhs_mom_x .-= θc * (data.visc_x_ω * Vector{Float64}(uωx_prev) + data.visc_x_γ * Vector{Float64}(uγx_prev))
 
     rhs_mom_y = mass_y_dt * Vector{Float64}(uωy_prev)
-    rhs_mom_y .+= θc * (data.visc_y_ω * Vector{Float64}(uωy_prev) + data.visc_y_γ * Vector{Float64}(uγy_prev))
+    rhs_mom_y .-= θc * (data.visc_y_ω * Vector{Float64}(uωy_prev) + data.visc_y_γ * Vector{Float64}(uγy_prev))
 
     grad_prev_coeff = θ == 1.0 ? 0.0 : (1.0 - θ) / θ
     if grad_prev_coeff != 0.0
@@ -398,12 +392,17 @@ function assemble_navierstokes2D_unsteady!(s::NavierStokesMono, data, Δt::Float
     rhs_mom_y .+= load_y
 
     conv_curr = compute_convection_vectors!(s, data, x_prev)
+    
+    # Get density for convection terms
+    ρ = s.fluid.ρ
+    ρ_val = ρ isa Function ? 1.0 : ρ  # Use constant ρ for now
+    
     if conv_prev === nothing
-        rhs_mom_x .-= conv_curr[1]
-        rhs_mom_y .-= conv_curr[2]
+        rhs_mom_x .-= ρ_val .* conv_curr[1]
+        rhs_mom_y .-= ρ_val .* conv_curr[2]
     else
-        rhs_mom_x .-= 1.5 .* conv_curr[1] .- 0.5 .* conv_prev[1]
-        rhs_mom_y .-= 1.5 .* conv_curr[2] .- 0.5 .* conv_prev[2]
+        rhs_mom_x .-= ρ_val .* (1.5 .* conv_curr[1] .- 0.5 .* conv_prev[1])
+        rhs_mom_y .-= ρ_val .* (1.5 .* conv_curr[2] .- 0.5 .* conv_prev[2])
     end
 
     g_cut_x = safe_build_g(data.op_ux, s.bc_cut, data.cap_px, t_next)
@@ -457,15 +456,18 @@ function assemble_navierstokes2D_steady_picard!(s::NavierStokesMono,
     @assert ops !== nothing
     bulk = ops.bulk
     K_diag = ops.K_adv
-    K_gamma = ops.K_gamma
 
+    # Get density for convection terms
+    ρ = s.fluid.ρ
+    ρ_val = ρ isa Function ? 1.0 : ρ  # Use constant ρ for now, spatial variation needs more work
+    
     # Momentum rows with Picard linearized convection
-    A[row_uωx+1:row_uωx+nu_x, off_uωx+1:off_uωx+nu_x] = data.visc_x_ω + bulk[1] - 0.5 * K_diag[1]
-    A[row_uωx+1:row_uωx+nu_x, off_uγx+1:off_uγx+nu_x] = data.visc_x_γ - 0.5 * K_gamma[1]
+    A[row_uωx+1:row_uωx+nu_x, off_uωx+1:off_uωx+nu_x] = data.visc_x_ω + ρ_val * bulk[1] - 0.5 * ρ_val * K_diag[1]
+    A[row_uωx+1:row_uωx+nu_x, off_uγx+1:off_uγx+nu_x] = data.visc_x_γ
     A[row_uωx+1:row_uωx+nu_x, off_p+1:off_p+np]       = data.grad_x
 
-    A[row_uωy+1:row_uωy+nu_y, off_uωy+1:off_uωy+nu_y] = data.visc_y_ω + bulk[2] - 0.5 * K_diag[2]
-    A[row_uωy+1:row_uωy+nu_y, off_uγy+1:off_uγy+nu_y] = data.visc_y_γ - 0.5 * K_gamma[2]
+    A[row_uωy+1:row_uωy+nu_y, off_uωy+1:off_uωy+nu_y] = data.visc_y_ω + ρ_val * bulk[2] - 0.5 * ρ_val * K_diag[2]
+    A[row_uωy+1:row_uωy+nu_y, off_uγy+1:off_uγy+nu_y] = data.visc_y_γ
     A[row_uωy+1:row_uωy+nu_y, off_p+1:off_p+np]       = data.grad_y
 
     # Tie rows
@@ -622,6 +624,9 @@ function solve_NavierStokesMono_steady!(s::NavierStokesMono; tol=1e-8, maxiter::
     x_iter = copy(s.x)
     residual = Inf
     iter = 0
+    
+    # Clear and initialize residual history
+    empty!(s.residual_history)
 
     println("[NavierStokesMono] Starting steady Picard iterations (tol=$(tol), maxiter=$(maxiter), relaxation=$(θ_relax))")
 
@@ -630,13 +635,20 @@ function solve_NavierStokesMono_steady!(s::NavierStokesMono; tol=1e-8, maxiter::
         solve_navierstokes_linear_system!(s; method=method, algorithm=algorithm, kwargs...)
 
         x_new = θ_relax .* s.x .+ (1.0 - θ_relax) .* x_iter
-        residual = maximum(abs, x_new .- x_iter)
+        
+        # Calculate residual only on velocity components (exclude pressure)
+        p_offset = 2 * (data.nu_x + data.nu_y)
+        velocity_residual = maximum(abs, (x_new .- x_iter)[1:p_offset])
+        residual = velocity_residual
+        
+        # Store residual in history
+        push!(s.residual_history, residual)
 
         x_iter .= x_new
         s.x .= x_new
 
         iter += 1
-        println("[NavierStokesMono] Picard iter=$(iter) max|Δx|=$(residual)")
+        println("[NavierStokesMono] Picard iter=$(iter) max|Δu|=$(residual)")
     end
 
     if residual > tol

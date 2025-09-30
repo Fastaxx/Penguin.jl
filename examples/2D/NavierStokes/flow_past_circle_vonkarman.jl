@@ -64,7 +64,7 @@ end
 # Boundary conditions
 # ---------------------------------------------------------------------------
 ux_left   = Dirichlet(inflow_profile)
-ux_right  = Dirichlet((x, y, t)->U_ref)   # weakly enforce outflow speed
+ux_right  = Periodic()
 ux_bottom = Dirichlet((x, y, t)->0.0)
 ux_top    = Dirichlet((x, y, t)->0.0)
 
@@ -107,8 +107,8 @@ solver = NavierStokesMono(fluid, (bc_ux, bc_uy), bc_p, interface_bc; x0=x0_vec)
 # ---------------------------------------------------------------------------
 # Time integration parameters
 # ---------------------------------------------------------------------------
-Δt = 0.002
-T_end = 5.0
+Δt = 0.01
+T_end = 0.05
 
 println("Running oscillatory cylinder flow up to T=$(T_end) (Δt=$(Δt))")
 

@@ -58,14 +58,13 @@ function stokes1D_blocks(s::StokesMono)
     np = prod(op_p.size)
 
     μ = s.fluid.μ
-    μinv = μ isa Function ? (args...)->1.0/μ(args...) : 1.0/μ
-    Iμ⁻¹ = build_I_D(op_u, μinv, cap_u)
+    Iμ = build_I_D(op_u, μ, cap_u)
 
     WG_uG = op_u.Wꜝ * op_u.G
     WG_uH = op_u.Wꜝ * op_u.H
 
-    visc_uω = -(Iμ⁻¹ * op_u.G' * WG_uG)
-    visc_uγ = -(Iμ⁻¹ * op_u.G' * WG_uH)
+    visc_uω = (Iμ * op_u.G' * WG_uG)
+    visc_uγ = (Iμ * op_u.G' * WG_uH)
     grad = -((op_p.G + op_p.H))
 
     div_uω = - (op_p.G' + op_p.H')
@@ -91,19 +90,18 @@ function stokes2D_blocks(s::StokesMono)
     np = prod(op_p.size)
 
     μ = s.fluid.μ
-    μinv = μ isa Function ? (args...)->1.0/μ(args...) : 1.0/μ
-    Iμ⁻¹_x = build_I_D(ops_u[1], μinv, caps_u[1])
-    Iμ⁻¹_y = build_I_D(ops_u[2], μinv, caps_u[2])
+    Iμ_x = build_I_D(ops_u[1], μ, caps_u[1])
+    Iμ_y = build_I_D(ops_u[2], μ, caps_u[2])
 
     WGx_Gx = ops_u[1].Wꜝ * ops_u[1].G
     WGx_Hx = ops_u[1].Wꜝ * ops_u[1].H
-    visc_x_ω = -(Iμ⁻¹_x * ops_u[1].G' * WGx_Gx)
-    visc_x_γ = -(Iμ⁻¹_x * ops_u[1].G' * WGx_Hx)
+    visc_x_ω = (Iμ_x * ops_u[1].G' * WGx_Gx)
+    visc_x_γ = (Iμ_x * ops_u[1].G' * WGx_Hx)
 
     WGy_Gy = ops_u[2].Wꜝ * ops_u[2].G
     WGy_Hy = ops_u[2].Wꜝ * ops_u[2].H
-    visc_y_ω = -(Iμ⁻¹_y * ops_u[2].G' * WGy_Gy)
-    visc_y_γ = -(Iμ⁻¹_y * ops_u[2].G' * WGy_Hy)
+    visc_y_ω = (Iμ_y * ops_u[2].G' * WGy_Gy)
+    visc_y_γ = (Iμ_y * ops_u[2].G' * WGy_Hy)
 
     grad_full = (op_p.G + op_p.H)
     total_grad_rows = size(grad_full, 1)
@@ -155,25 +153,24 @@ function stokes3D_blocks(s::StokesMono)
     sum_nu = nu_x + nu_y + nu_z
 
     μ = s.fluid.μ
-    μinv = μ isa Function ? (args...)->1.0/μ(args...) : 1.0/μ
-    Iμ⁻¹_x = build_I_D(op_ux, μinv, cap_ux)
-    Iμ⁻¹_y = build_I_D(op_uy, μinv, cap_uy)
-    Iμ⁻¹_z = build_I_D(op_uz, μinv, cap_uz)
+    Iμ_x = build_I_D(op_ux, μ, cap_ux)
+    Iμ_y = build_I_D(op_uy, μ, cap_uy)
+    Iμ_z = build_I_D(op_uz, μ, cap_uz)
 
     WGx_Gx = op_ux.Wꜝ * op_ux.G
     WGx_Hx = op_ux.Wꜝ * op_ux.H
-    visc_x_ω = -(Iμ⁻¹_x * op_ux.G' * WGx_Gx)
-    visc_x_γ = -(Iμ⁻¹_x * op_ux.G' * WGx_Hx)
+    visc_x_ω = (Iμ_x * op_ux.G' * WGx_Gx)
+    visc_x_γ = (Iμ_x * op_ux.G' * WGx_Hx)
 
     WGy_Gy = op_uy.Wꜝ * op_uy.G
     WGy_Hy = op_uy.Wꜝ * op_uy.H
-    visc_y_ω = -(Iμ⁻¹_y * op_uy.G' * WGy_Gy)
-    visc_y_γ = -(Iμ⁻¹_y * op_uy.G' * WGy_Hy)
+    visc_y_ω = (Iμ_y * op_uy.G' * WGy_Gy)
+    visc_y_γ = (Iμ_y * op_uy.G' * WGy_Hy)
 
     WGz_Gz = op_uz.Wꜝ * op_uz.G
     WGz_Hz = op_uz.Wꜝ * op_uz.H
-    visc_z_ω = -(Iμ⁻¹_z * op_uz.G' * WGz_Gz)
-    visc_z_γ = -(Iμ⁻¹_z * op_uz.G' * WGz_Hz)
+    visc_z_ω = (Iμ_z * op_uz.G' * WGz_Gz)
+    visc_z_γ = (Iμ_z * op_uz.G' * WGz_Hz)
 
     grad_full = (op_p.G + op_p.H)
     total_grad_rows = size(grad_full, 1)
@@ -311,8 +308,8 @@ function assemble_stokes1D!(s::StokesMono)
     A = spzeros(Float64, rows, cols)
 
     # Momentum block rows
-    A[1:nu, 1:nu]         = data.visc_uω
-    A[1:nu, nu+1:2nu]     = data.visc_uγ
+    A[1:nu, 1:nu]         = -data.visc_uω
+    A[1:nu, nu+1:2nu]     = -data.visc_uγ
     A[1:nu, 2nu+1:2nu+np] = data.grad
 
     # Tie rows enforce uγ = g_cut
@@ -447,24 +444,24 @@ function assemble_stokes3D!(s::StokesMono)
     row_con = 2 * sum_nu
 
     # Momentum x-component rows
-    A[row_uωx+1:row_uωx+nu_x, off_uωx+1:off_uωx+nu_x] = data.visc_x_ω
-    A[row_uωx+1:row_uωx+nu_x, off_uγx+1:off_uγx+nu_x] = data.visc_x_γ
+    A[row_uωx+1:row_uωx+nu_x, off_uωx+1:off_uωx+nu_x] = -data.visc_x_ω
+    A[row_uωx+1:row_uωx+nu_x, off_uγx+1:off_uγx+nu_x] = -data.visc_x_γ
     A[row_uωx+1:row_uωx+nu_x, off_p+1:off_p+np]       = data.grad_x
 
     # Tie x rows
     A[row_uγx+1:row_uγx+nu_x, off_uγx+1:off_uγx+nu_x] = data.tie_x
 
     # Momentum y-component rows
-    A[row_uωy+1:row_uωy+nu_y, off_uωy+1:off_uωy+nu_y] = data.visc_y_ω
-    A[row_uωy+1:row_uωy+nu_y, off_uγy+1:off_uγy+nu_y] = data.visc_y_γ
+    A[row_uωy+1:row_uωy+nu_y, off_uωy+1:off_uωy+nu_y] = -data.visc_y_ω
+    A[row_uωy+1:row_uωy+nu_y, off_uγy+1:off_uγy+nu_y] = -data.visc_y_γ
     A[row_uωy+1:row_uωy+nu_y, off_p+1:off_p+np]       = data.grad_y
 
     # Tie y rows
     A[row_uγy+1:row_uγy+nu_y, off_uγy+1:off_uγy+nu_y] = data.tie_y
 
     # Momentum z-component rows
-    A[row_uωz+1:row_uωz+nu_z, off_uωz+1:off_uωz+nu_z] = data.visc_z_ω
-    A[row_uωz+1:row_uωz+nu_z, off_uγz+1:off_uγz+nu_z] = data.visc_z_γ
+    A[row_uωz+1:row_uωz+nu_z, off_uωz+1:off_uωz+nu_z] = -data.visc_z_ω
+    A[row_uωz+1:row_uωz+nu_z, off_uγz+1:off_uγz+nu_z] = -data.visc_z_γ
     A[row_uωz+1:row_uωz+nu_z, off_p+1:off_p+np]       = data.grad_z
 
     # Tie z rows
@@ -540,8 +537,8 @@ function assemble_stokes1D_unsteady!(s::StokesMono, data, Δt::Float64,
     θc = 1.0 - θ
 
     # Momentum block
-    A[1:nu, 1:nu]         = mass_dt - θ * data.visc_uω
-    A[1:nu, nu+1:2nu]     = -θ * data.visc_uγ
+    A[1:nu, 1:nu]         = mass_dt + θ * data.visc_uω
+    A[1:nu, nu+1:2nu]     = θ * data.visc_uγ
     A[1:nu, 2nu+1:2nu+np] = data.grad
 
     # Tie and continuity blocks
@@ -558,7 +555,7 @@ function assemble_stokes1D_unsteady!(s::StokesMono, data, Δt::Float64,
     load = data.V * (θ .* f_next .+ θc .* f_prev)
 
     rhs_mom = mass_dt * u_prev_ω
-    rhs_mom .+= θc * (data.visc_uω * u_prev_ω + data.visc_uγ * u_prev_γ)
+    rhs_mom .-= θc * (data.visc_uω * u_prev_ω + data.visc_uγ * u_prev_γ)
 
     grad_prev_coeff = θ == 1.0 ? 0.0 : (1.0 - θ) / θ
     if grad_prev_coeff != 0.0
@@ -647,7 +644,7 @@ function assemble_stokes2D_unsteady!(s::StokesMono, data, Δt::Float64,
     load_y = data.Vy * (θ .* f_next_y .+ θc .* f_prev_y)
 
     rhs_mom_x = mass_x_dt * uωx_prev
-    rhs_mom_x .+= θc * (data.visc_x_ω * uωx_prev + data.visc_x_γ * uγx_prev)
+    rhs_mom_x .-= θc * (data.visc_x_ω * uωx_prev + data.visc_x_γ * uγx_prev)
 
     grad_prev_coeff = θ == 1.0 ? 0.0 : (1.0 - θ) / θ
     if grad_prev_coeff != 0.0
@@ -657,7 +654,7 @@ function assemble_stokes2D_unsteady!(s::StokesMono, data, Δt::Float64,
     rhs_mom_x .+= load_x
 
     rhs_mom_y = mass_y_dt * uωy_prev
-    rhs_mom_y .+= θc * (data.visc_y_ω * uωy_prev + data.visc_y_γ * uγy_prev)
+    rhs_mom_y .-= θc * (data.visc_y_ω * uωy_prev + data.visc_y_γ * uγy_prev)
     if grad_prev_coeff != 0.0
         rhs_mom_y .+= grad_prev_coeff * (data.grad_y * p_half_prev)
     end
@@ -721,24 +718,24 @@ function assemble_stokes3D_unsteady!(s::StokesMono, data, Δt::Float64,
     row_con = 2 * sum_nu
 
     # Momentum x-component
-    A[row_uωx+1:row_uωx+nu_x, off_uωx+1:off_uωx+nu_x] = mass_x_dt - θ * data.visc_x_ω
-    A[row_uωx+1:row_uωx+nu_x, off_uγx+1:off_uγx+nu_x] = -θ * data.visc_x_γ
+    A[row_uωx+1:row_uωx+nu_x, off_uωx+1:off_uωx+nu_x] = mass_x_dt + θ * data.visc_x_ω
+    A[row_uωx+1:row_uωx+nu_x, off_uγx+1:off_uγx+nu_x] = θ * data.visc_x_γ
     A[row_uωx+1:row_uωx+nu_x, off_p+1:off_p+np]       = data.grad_x
 
     # Tie x rows
     A[row_uγx+1:row_uγx+nu_x, off_uγx+1:off_uγx+nu_x] = data.tie_x
 
     # Momentum y-component
-    A[row_uωy+1:row_uωy+nu_y, off_uωy+1:off_uωy+nu_y] = mass_y_dt - θ * data.visc_y_ω
-    A[row_uωy+1:row_uωy+nu_y, off_uγy+1:off_uγy+nu_y] = -θ * data.visc_y_γ
+    A[row_uωy+1:row_uωy+nu_y, off_uωy+1:off_uωy+nu_y] = mass_y_dt + θ * data.visc_y_ω
+    A[row_uωy+1:row_uωy+nu_y, off_uγy+1:off_uγy+nu_y] = θ * data.visc_y_γ
     A[row_uωy+1:row_uωy+nu_y, off_p+1:off_p+np]       = data.grad_y
 
     # Tie y rows
     A[row_uγy+1:row_uγy+nu_y, off_uγy+1:off_uγy+nu_y] = data.tie_y
 
     # Momentum z-component
-    A[row_uωz+1:row_uωz+nu_z, off_uωz+1:off_uωz+nu_z] = mass_z_dt - θ * data.visc_z_ω
-    A[row_uωz+1:row_uωz+nu_z, off_uγz+1:off_uγz+nu_z] = -θ * data.visc_z_γ
+    A[row_uωz+1:row_uωz+nu_z, off_uωz+1:off_uωz+nu_z] = mass_z_dt + θ * data.visc_z_ω
+    A[row_uωz+1:row_uωz+nu_z, off_uγz+1:off_uγz+nu_z] = θ * data.visc_z_γ
     A[row_uωz+1:row_uωz+nu_z, off_p+1:off_p+np]       = data.grad_z
 
     # Tie z rows
@@ -773,13 +770,13 @@ function assemble_stokes3D_unsteady!(s::StokesMono, data, Δt::Float64,
     load_z = data.Vz * (θ .* f_next_z .+ θc .* f_prev_z)
 
     rhs_mom_x = mass_x_dt * uωx_prev
-    rhs_mom_x .+= θc * (data.visc_x_ω * uωx_prev + data.visc_x_γ * uγx_prev)
+    rhs_mom_x .-= θc * (data.visc_x_ω * uωx_prev + data.visc_x_γ * uγx_prev)
 
     rhs_mom_y = mass_y_dt * uωy_prev
-    rhs_mom_y .+= θc * (data.visc_y_ω * uωy_prev + data.visc_y_γ * uγy_prev)
+    rhs_mom_y .-= θc * (data.visc_y_ω * uωy_prev + data.visc_y_γ * uγy_prev)
 
     rhs_mom_z = mass_z_dt * uωz_prev
-    rhs_mom_z .+= θc * (data.visc_z_ω * uωz_prev + data.visc_z_γ * uγz_prev)
+    rhs_mom_z .-= θc * (data.visc_z_ω * uωz_prev + data.visc_z_γ * uγz_prev)
 
     grad_prev_coeff = θ == 1.0 ? 0.0 : (1.0 - θ) / θ
     if grad_prev_coeff != 0.0

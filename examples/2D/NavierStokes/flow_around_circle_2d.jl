@@ -70,9 +70,9 @@ interface_bc = Dirichlet(0.0)
 ###########
 # Physics
 ###########
-Re = 100.0
-μ = 1.0 / Re
+μ = 0.001 
 ρ = 1.0
+println("Re=", ρ * Umax * (2 * circle_radius) / μ)
 fᵤ = (x, y, z=0.0, t=0.0) -> 0.0
 fₚ = (x, y, z=0.0, t=0.0) -> 0.0
 
@@ -95,8 +95,8 @@ x0_vec = zeros(2 * (nu_x + nu_y) + np)
 
 solver = NavierStokesMono(fluid, (bc_ux, bc_uy), bc_p, interface_bc; x0=x0_vec)
 
-Δt = 0.01
-T_end = 0.5
+Δt = 0.005
+T_end = 5.0
 
 println("Running Navier–Stokes unsteady simulation...")
 times, histories = solve_NavierStokesMono_unsteady!(solver; Δt=Δt, T_end=T_end, scheme=:CN)
@@ -104,9 +104,6 @@ times, histories = solve_NavierStokesMono_unsteady!(solver; Δt=Δt, T_end=T_end
 println("Simulation finished. Stored states = ", length(histories))
 println("Final time step = ", times[end])
 
-conv_ops, conv_vecs = build_convection_operators(solver, solver.x)
-#println("Convection operator norms: \n  ‖Cx‖ = $(opnorm(conv_ops.Cx))\n  ‖Cy‖ = $(opnorm(conv_ops.Cy))")
-#println("AB2 convection residual magnitudes: \n  ‖conv_x‖ = $(norm(conv_vecs[1]))\n  ‖conv_y‖ = $(norm(conv_vecs[2]))")
 
 ###########
 # Visualization of final velocity and pressure
