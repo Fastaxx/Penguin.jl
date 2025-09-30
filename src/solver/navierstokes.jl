@@ -1,17 +1,14 @@
-struct ConvectiveStencil2D
-    D_primary::SparseMatrixCSC{Float64,Int}
-    D_cross::SparseMatrixCSC{Float64,Int}
-    S_diag::SparseMatrixCSC{Float64,Int}
-    S_cross::SparseMatrixCSC{Float64,Int}
-    S_plus::SparseMatrixCSC{Float64,Int}
-    A_primary::SparseMatrixCSC{Float64,Int}
-    A_cross::SparseMatrixCSC{Float64,Int}
+struct ConvectiveStencil{N}
+    primary_dim::Int
+    D_plus::NTuple{N,SparseMatrixCSC{Float64,Int}}
+    S_minus::NTuple{N,SparseMatrixCSC{Float64,Int}}
+    S_plus_primary::SparseMatrixCSC{Float64,Int}
+    A::NTuple{N,SparseMatrixCSC{Float64,Int}}
     Ht::SparseMatrixCSC{Float64,Int}
 end
 
-struct NavierStokesConvection2D
-    x::ConvectiveStencil2D
-    y::ConvectiveStencil2D
+struct NavierStokesConvection{N}
+    stencils::NTuple{N,ConvectiveStencil{N}}
 end
 
 """
@@ -29,11 +26,11 @@ mutable struct NavierStokesMono{N}
     bc_u::NTuple{N, BorderConditions}
     bc_p::BorderConditions
     bc_cut::AbstractBoundary
-    convection::Union{Nothing,NavierStokesConvection2D}  # Populated for N=2 currently
+    convection::Union{Nothing,NavierStokesConvection{N}}  # Populated for N>=2 currently
     A::SparseMatrixCSC{Float64, Int}
     b::Vector{Float64}
     x::Vector{Float64}
-    prev_conv::Union{Nothing,Tuple{Vector{Float64},Vector{Float64}}}
+    prev_conv::Union{Nothing,NTuple{N,Vector{Float64}}}
     last_conv_ops::Union{Nothing,NamedTuple}
     ch::Vector{Any}
 end
@@ -57,7 +54,7 @@ function NavierStokesMono(fluid::Fluid{N},
     A = spzeros(Float64, Ntot, Ntot)
     b = zeros(Ntot)
 
-    convection = N == 2 ? build_convection_data_2d(fluid) : nothing
+    convection = build_convection_data(fluid)
 
     return NavierStokesMono{N}(fluid, bc_u, bc_p, bc_cut,
                                convection, A, b, x_init,
@@ -78,42 +75,34 @@ function NavierStokesMono(fluid::Fluid{N},
     return NavierStokesMono(fluid, Tuple(bc_u_args), bc_p, bc_cut; x0=x0)
 end
 
-function build_convection_data_2d(fluid::Fluid{2})
-    cap_x, cap_y = fluid.capacity_u
-    op_x, op_y = fluid.operator_u
-    stencil_x = build_convective_stencil_2d(cap_x, op_x, 1)
-    stencil_y = build_convective_stencil_2d(cap_y, op_y, 2)
-    return NavierStokesConvection2D(stencil_x, stencil_y)
+function build_convection_data(fluid::Fluid{N}) where {N}
+    stencils = ntuple(Val(N)) do i
+        build_convective_stencil(fluid.capacity_u[Int(i)], fluid.operator_u[Int(i)], Int(i))
+    end
+    return NavierStokesConvection{N}(stencils)
 end
 
-function build_convective_stencil_2d(capacity::Capacity{2}, op::DiffusionOps{2}, primary_dim::Int)
-    _, _, _, _, D_m, D_p, S_m, S_p = compute_base_operators(capacity)
-    cross_dim = primary_dim == 1 ? 2 : 1
-    return ConvectiveStencil2D(
-        D_p[primary_dim],
-        D_p[cross_dim],
-        S_m[primary_dim],
-        S_m[cross_dim],
-        S_p[primary_dim],
-        capacity.A[primary_dim],
-        capacity.A[cross_dim],
-        op.H'
-    )
-end
+function build_convective_stencil(capacity::AbstractCapacity,
+                                  op::AbstractOperators,
+                                  primary_dim::Int)
+    _, _, _, _, _, D_p, S_m, S_p = compute_base_operators(capacity)
+    N = length(D_p)
+    @assert 1 ≤ primary_dim ≤ N "Primary dimension $(primary_dim) out of bounds for N=$(N)"
 
-function build_convective_stencil_2d(capacity::Capacity{2}, op::AbstractOperators, primary_dim::Int)
-    _, _, _, _, D_m, D_p, S_m, S_p = compute_base_operators(capacity)
-    cross_dim = primary_dim == 1 ? 2 : 1
-    return ConvectiveStencil2D(
-        D_p[primary_dim],
-        D_p[cross_dim],
-        S_m[primary_dim],
-        S_m[cross_dim],
-        S_p[primary_dim],
-        capacity.A[primary_dim],
-        capacity.A[cross_dim],
-        op.H'
-    )
+    D_plus = ntuple(Val(N)) do i
+        D_p[Int(i)]
+    end
+
+    S_minus = ntuple(Val(N)) do i
+        S_m[Int(i)]
+    end
+
+    return ConvectiveStencil{N}(primary_dim,
+                                 D_plus,
+                                 S_minus,
+                                 S_p[primary_dim],
+                                 capacity.A,
+                                 op.H')
 end
 
 # Safe sparse products -------------------------------------------------------
@@ -124,28 +113,51 @@ end
     return A * Vector{Float64}(v)
 end
 
-@inline function build_convection_matrix(stencil::ConvectiveStencil2D,
-                                         u_primary::AbstractVector{<:Real},
-                                         u_cross::AbstractVector{<:Real})
-    flux_primary = stencil.S_diag * safe_mul(stencil.A_primary, u_primary)
-    term1 = stencil.D_primary * spdiagm(0 => flux_primary) * stencil.S_diag
+@inline function build_convection_matrix(stencil::ConvectiveStencil{N},
+                                         u_components::NTuple{N,AbstractVector{<:Real}}) where {N}
+    primary = stencil.primary_dim
 
-    if size(stencil.A_cross, 2) == 0 || length(u_cross) == 0
-        term2 = spzeros(Float64, size(term1, 1), size(term1, 2))
-    else
-        flux_cross = stencil.S_diag * safe_mul(stencil.A_cross, u_cross)
-        term2 = stencil.D_cross * spdiagm(0 => flux_cross) * stencil.S_cross
+    flux_primary = stencil.S_minus[primary] * safe_mul(stencil.A[primary], u_components[primary])
+    term = stencil.D_plus[primary] * spdiagm(0 => flux_primary) * stencil.S_minus[primary]
+
+    for j in 1:N
+        j == primary && continue
+        A_cross = stencil.A[j]
+        if size(A_cross, 2) == 0 || length(u_components[j]) == 0
+            continue
+        end
+        flux_cross = stencil.S_minus[primary] * safe_mul(A_cross, u_components[j])
+        term += stencil.D_plus[j] * spdiagm(0 => flux_cross) * stencil.S_minus[j]
     end
 
-    return term1 + term2
+    return term
 end
 
-@inline function build_K_matrix(stencil::ConvectiveStencil2D,
+@inline function build_K_matrix(stencil::ConvectiveStencil,
                                 uγ::AbstractVector{<:Real})
-    size(stencil.Ht, 2) == 0 && return spzeros(Float64, size(stencil.S_plus, 1), size(stencil.S_plus, 1))
+    size(stencil.Ht, 2) == 0 && return spzeros(Float64, size(stencil.S_plus_primary, 1), size(stencil.S_plus_primary, 1))
     @assert size(stencil.Ht, 2) == length(uγ) "Dimension mismatch for interface velocities"
-    weights = stencil.S_plus * (stencil.Ht * Vector{Float64}(uγ))
+    weights = stencil.S_plus_primary * (stencil.Ht * Vector{Float64}(uγ))
     return spdiagm(0 => weights)
+end
+
+@inline function rotated_interfaces(uγ_tuple::NTuple{N,Vector{Float64}}, idx::Int) where {N}
+    total = 0
+    for j in 1:N
+        total += length(uγ_tuple[j])
+    end
+    result = Vector{Float64}(undef, total)
+    pos = 1
+    for shift in 0:N-1
+        comp = mod1(idx + shift, N)
+        vals = uγ_tuple[comp]
+        len = length(vals)
+        if len > 0
+            copyto!(result, pos, vals, 1, len)
+        end
+        pos += len
+    end
+    return result
 end
 
 # Block builders -------------------------------------------------------------
@@ -199,7 +211,8 @@ function navierstokes2D_blocks(s::NavierStokesMono)
     mass_x = build_I_D(ops_u[1], ρ, caps_u[1]) * ops_u[1].V
     mass_y = build_I_D(ops_u[2], ρ, caps_u[2]) * ops_u[2].V
 
-    return (; nu_x, nu_y, np,
+    return (; nu_components=(nu_x, nu_y),
+            nu_x, nu_y, np,
             op_ux = ops_u[1], op_uy = ops_u[2], op_p, cap_px = caps_u[1], cap_py = caps_u[2], cap_p,
             visc_x_ω, visc_x_γ, visc_y_ω, visc_y_γ,
             grad_x, grad_y,
@@ -211,65 +224,96 @@ end
 
 # Convection helpers ---------------------------------------------------------
 
-function extract_velocity_slices(data, x_state)
-    nu_x = data.nu_x
-    nu_y = data.nu_y
-
-    off_uωx = 0
-    off_uγx = nu_x
-    off_uωy = 2 * nu_x
-    off_uγy = 2 * nu_x + nu_y
-
-    uωx = view(x_state, off_uωx+1:off_uωx+nu_x)
-    uγx = view(x_state, off_uγx+1:off_uγx+nu_x)
-    uωy = view(x_state, off_uωy+1:off_uωy+nu_y)
-    uγy = view(x_state, off_uγy+1:off_uγy+nu_y)
-    return uωx, uγx, uωy, uγy
-end
-
 function compute_convection_vectors!(s::NavierStokesMono,
                                      data,
                                      advecting_state::AbstractVector{<:Real},
                                      advected_state::AbstractVector{<:Real}=advecting_state)
     convection = s.convection
-    convection isa NavierStokesConvection2D || error("Convection data only implemented for 2D Navier–Stokes.")
+    convection === nothing && error("Convection data not available for the current Navier–Stokes configuration.")
 
-    uωx_view, uγx_view, uωy_view, uγy_view = extract_velocity_slices(data, advecting_state)
-    uωx = Vector{Float64}(uωx_view)
-    uγx = Vector{Float64}(uγx_view)
-    uωy = Vector{Float64}(uωy_view)
-    uγy = Vector{Float64}(uγy_view)
+    nu_components = data.nu_components
+    N = length(nu_components)
+
+    uω_adv = Vector{Vector{Float64}}(undef, N)
+    uγ_adv = Vector{Vector{Float64}}(undef, N)
+    offset = 0
+    for i in 1:N
+        n = nu_components[i]
+        uω_adv[i] = Vector{Float64}(view(advecting_state, offset+1:offset+n))
+        offset += n
+        uγ_adv[i] = Vector{Float64}(view(advecting_state, offset+1:offset+n))
+        offset += n
+    end
+    uω_adv_tuple = Tuple(uω_adv)
+    uγ_adv_tuple = Tuple(uγ_adv)
 
     same_state = advected_state === advecting_state
+    qω_tuple = nothing
+    qγ_tuple = nothing
     if same_state
-        qωx, qγx, qωy, qγy = uωx, uγx, uωy, uγy
+        qω_tuple = uω_adv_tuple
+        qγ_tuple = uγ_adv_tuple
     else
-        qωx_view, qγx_view, qωy_view, qγy_view = extract_velocity_slices(data, advected_state)
-        qωx = Vector{Float64}(qωx_view)
-        qγx = Vector{Float64}(qγx_view)
-        qωy = Vector{Float64}(qωy_view)
-        qγy = Vector{Float64}(qγy_view)
+        uω_advected = Vector{Vector{Float64}}(undef, N)
+        uγ_advected = Vector{Vector{Float64}}(undef, N)
+        offset = 0
+        for i in 1:N
+            n = nu_components[i]
+            uω_advected[i] = Vector{Float64}(view(advected_state, offset+1:offset+n))
+            offset += n
+            uγ_advected[i] = Vector{Float64}(view(advected_state, offset+1:offset+n))
+            offset += n
+        end
+        qω_tuple = Tuple(uω_advected)
+        qγ_tuple = Tuple(uγ_advected)
     end
 
-    Cx = build_convection_matrix(convection.x, uωx, uωy)
-    Cy = build_convection_matrix(convection.y, uωy, uωx)
+    qω_tuple = qω_tuple::NTuple{N,Vector{Float64}}
+    qγ_tuple = qγ_tuple::NTuple{N,Vector{Float64}}
 
-    Kx_adv = build_K_matrix(convection.x, vcat(uγx, uγy))
-    Ky_adv = build_K_matrix(convection.y, vcat(uγy, uγx))
+    bulk = ntuple(Val(N)) do i
+        idx = Int(i)
+        build_convection_matrix(convection.stencils[idx], uω_adv_tuple)
+    end
 
-    Kx_advected = same_state ? Kx_adv : build_K_matrix(convection.x, qγx)
-    Ky_advected = same_state ? Ky_adv : build_K_matrix(convection.y, qγy)
+    K_adv = ntuple(Val(N)) do i
+        idx = Int(i)
+        build_K_matrix(convection.stencils[idx], rotated_interfaces(uγ_adv_tuple, idx))
+    end
 
-    s.last_conv_ops = (Cx=Cx, Cy=Cy,
-                       Kx_adv=Kx_adv, Kx_advected=Kx_advected,
-                       Ky_adv=Ky_adv, Ky_advected=Ky_advected,
-                       Kx=0.5 * (Kx_adv + Kx_advected),
-                       Ky=0.5 * (Ky_adv + Ky_advected))
+    K_advected = same_state ? K_adv : ntuple(Val(N)) do i
+        idx = Int(i)
+        build_K_matrix(convection.stencils[idx], rotated_interfaces(qγ_tuple, idx))
+    end
 
-    conv_x = Cx * qωx - 0.5 * (Kx_adv * qωx + Kx_advected * uωx)
-    conv_y = Cy * qωy - 0.5 * (Ky_adv * qωy + Ky_advected * uωy)
+    SplusHt = ntuple(Val(N)) do i
+        idx = Int(i)
+        convection.stencils[idx].S_plus_primary * convection.stencils[idx].Ht
+    end
 
-    return conv_x, conv_y
+    conv_vectors = ntuple(Val(N)) do i
+        idx = Int(i)
+        bulk[idx] * qω_tuple[idx] - 0.5 * (K_adv[idx] * qω_tuple[idx] + K_advected[idx] * uω_adv_tuple[idx])
+    end
+
+    K_gamma = ntuple(Val(N)) do i
+        idx = Int(i)
+        spdiagm(0 => uω_adv_tuple[idx]) * SplusHt[idx]
+    end
+
+    s.last_conv_ops = (bulk=bulk,
+                       K_adv=K_adv,
+                       K_advected=K_advected,
+                       K_mean=ntuple(Val(N)) do i
+                           idx = Int(i)
+                           0.5 * (K_adv[idx] + K_advected[idx])
+                       end,
+                       K_gamma=K_gamma,
+                       SplusHt=SplusHt,
+                       uω_adv=uω_adv_tuple,
+                       uγ_adv=uγ_adv_tuple)
+
+    return conv_vectors
 end
 
 # Assembly ------------------------------------------------------------------
@@ -279,7 +323,7 @@ function assemble_navierstokes2D_unsteady!(s::NavierStokesMono, data, Δt::Float
                                            p_half_prev::AbstractVector{<:Real},
                                            t_prev::Float64, t_next::Float64,
                                            θ::Float64,
-                                           conv_prev::Union{Nothing,Tuple{Vector{Float64},Vector{Float64}}})
+                                           conv_prev::Union{Nothing,NTuple{2,Vector{Float64}}})
     nu_x = data.nu_x
     nu_y = data.nu_y
     sum_nu = nu_x + nu_y
@@ -383,6 +427,85 @@ function assemble_navierstokes2D_unsteady!(s::NavierStokesMono, data, Δt::Float
     return conv_curr
 end
 
+function assemble_navierstokes2D_steady_picard!(s::NavierStokesMono,
+                                                data,
+                                                advecting_state::AbstractVector{<:Real})
+    nu_x = data.nu_x
+    nu_y = data.nu_y
+    sum_nu = nu_x + nu_y
+    np = data.np
+
+    rows = 2 * sum_nu + np
+    cols = 2 * sum_nu + np
+    A = spzeros(Float64, rows, cols)
+
+    off_uωx = 0
+    off_uγx = nu_x
+    off_uωy = 2 * nu_x
+    off_uγy = 2 * nu_x + nu_y
+    off_p   = 2 * sum_nu
+
+    row_uωx = 0
+    row_uγx = nu_x
+    row_uωy = 2 * nu_x
+    row_uγy = 2 * nu_x + nu_y
+    row_con = 2 * sum_nu
+
+    # Build convection linearization for the current iterate
+    compute_convection_vectors!(s, data, advecting_state)
+    ops = s.last_conv_ops
+    @assert ops !== nothing
+    bulk = ops.bulk
+    K_diag = ops.K_adv
+    K_gamma = ops.K_gamma
+
+    # Momentum rows with Picard linearized convection
+    A[row_uωx+1:row_uωx+nu_x, off_uωx+1:off_uωx+nu_x] = data.visc_x_ω + bulk[1] - 0.5 * K_diag[1]
+    A[row_uωx+1:row_uωx+nu_x, off_uγx+1:off_uγx+nu_x] = data.visc_x_γ - 0.5 * K_gamma[1]
+    A[row_uωx+1:row_uωx+nu_x, off_p+1:off_p+np]       = data.grad_x
+
+    A[row_uωy+1:row_uωy+nu_y, off_uωy+1:off_uωy+nu_y] = data.visc_y_ω + bulk[2] - 0.5 * K_diag[2]
+    A[row_uωy+1:row_uωy+nu_y, off_uγy+1:off_uγy+nu_y] = data.visc_y_γ - 0.5 * K_gamma[2]
+    A[row_uωy+1:row_uωy+nu_y, off_p+1:off_p+np]       = data.grad_y
+
+    # Tie rows
+    A[row_uγx+1:row_uγx+nu_x, off_uγx+1:off_uγx+nu_x] = data.tie_x
+    A[row_uγy+1:row_uγy+nu_y, off_uγy+1:off_uγy+nu_y] = data.tie_y
+
+    # Continuity
+    con_rows = row_con+1:row_con+np
+    A[con_rows, off_uωx+1:off_uωx+nu_x] = data.div_x_ω
+    A[con_rows, off_uγx+1:off_uγx+nu_x] = data.div_x_γ
+    A[con_rows, off_uωy+1:off_uωy+nu_y] = data.div_y_ω
+    A[con_rows, off_uγy+1:off_uγy+nu_y] = data.div_y_γ
+
+    # Forcing (steady)
+    f_x = safe_build_source(data.op_ux, s.fluid.fᵤ, data.cap_px, nothing)
+    f_y = safe_build_source(data.op_uy, s.fluid.fᵤ, data.cap_py, nothing)
+    load_x = data.Vx * f_x
+    load_y = data.Vy * f_y
+
+    g_cut_x = safe_build_g(data.op_ux, s.bc_cut, data.cap_px, nothing)
+    g_cut_y = safe_build_g(data.op_uy, s.bc_cut, data.cap_py, nothing)
+
+    b = vcat(load_x, g_cut_x, load_y, g_cut_y, zeros(np))
+
+    apply_velocity_dirichlet_2D!(A, b, s.bc_u[1], s.bc_u[2], s.fluid.mesh_u;
+                                 nu_x=nu_x, nu_y=nu_y,
+                                 uωx_off=off_uωx, uγx_off=off_uγx,
+                                 uωy_off=off_uωy, uγy_off=off_uγy,
+                                 row_uωx_off=row_uωx, row_uγx_off=row_uγx,
+                                 row_uωy_off=row_uωy, row_uγy_off=row_uγy,
+                                 t=nothing)
+
+    apply_pressure_gauge!(A, b, s.bc_p, s.fluid.mesh_p, s.fluid.capacity_p;
+                          p_offset=off_p, np=np, row_start=row_con+1)
+
+    s.A = A
+    s.b = b
+    return nothing
+end
+
 # Linear solve ---------------------------------------------------------------
 
 function solve_navierstokes_linear_system!(s::NavierStokesMono; method=Base.:\, algorithm=nothing, kwargs...)
@@ -463,7 +586,10 @@ function solve_NavierStokesMono_unsteady!(s::NavierStokesMono; Δt::Float64, T_e
 
         x_prev = copy(s.x)
         p_half_prev .= s.x[p_offset+1:p_offset+np]
-        conv_prev = (copy(conv_curr[1]), copy(conv_curr[2]))
+        N_comp = length(data.nu_components)
+        conv_prev = ntuple(Val(N_comp)) do i
+            copy(conv_curr[Int(i)])
+        end
 
         push!(times, t_next)
         if store_states
@@ -483,4 +609,40 @@ function build_convection_operators(s::NavierStokesMono, state::AbstractVector{<
     data = navierstokes2D_blocks(s)
     conv_vectors = compute_convection_vectors!(s, data, state)
     return s.last_conv_ops, conv_vectors
+end
+
+function solve_NavierStokesMono_steady!(s::NavierStokesMono; tol=1e-8, maxiter::Int=25,
+                                        relaxation::Float64=1.0, method=Base.:\,
+                                        algorithm=nothing, kwargs...)
+    θ_relax = clamp(relaxation, 0.0, 1.0)
+    N = length(s.fluid.operator_u)
+    N == 2 || error("Steady Navier–Stokes Picard solver currently implemented for 2D (N=$(N)).")
+
+    data = navierstokes2D_blocks(s)
+    x_iter = copy(s.x)
+    residual = Inf
+    iter = 0
+
+    println("[NavierStokesMono] Starting steady Picard iterations (tol=$(tol), maxiter=$(maxiter), relaxation=$(θ_relax))")
+
+    while iter < maxiter && residual > tol
+        assemble_navierstokes2D_steady_picard!(s, data, x_iter)
+        solve_navierstokes_linear_system!(s; method=method, algorithm=algorithm, kwargs...)
+
+        x_new = θ_relax .* s.x .+ (1.0 - θ_relax) .* x_iter
+        residual = maximum(abs, x_new .- x_iter)
+
+        x_iter .= x_new
+        s.x .= x_new
+
+        iter += 1
+        println("[NavierStokesMono] Picard iter=$(iter) max|Δx|=$(residual)")
+    end
+
+    if residual > tol
+        @warn "Navier–Stokes steady Picard did not reach tolerance" final_residual=residual iterations=iter tol=tol
+    end
+
+    s.prev_conv = nothing
+    return s.x, iter, residual
 end
