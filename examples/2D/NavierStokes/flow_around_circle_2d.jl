@@ -96,7 +96,7 @@ x0_vec = zeros(2 * (nu_x + nu_y) + np)
 solver = NavierStokesMono(fluid, (bc_ux, bc_uy), bc_p, interface_bc; x0=x0_vec)
 
 Δt = 0.005
-T_end = 5.0
+T_end = 8.0
 
 println("Running Navier–Stokes unsteady simulation...")
 times, histories = solve_NavierStokesMono_unsteady!(solver; Δt=Δt, T_end=T_end, scheme=:CN)
@@ -147,3 +147,110 @@ contour!(ax_contours, xs, ys, [circle_body(x,y) for x in xs, y in ys]; levels=[0
 
 save("navierstokes2d_circle_flow.png", fig)
 display(fig)
+
+###########
+# Animation of time evolution
+###########
+println("Creating animation...")
+
+# Select subset of time steps for animation (to keep file size reasonable)
+n_frames = min(50, length(histories))
+frame_indices = round.(Int, range(1, length(histories), length=n_frames))
+
+fig_anim = Figure(resolution=(800, 600))
+ax_anim = Axis(fig_anim[1,1], xlabel="x", ylabel="y", title="Velocity magnitude evolution")
+
+# Observable for updating the plot
+speed_obs = Observable(zeros(length(xs), length(ys)))
+
+# Create the heatmap and contours
+hm_anim = heatmap!(ax_anim, xs, ys, speed_obs; colormap=:plasma, colorrange=(0, 1.5))
+contour!(ax_anim, xs, ys, [circle_body(x,y) for x in xs, y in ys]; levels=[0.0], color=:white, linewidth=2)
+Colorbar(fig_anim[1,2], hm_anim)
+
+# Function to update frame
+function update_frame!(frame_idx)
+    # Extract velocity from history
+    hist = histories[frame_indices[frame_idx]]
+    ux_hist = hist[1:nu_x]
+    uy_hist = hist[2nu_x+1:2nu_x+nu_y]
+    
+    # Reshape and compute speed
+    Ux_hist = reshape(ux_hist, (length(xs), length(ys)))
+    Uy_hist = reshape(uy_hist, (length(xs), length(ys)))
+    speed_hist = sqrt.(Ux_hist.^2 .+ Uy_hist.^2)
+    
+    # Update observable
+    speed_obs[] = speed_hist
+    
+    # Update title with time
+    ax_anim.title = "Velocity magnitude at t = $(round(times[frame_indices[frame_idx]], digits=3))"
+end
+
+# Create animation
+record(fig_anim, "navierstokes2d_vonkarman.gif", 1:n_frames; framerate=8) do frame
+    update_frame!(frame)
+end
+
+println("Animation saved as navierstokes2d_vonkarman.gif")
+
+# Also create a streamline animation
+println("Creating streamline animation...")
+
+fig_stream = Figure(resolution=(800, 600))
+ax_stream_anim = Axis(fig_stream[1,1], xlabel="x", ylabel="y", title="Velocity streamlines evolution")
+
+# Function to create velocity field function for streamlines
+function make_velocity_field(ux_data, uy_data)
+    Ux_data = reshape(ux_data, (length(xs), length(ys)))
+    Uy_data = reshape(uy_data, (length(xs), length(ys)))
+    
+    # Create interpolation functions for better coverage
+    return function(x, y)
+        # Clamp coordinates to domain bounds
+        x_clamped = clamp(x, xs[1], xs[end])
+        y_clamped = clamp(y, ys[1], ys[end])
+        
+        # Find nearest indices
+        i = nearest_index(xs, x_clamped)
+        j = nearest_index(ys, y_clamped)
+        
+        # Return velocity components
+        return Point2f(Ux_data[i, j], Uy_data[i, j])
+    end
+end
+
+using GeometryBasics
+
+record(fig_stream, "navierstokes2d_streamlines.gif", 1:n_frames; framerate=8) do frame
+    empty!(ax_stream_anim)
+    
+    # Extract velocity from history
+    hist = histories[frame_indices[frame]]
+    ux_hist = hist[1:nu_x]
+    uy_hist = hist[2nu_x+1:2nu_x+nu_y]
+    
+    # Create velocity field function
+    vel_field = make_velocity_field(ux_hist, uy_hist)
+    
+    # Plot streamlines with better coverage
+    x_min, x_max = xs[1], xs[end]
+    y_min, y_max = ys[1], ys[end]
+    stepsize = 0.01
+    maxsteps = 1000
+    density = 2.0
+    color_func = (p) -> norm(p)  # Color by speed magnitude
+    velocity_func = (x, y) -> vel_field(x, y)
+    rect = Rect(x_min, y_min, x_max - x_min, y_max - y_min)
+    streamplot!(ax_stream_anim, velocity_func, rect, stepsize=stepsize, maxsteps=maxsteps, density=density, color=color_func)
+    contour!(ax_stream_anim, xs, ys, [circle_body(x,y) for x in xs, y in ys]; 
+             levels=[0.0], color=:red, linewidth=2)
+    
+    # Set axis limits explicitly
+    xlims!(ax_stream_anim, xs[1], xs[end])
+    ylims!(ax_stream_anim, ys[1], ys[end])
+    
+    ax_stream_anim.title = "Streamlines at t = $(round(times[frame_indices[frame]], digits=3))"
+end
+
+println("Streamline animation saved as navierstokes2d_streamlines.gif")

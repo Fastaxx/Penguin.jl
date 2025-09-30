@@ -615,7 +615,26 @@ end
 
 function solve_NavierStokesMono_steady!(s::NavierStokesMono; tol=1e-8, maxiter::Int=25,
                                         relaxation::Float64=1.0, method=Base.:\,
-                                        algorithm=nothing, kwargs...)
+                                        algorithm=nothing, nlsolve_method::Symbol=:picard,
+                                        kwargs...)
+    N = length(s.fluid.operator_u)
+    N == 2 || error("Steady Navier–Stokes solver currently implemented for 2D (N=$(N)).")
+
+    if nlsolve_method == :picard
+        return solve_NavierStokesMono_steady_picard!(s; tol=tol, maxiter=maxiter, 
+                                                   relaxation=relaxation, method=method, 
+                                                   algorithm=algorithm, kwargs...)
+    elseif nlsolve_method == :newton
+        return solve_NavierStokesMono_steady_newton!(s; tol=tol, maxiter=maxiter, 
+                                                   method=method, algorithm=algorithm, kwargs...)
+    else
+        error("Unknown nlsolve_method: $(nlsolve_method). Use :picard or :newton")
+    end
+end
+
+function solve_NavierStokesMono_steady_picard!(s::NavierStokesMono; tol=1e-8, maxiter::Int=25,
+                                              relaxation::Float64=1.0, method=Base.:\,
+                                              algorithm=nothing, kwargs...)
     θ_relax = clamp(relaxation, 0.0, 1.0)
     N = length(s.fluid.operator_u)
     N == 2 || error("Steady Navier–Stokes Picard solver currently implemented for 2D (N=$(N)).")
@@ -657,4 +676,398 @@ function solve_NavierStokesMono_steady!(s::NavierStokesMono; tol=1e-8, maxiter::
 
     s.prev_conv = nothing
     return s.x, iter, residual
+end
+
+function solve_NavierStokesMono_steady_newton!(s::NavierStokesMono; tol=1e-8, maxiter::Int=25,
+                                              method=Base.:\, algorithm=nothing, kwargs...)
+    N = length(s.fluid.operator_u)
+    N == 2 || error("Steady Navier–Stokes Newton solver currently implemented for 2D (N=$(N)).")
+
+    data = navierstokes2D_blocks(s)
+    x_iter = copy(s.x)
+    residual = Inf
+    iter = 0
+    
+    # Clear and initialize residual history
+    empty!(s.residual_history)
+
+    println("[NavierStokesMono] Starting steady Newton iterations (tol=$(tol), maxiter=$(maxiter))")
+
+    while iter < maxiter && residual > tol
+        # Compute residual and Jacobian
+        F_val = compute_navierstokes2D_residual!(s, data, x_iter)
+        J_val = compute_navierstokes2D_jacobian!(s, data, x_iter)
+
+        rhs = -F_val
+
+        nu_x = data.nu_x
+        nu_y = data.nu_y
+        sum_nu = nu_x + nu_y
+        off_uωx = 0
+        off_uγx = nu_x
+        off_uωy = 2 * nu_x
+        off_uγy = 2 * nu_x + nu_y
+        off_p   = 2 * sum_nu
+
+        apply_velocity_dirichlet_2D_newton!(J_val, rhs, x_iter, s.bc_u[1], s.bc_u[2], s.fluid.mesh_u;
+                                             nu_x=nu_x, nu_y=nu_y,
+                                             uωx_off=off_uωx, uγx_off=off_uγx,
+                                             uωy_off=off_uωy, uγy_off=off_uγy,
+                                             row_uωx_off=0, row_uγx_off=nu_x,
+                                             row_uωy_off=2*nu_x, row_uγy_off=2*nu_x+nu_y,
+                                             t=nothing)
+
+        apply_pressure_gauge_newton!(J_val, rhs, x_iter, s.bc_p, s.fluid.mesh_p, s.fluid.capacity_p;
+                                     p_offset=off_p, np=data.np,
+                                     row_start=2*sum_nu+1,
+                                     t=nothing)
+
+        # Solve Newton step: J * Δx = rhs
+        s.A = J_val
+        s.b = rhs
+        solve_navierstokes_linear_system!(s; method=method, algorithm=algorithm, kwargs...)
+        
+        # Update solution: x_new = x_iter + Δx
+        x_new = x_iter .+ s.x
+        
+        # Calculate residual only on velocity components (exclude pressure)
+        p_offset = 2 * (data.nu_x + data.nu_y)
+        velocity_residual = maximum(abs, (x_new .- x_iter)[1:p_offset])
+        residual = velocity_residual
+        
+        # Store residual in history
+        push!(s.residual_history, residual)
+
+        x_iter .= x_new
+        s.x .= x_new
+
+        iter += 1
+        println("[NavierStokesMono] Newton iter=$(iter) max|Δu|=$(residual)")
+    end
+
+    if residual > tol
+        @warn "Navier–Stokes steady Newton did not reach tolerance" final_residual=residual iterations=iter tol=tol
+    end
+
+    s.prev_conv = nothing
+    return s.x, iter, residual
+end
+
+# Newton method helper functions
+function compute_navierstokes2D_residual!(s::NavierStokesMono, data, x_state::AbstractVector{<:Real})
+    """
+    Compute the nonlinear residual F(x) = 0 for steady Navier-Stokes:
+    F = [momentum_x_residual; tie_x_residual; momentum_y_residual; tie_y_residual; continuity_residual]
+    """
+    nu_x = data.nu_x
+    nu_y = data.nu_y
+    sum_nu = nu_x + nu_y
+    np = data.np
+    
+    # Extract state variables
+    off_uωx = 0
+    off_uγx = nu_x
+    off_uωy = 2 * nu_x
+    off_uγy = 2 * nu_x + nu_y
+    off_p   = 2 * sum_nu
+    
+    uωx = view(x_state, off_uωx+1:off_uωx+nu_x)
+    uγx = view(x_state, off_uγx+1:off_uγx+nu_x)
+    uωy = view(x_state, off_uωy+1:off_uωy+nu_y)
+    uγy = view(x_state, off_uγy+1:off_uγy+nu_y)
+    pω  = view(x_state, off_p+1:off_p+np)
+    
+    # Compute convection terms
+    conv_vectors = compute_convection_vectors!(s, data, x_state)
+    
+    # Get density for convection terms
+    ρ = s.fluid.ρ
+    ρ_val = ρ isa Function ? 1.0 : ρ
+    
+    # Forcing terms
+    f_x = safe_build_source(data.op_ux, s.fluid.fᵤ, data.cap_px, nothing)
+    f_y = safe_build_source(data.op_uy, s.fluid.fᵤ, data.cap_py, nothing)
+    load_x = data.Vx * f_x
+    load_y = data.Vy * f_y
+    
+    # Compute residuals
+    # Momentum x: -μ∇²u + ρ(u·∇)u + ∇p - f = 0
+    F_mom_x = data.visc_x_ω * Vector{Float64}(uωx) + data.visc_x_γ * Vector{Float64}(uγx) + 
+              ρ_val * conv_vectors[1] + data.grad_x * Vector{Float64}(pω) - load_x
+    
+    # Tie x: uγ - g_cut = 0
+    g_cut_x = safe_build_g(data.op_ux, s.bc_cut, data.cap_px, nothing)
+    F_tie_x = Vector{Float64}(uγx) - g_cut_x
+    
+    # Momentum y: -μ∇²v + ρ(u·∇)v + ∇p - f = 0
+    F_mom_y = data.visc_y_ω * Vector{Float64}(uωy) + data.visc_y_γ * Vector{Float64}(uγy) + 
+              ρ_val * conv_vectors[2] + data.grad_y * Vector{Float64}(pω) - load_y
+    
+    # Tie y: vγ - g_cut = 0
+    g_cut_y = safe_build_g(data.op_uy, s.bc_cut, data.cap_py, nothing)
+    F_tie_y = Vector{Float64}(uγy) - g_cut_y
+    
+    # Continuity: ∇·u = 0
+    F_cont = data.div_x_ω * Vector{Float64}(uωx) + data.div_x_γ * Vector{Float64}(uγx) + 
+             data.div_y_ω * Vector{Float64}(uωy) + data.div_y_γ * Vector{Float64}(uγy)
+    
+    # Combine all residuals
+    F = vcat(F_mom_x, F_tie_x, F_mom_y, F_tie_y, F_cont)
+    
+    return F
+end
+
+function compute_navierstokes2D_jacobian!(s::NavierStokesMono, data, x_state::AbstractVector{<:Real})
+    """
+    Compute the Jacobian matrix J = ∂F/∂x for Newton method
+    """
+    nu_x = data.nu_x
+    nu_y = data.nu_y
+    sum_nu = nu_x + nu_y
+    np = data.np
+    
+    rows = 2 * sum_nu + np
+    cols = 2 * sum_nu + np
+    J = spzeros(Float64, rows, cols)
+    
+    off_uωx = 0
+    off_uγx = nu_x
+    off_uωy = 2 * nu_x
+    off_uγy = 2 * nu_x + nu_y
+    off_p   = 2 * sum_nu
+    
+    row_uωx = 0
+    row_uγx = nu_x
+    row_uωy = 2 * nu_x
+    row_uγy = 2 * nu_x + nu_y
+    row_con = 2 * sum_nu
+    
+    # Compute convection Jacobian terms
+    compute_convection_vectors!(s, data, x_state)
+    ops = s.last_conv_ops
+    @assert ops !== nothing
+    bulk = ops.bulk
+    K_adv = ops.K_adv
+    
+    # Get density for convection terms
+    ρ = s.fluid.ρ
+    ρ_val = ρ isa Function ? 1.0 : ρ
+    
+    # Momentum x Jacobian: ∂F_mom_x/∂x
+    J[row_uωx+1:row_uωx+nu_x, off_uωx+1:off_uωx+nu_x] = data.visc_x_ω + ρ_val * bulk[1] - 0.5 * ρ_val * K_adv[1]
+    J[row_uωx+1:row_uωx+nu_x, off_uγx+1:off_uγx+nu_x] = data.visc_x_γ
+    J[row_uωx+1:row_uωx+nu_x, off_p+1:off_p+np]       = data.grad_x
+    
+    # Tie x Jacobian: ∂F_tie_x/∂x
+    J[row_uγx+1:row_uγx+nu_x, off_uγx+1:off_uγx+nu_x] = data.tie_x
+    
+    # Momentum y Jacobian: ∂F_mom_y/∂x
+    J[row_uωy+1:row_uωy+nu_y, off_uωy+1:off_uωy+nu_y] = data.visc_y_ω + ρ_val * bulk[2] - 0.5 * ρ_val * K_adv[2]
+    J[row_uωy+1:row_uωy+nu_y, off_uγy+1:off_uγy+nu_y] = data.visc_y_γ
+    J[row_uωy+1:row_uωy+nu_y, off_p+1:off_p+np]       = data.grad_y
+    
+    # Tie y Jacobian: ∂F_tie_y/∂x
+    J[row_uγy+1:row_uγy+nu_y, off_uγy+1:off_uγy+nu_y] = data.tie_y
+    
+    # Continuity Jacobian: ∂F_cont/∂x
+    con_rows = row_con+1:row_con+np
+    J[con_rows, off_uωx+1:off_uωx+nu_x] = data.div_x_ω
+    J[con_rows, off_uγx+1:off_uγx+nu_x] = data.div_x_γ
+    J[con_rows, off_uωy+1:off_uωy+nu_y] = data.div_y_ω
+    J[con_rows, off_uγy+1:off_uγy+nu_y] = data.div_y_γ
+    
+    return J
+end
+
+# Boundary condition application for Newton method residuals
+function apply_velocity_dirichlet_2D_newton!(A::SparseMatrixCSC{Float64, Int}, rhs::Vector{Float64},
+                                             x_state::AbstractVector{<:Real},
+                                             bc_ux::BorderConditions,
+                                             bc_uy::BorderConditions,
+                                             mesh_u::NTuple{2,AbstractMesh};
+                                             nu_x::Int, nu_y::Int,
+                                             uωx_off::Int, uγx_off::Int,
+                                             uωy_off::Int, uγy_off::Int,
+                                             row_uωx_off::Int, row_uγx_off::Int,
+                                             row_uωy_off::Int, row_uγy_off::Int,
+                                             t::Union{Nothing,Float64}=nothing)
+    mesh_ux, mesh_uy = mesh_u
+    nx = length(mesh_ux.nodes[1]); ny = length(mesh_ux.nodes[2])
+    nx_y = length(mesh_uy.nodes[1]); ny_y = length(mesh_uy.nodes[2])
+    @assert nx == nx_y && ny == ny_y "Velocity component meshes must share grid dimensions"
+
+    LIx = LinearIndices((nx, ny))
+    LIy = LinearIndices((nx_y, ny_y))
+
+    iright = max(nx - 1, 1)
+    jtop   = max(ny - 1, 1)
+
+    xs_x = mesh_ux.nodes[1]; ys_x = mesh_ux.nodes[2]
+    xs_y = mesh_uy.nodes[1]; ys_y = mesh_uy.nodes[2]
+
+    eval_val(bc, x, y) = (bc isa Dirichlet) ? (bc.value isa Function ? eval_boundary_func(bc.value, x, y) : bc.value) : nothing
+    eval_val(bc, x, y, t) = (bc isa Dirichlet) ? (bc.value isa Function ? bc.value(x, y, t) : bc.value) : nothing
+
+    function eval_boundary_func(f, x, y)
+        try
+            return f(x, y)
+        catch MethodError
+            return f(x, y, 0.0)
+        end
+    end
+
+    bcx_bottom = get(bc_ux.borders, :bottom, nothing)
+    bcy_bottom = get(bc_uy.borders, :bottom, nothing)
+    bcx_top    = get(bc_ux.borders, :top, nothing)
+    bcy_top    = get(bc_uy.borders, :top, nothing)
+    bcx_left   = get(bc_ux.borders, :left, nothing)
+    bcy_left   = get(bc_uy.borders, :left, nothing)
+    bcx_right  = get(bc_ux.borders, :right, nothing)
+    bcy_right  = get(bc_uy.borders, :right, nothing)
+
+    # Bottom/top boundaries
+    for (jx, bcx, bcy) in ((1, bcx_bottom, bcy_bottom), (jtop, bcx_top, bcy_top))
+        for i in 1:nx
+            if bcx isa Dirichlet
+                vx = t === nothing ? eval_val(bcx, xs_x[i], ys_x[jx]) : eval_val(bcx, xs_x[i], ys_x[jx], t)
+                if vx !== nothing
+                    lix = LIx[i, jx]
+                    col = uωx_off + lix
+                    delta = Float64(vx) - Float64(x_state[col])
+                    enforce_dirichlet!(A, rhs, row_uωx_off + lix, col, delta)
+                    colγ = uγx_off + lix
+                    deltaγ = Float64(vx) - Float64(x_state[colγ])
+                    enforce_dirichlet!(A, rhs, row_uγx_off + lix, colγ, deltaγ)
+                end
+            end
+        end
+        for i in 1:nx_y
+            if bcy isa Dirichlet
+                vy = t === nothing ? eval_val(bcy, xs_y[i], ys_y[jx]) : eval_val(bcy, xs_y[i], ys_y[jx], t)
+                if vy !== nothing
+                    liy = LIy[i, jx]
+                    col = uωy_off + liy
+                    delta = Float64(vy) - Float64(x_state[col])
+                    enforce_dirichlet!(A, rhs, row_uωy_off + liy, col, delta)
+                    colγ = uγy_off + liy
+                    deltaγ = Float64(vy) - Float64(x_state[colγ])
+                    enforce_dirichlet!(A, rhs, row_uγy_off + liy, colγ, deltaγ)
+                end
+            end
+        end
+    end
+
+    # Left/right boundaries
+    for (ix, bcx, bcy) in ((1, bcx_left, bcy_left), (iright, bcx_right, bcy_right))
+        for j in 1:ny
+            if bcx isa Dirichlet
+                vx = t === nothing ? eval_val(bcx, xs_x[ix], ys_x[j]) : eval_val(bcx, xs_x[ix], ys_x[j], t)
+                if vx !== nothing
+                    lix = LIx[ix, j]
+                    col = uωx_off + lix
+                    delta = Float64(vx) - Float64(x_state[col])
+                    enforce_dirichlet!(A, rhs, row_uωx_off + lix, col, delta)
+                    colγ = uγx_off + lix
+                    deltaγ = Float64(vx) - Float64(x_state[colγ])
+                    enforce_dirichlet!(A, rhs, row_uγx_off + lix, colγ, deltaγ)
+                end
+            end
+        end
+        for j in 1:ny_y
+            if bcy isa Dirichlet
+                vy = t === nothing ? eval_val(bcy, xs_y[ix], ys_y[j]) : eval_val(bcy, xs_y[ix], ys_y[j], t)
+                if vy !== nothing
+                    liy = LIy[ix, j]
+                    col = uωy_off + liy
+                    delta = Float64(vy) - Float64(x_state[col])
+                    enforce_dirichlet!(A, rhs, row_uωy_off + liy, col, delta)
+                    colγ = uγy_off + liy
+                    deltaγ = Float64(vy) - Float64(x_state[colγ])
+                    enforce_dirichlet!(A, rhs, row_uγy_off + liy, colγ, deltaγ)
+                end
+            end
+        end
+    end
+
+    return nothing
+end
+
+function apply_pressure_gauge_newton!(A::SparseMatrixCSC{Float64,Int}, rhs::Vector{Float64},
+                                      x_state::AbstractVector{<:Real},
+                                      bc_p::BorderConditions,
+                                      mesh_p::AbstractMesh,
+                                      capacity_p::AbstractCapacity;
+                                      p_offset::Int, np::Int,
+                                      row_start::Int,
+                                      t::Union{Nothing,Float64}=nothing)
+    nodes = mesh_p.nodes
+    nd = length(nodes)
+    dims = ntuple(i -> length(nodes[i]), nd)
+    LI = LinearIndices(Tuple(dims))
+
+    ranges_full = ntuple(i -> 1:dims[i], nd)
+
+    function eval_pressure_bc(bc::AbstractBoundary, coords::NTuple{N,Float64}) where {N}
+        bc isa Dirichlet || return nothing
+        val = bc.value
+        if val isa Function
+            t_arg = t === nothing ? nothing : t
+            try
+                return Float64(val(coords...))
+            catch MethodError
+                return Float64(val(coords..., t_arg === nothing ? 0.0 : t_arg))
+            end
+        else
+            return Float64(val)
+        end
+    end
+
+    function apply_face!(dim::Int, fixed_idx::Int, bc::AbstractBoundary)
+        dim <= nd || return
+        bc isa Dirichlet || return
+        ranges = collect(ranges_full)
+        ranges[dim] = fixed_idx:fixed_idx
+        for idx in Iterators.product(ranges...)
+            lin = LI[idx...]
+            row = row_start + lin - 1
+            col = p_offset + lin
+            coords = ntuple(i -> nodes[i][idx[i]], nd)
+            val = eval_pressure_bc(bc, coords)
+            val = val === nothing ? 0.0 : val
+            delta = val - Float64(x_state[col])
+            enforce_dirichlet!(A, rhs, row, col, delta)
+        end
+    end
+
+    side_specs = Dict{Symbol,Tuple{Int,Int}}(
+        :left  => (1, 1),
+        :right => (1, dims[1]),
+    )
+    if nd >= 2
+        side_specs[:bottom] = (2, 1)
+        side_specs[:top]    = (2, dims[2])
+    else
+        side_specs[:bottom] = (1, 1)
+        side_specs[:top]    = (1, dims[1])
+    end
+    if nd >= 3
+        side_specs[:front] = (3, 1)
+        side_specs[:back]  = (3, dims[3])
+    end
+
+    for (side, bc) in bc_p.borders
+        haskey(side_specs, side) || continue
+        dim, fixed_idx = side_specs[side]
+        apply_face!(dim, fixed_idx, bc)
+    end
+
+    # If no explicit Dirichlet, pin gauge at first cell
+    if isempty(bc_p.borders)
+        row = row_start
+        col = p_offset + 1
+        delta = -Float64(x_state[col])
+        enforce_dirichlet!(A, rhs, row, col, delta)
+    end
+
+    return nothing
 end

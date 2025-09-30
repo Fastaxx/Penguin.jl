@@ -89,3 +89,20 @@ end
     @test res ≤ 1e-10
     @test maximum(abs, solver.x) ≤ 1e-12
 end
+
+@testset "Navier–Stokes steady Newton" begin
+    solver, data = build_simple_navierstokes()
+    # Impose a lid-driven boundary to trigger non-trivial increments
+    solver.bc_u[1].borders[:top] = Dirichlet(1.0)
+    solver.bc_u[1].borders[:bottom] = Dirichlet(0.0)
+    solver.bc_u[1].borders[:left] = Dirichlet(0.0)
+    solver.bc_u[1].borders[:right] = Dirichlet(0.0)
+    for side in (:left, :right, :bottom, :top)
+        solver.bc_u[2].borders[side] = Dirichlet(0.0)
+    end
+    solver.x .= 0.0
+    _, iters, res = Penguin.solve_NavierStokesMono_steady!(solver; tol=1e-8, maxiter=5, nlsolve_method=:newton)
+    @test iters ≥ 1
+    @test res ≤ 1e-8
+    @test maximum(abs, solver.x) > 0
+end

@@ -3,11 +3,16 @@ using CairoMakie
 using LinearAlgebra
 
 """
-Steady lid-driven cavity solved with the Picard linearized Navier–Stokes
-solver. The setup mirrors the classic benchmark: unit square domain,
-no-slip walls, and a unit tangential velocity at the lid. The convection
-operator is assembled from the skew-symmetric flux form; viscosity is
-implicit and the Picard solver lags convection between iterations.
+Steady lid-driven cavity solved with either Picard or Newton nonlinear solver
+for the Navier–Stokes equations. The setup mirrors the classic benchmark: 
+unit square domain, no-slip walls, and a unit tangential velocity at the lid. 
+
+Two solver options are available:
+- Picard iteration: Linearizes convection using previous iterate (successive substitution)
+- Newton method: Full Newton-Raphson with exact Jacobian (quadratic convergence)
+
+The convection operator uses skew-symmetric flux form; viscosity is implicit.
+Switch between methods by changing the nlsolve_method parameter below.
 """
 
 ###########
@@ -97,17 +102,16 @@ x0_vec = zeros(2 * (nu_x + nu_y) + np)
 
 solver = NavierStokesMono(fluid, (bc_ux, bc_uy), bc_p, bc_cut; x0=x0_vec)
 
-###########
-# Picard iteration
-###########
 tol = 1e-9
 maxiter = 40
 relaxation = 0.7
 
-println("Solving steady Navier–Stokes lid-driven cavity (Re=$(Re))")
-_, iters, residual = solve_NavierStokesMono_steady!(solver; tol=tol, maxiter=maxiter, relaxation=relaxation)
-
-println("Picard iterations completed: iters=$(iters), residual=$(residual)")
+println("Refining solution with Newton iterations")
+_, newton_iters, newton_res = solve_NavierStokesMono_steady!(solver; 
+                                                            tol=1e-10,
+                                                            maxiter=20,
+                                                            nlsolve_method=:newton)
+println("Newton iterations completed: iters=$(newton_iters), residual=$(newton_res)")
 
 ###########
 # Basic diagnostics
@@ -176,13 +180,21 @@ lines!(ax_horiz, xs, v_center_horizontal)
 display(fig_profiles)
 save("navierstokes2d_lidcavity_profile.png", fig_profiles)
 
-# Picard convergence plot
+# Convergence plot for both methods
+nlsolve_method = :picard
 if !isempty(solver.residual_history)
     fig_conv = Figure(resolution=(600, 400))
-    ax_conv = Axis(fig_conv[1,1], xlabel="Picard iteration", ylabel="Residual max|Δu|", 
-                   title="Picard Convergence", yscale=log10)
+    method_name = nlsolve_method == :picard ? "Picard" : "Newton"
+    ax_conv = Axis(fig_conv[1,1], xlabel="$(method_name) iteration", ylabel="Residual max|Δu|", 
+                   title="$(method_name) Convergence", yscale=log10)
     lines!(ax_conv, 1:length(solver.residual_history), solver.residual_history, linewidth=2)
     scatter!(ax_conv, 1:length(solver.residual_history), solver.residual_history, color=:red, markersize=8)
     display(fig_conv)
-    save("navierstokes2d_picard_convergence.png", fig_conv)
+    
+    # Save with method-specific filename
+    if nlsolve_method == :picard
+        save("navierstokes2d_picard_convergence.png", fig_conv)
+    else
+        save("navierstokes2d_newton_convergence.png", fig_conv)
+    end
 end
