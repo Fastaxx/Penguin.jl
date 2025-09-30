@@ -209,10 +209,21 @@ function compute_geometric_segment_displacements(front::FrontTracker,
         push!(residual_values, residual)
 
         Gₛ = residual / ρL_val
+
+        total_length = 0.0
+        for (_, length) in entries
+            total_length += max(Float64(length), 1e-12)
+        end
+
+        if total_length <= 1e-12
+            continue
+        end
+
         for (segment_idx, length) in entries
             segment_length = max(Float64(length), 1e-12)
-            segment_accumulator[segment_idx] += Gₛ / segment_length
-            segment_weights[segment_idx] += 1.0 / segment_length
+            weight = segment_length / total_length
+            segment_accumulator[segment_idx] += Gₛ * weight
+            segment_weights[segment_idx] += weight
         end
     end
 
@@ -224,6 +235,53 @@ function compute_geometric_segment_displacements(front::FrontTracker,
     end
 
     return segment_displacements, segment_lengths, cells_idx, residual_values
+end
+
+function smooth_segment_displacements!(segment_displacements::Vector{Float64},
+                                      segment_lengths::Vector{Float64},
+                                      is_closed::Bool;
+                                      iterations::Int=1)
+    n = length(segment_displacements)
+    if n == 0 || iterations <= 0
+        return segment_displacements
+    end
+
+    buffer = similar(segment_displacements)
+
+    for _ in 1:iterations
+        for i in 1:n
+            prev = i - 1
+            next = i + 1
+
+            if is_closed
+                prev = prev < 1 ? n : prev
+                next = next > n ? 1 : next
+            else
+                prev = max(prev, 1)
+                next = min(next, n)
+            end
+
+            len_prev = prev == i ? 0.0 : max(segment_lengths[prev], 1e-12)
+            len_self = max(segment_lengths[i], 1e-12)
+            len_next = next == i ? 0.0 : max(segment_lengths[next], 1e-12)
+
+            weight_sum = len_prev + len_self + len_next
+
+            value = len_self * segment_displacements[i]
+            if prev != i
+                value += len_prev * segment_displacements[prev]
+            end
+            if next != i
+                value += len_next * segment_displacements[next]
+            end
+
+            buffer[i] = weight_sum > 0 ? value / weight_sum : segment_displacements[i]
+        end
+
+        segment_displacements .= buffer
+    end
+
+    return segment_displacements
 end
 
 function segment_to_marker_displacements(segment_displacements::Vector{Float64},
@@ -250,14 +308,14 @@ function segment_to_marker_displacements(segment_displacements::Vector{Float64},
 
         if prev_seg > 0 && segment_lengths[prev_seg] > 1e-14
             len_prev = segment_lengths[prev_seg]
-            numerator += segment_displacements[prev_seg] / len_prev
-            denominator += 1.0 / len_prev
+            numerator += segment_displacements[prev_seg] * len_prev
+            denominator += len_prev
         end
 
         if next_seg > 0 && segment_lengths[next_seg] > 1e-14
             len_next = segment_lengths[next_seg]
-            numerator += segment_displacements[next_seg] / len_next
-            denominator += 1.0 / len_next
+            numerator += segment_displacements[next_seg] * len_next
+            denominator += len_next
         end
 
         if denominator > 0
@@ -1069,6 +1127,7 @@ function solve_StefanMono2D_geom!(s::Solver, phase::Phase, front::FrontTracker, 
                                   Newton_params=(100, 1e-6, 1e-6, 1.0),
                                   smooth_factor=0.5,
                                   window_size=10,
+                                  segment_smoothing_iters::Int=0,
                                   algorithm=nothing,
                                   kwargs...)
     if s.A === nothing
@@ -1173,6 +1232,11 @@ function solve_StefanMono2D_geom!(s::Solver, phase::Phase, front::FrontTracker, 
 
             segment_displacements, segment_lengths, cells_idx, residual_vector =
                 compute_geometric_segment_displacements(front, mesh, Vₙ_matrix, Vₙ₊₁_matrix, interface_flux_2d, ρL, α)
+
+            if segment_smoothing_iters > 0
+                smooth_segment_displacements!(segment_displacements, segment_lengths, front.is_closed;
+                                              iterations=segment_smoothing_iters)
+            end
 
             energy_residual_norm = isempty(residual_vector) ? 0.0 : norm(residual_vector)
 

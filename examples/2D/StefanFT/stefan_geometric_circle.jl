@@ -16,7 +16,7 @@ Frank sphere growth but keeps the script focused on the new algorithm.
 const ρ = 1.0
 const L = 1.0
 const c = 1.0
-const T∞ = -0.4
+const T∞ = -0.5
 const TM = 0.0
 
 Ste = (c * (TM - T∞)) / L
@@ -36,8 +36,8 @@ end
 # -----------------------------------------------------------------------------
 # Numerical setup
 # -----------------------------------------------------------------------------
-t_init = 0.8
-t_final = t_init + 0.12
+t_init = 1.0
+t_final = 1.1
 
 nx, ny = 48, 48
 lx, ly = 12.0, 12.0
@@ -45,7 +45,8 @@ domain_origin = (-lx/2, -ly/2)
 mesh = Penguin.Mesh((nx, ny), (lx, ly), domain_origin)
 
 Δx = lx / nx
-Δt = 0.5 * Δx^2  # explicit-ish CFL for diffusion
+Δt = 0.15 * Δx^2  # explicit-ish CFL for diffusion
+t_final = t_init + 10Δt
 
 println("Mesh: $(nx)x$(ny), Δx = $(round(Δx, digits=3))")
 println("Time step Δt = $(round(Δt, digits=5))")
