@@ -939,17 +939,6 @@ function apply_velocity_dirichlet_2D_newton!(A::SparseMatrixCSC{Float64, Int}, r
                     deltaγ = Float64(vx) - Float64(x_state[colγ])
                     enforce_dirichlet!(A, rhs, row_uγx_off + lix, colγ, deltaγ)
                 end
-            elseif bcx isa Outflow
-                lix = LIx[i, jx]
-                neighbor = jx == 1 ? LIx[i, min(jx+1, ny)] : LIx[i, max(jx-1, 1)]
-                col = uωx_off + lix
-                col_adj = uωx_off + neighbor
-                rhs_val = -(Float64(x_state[col]) - Float64(x_state[col_adj]))
-                enforce_zero_gradient!(A, rhs, row_uωx_off + lix, col, col_adj, rhs_val)
-                colγ = uγx_off + lix
-                colγ_adj = uγx_off + neighbor
-                rhs_gamma = -(Float64(x_state[colγ]) - Float64(x_state[colγ_adj]))
-                enforce_zero_gradient!(A, rhs, row_uγx_off + lix, colγ, colγ_adj, rhs_gamma)
             end
         end
         for i in 1:nx_y
@@ -964,17 +953,6 @@ function apply_velocity_dirichlet_2D_newton!(A::SparseMatrixCSC{Float64, Int}, r
                     deltaγ = Float64(vy) - Float64(x_state[colγ])
                     enforce_dirichlet!(A, rhs, row_uγy_off + liy, colγ, deltaγ)
                 end
-            elseif bcy isa Outflow
-                liy = LIy[i, jx]
-                neighbor = jx == 1 ? LIy[i, min(jx+1, ny)] : LIy[i, max(jx-1, 1)]
-                col = uωy_off + liy
-                col_adj = uωy_off + neighbor
-                rhs_val = -(Float64(x_state[col]) - Float64(x_state[col_adj]))
-                enforce_zero_gradient!(A, rhs, row_uωy_off + liy, col, col_adj, rhs_val)
-                colγ = uγy_off + liy
-                colγ_adj = uγy_off + neighbor
-                rhs_gamma = -(Float64(x_state[colγ]) - Float64(x_state[colγ_adj]))
-                enforce_zero_gradient!(A, rhs, row_uγy_off + liy, colγ, colγ_adj, rhs_gamma)
             end
         end
     end
@@ -993,17 +971,6 @@ function apply_velocity_dirichlet_2D_newton!(A::SparseMatrixCSC{Float64, Int}, r
                     deltaγ = Float64(vx) - Float64(x_state[colγ])
                     enforce_dirichlet!(A, rhs, row_uγx_off + lix, colγ, deltaγ)
                 end
-            elseif bcx isa Outflow
-                lix = LIx[ix, j]
-                neighbor = ix == 1 ? LIx[min(ix+1, nx), j] : LIx[max(ix-1, 1), j]
-                col = uωx_off + lix
-                col_adj = uωx_off + neighbor
-                rhs_val = -(Float64(x_state[col]) - Float64(x_state[col_adj]))
-                enforce_zero_gradient!(A, rhs, row_uωx_off + lix, col, col_adj, rhs_val)
-                colγ = uγx_off + lix
-                colγ_adj = uγx_off + neighbor
-                rhs_gamma = -(Float64(x_state[colγ]) - Float64(x_state[colγ_adj]))
-                enforce_zero_gradient!(A, rhs, row_uγx_off + lix, colγ, colγ_adj, rhs_gamma)
             end
         end
         for j in 1:ny_y
@@ -1018,17 +985,6 @@ function apply_velocity_dirichlet_2D_newton!(A::SparseMatrixCSC{Float64, Int}, r
                     deltaγ = Float64(vy) - Float64(x_state[colγ])
                     enforce_dirichlet!(A, rhs, row_uγy_off + liy, colγ, deltaγ)
                 end
-            elseif bcy isa Outflow
-                liy = LIy[ix, j]
-                neighbor = ix == 1 ? LIy[min(ix+1, nx), j] : LIy[max(ix-1, 1), j]
-                col = uωy_off + liy
-                col_adj = uωy_off + neighbor
-                rhs_val = -(Float64(x_state[col]) - Float64(x_state[col_adj]))
-                enforce_zero_gradient!(A, rhs, row_uωy_off + liy, col, col_adj, rhs_val)
-                colγ = uγy_off + liy
-                colγ_adj = uγy_off + neighbor
-                rhs_gamma = -(Float64(x_state[colγ]) - Float64(x_state[colγ_adj]))
-                enforce_zero_gradient!(A, rhs, row_uγy_off + liy, colγ, colγ_adj, rhs_gamma)
             end
         end
     end
