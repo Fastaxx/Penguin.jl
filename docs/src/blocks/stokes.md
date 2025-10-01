@@ -44,7 +44,6 @@ For `StokesDiph`, construct two `Fluid` objects (A,B) with their own properties 
 
 ## Limitations / Roadmap
 
-- No convective term yet (pure Stokes); Navier–Stokes planned. 
 - Preconditioning & iterative solvers WIP (current examples use direct solve or simple reduction).
 - Pressure accuracy in manufactured solutions that assume NS pressure requires added body force or advection term.
 

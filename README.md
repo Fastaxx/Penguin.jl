@@ -85,7 +85,7 @@ plot_solution(solver, mesh, circle, capacity; state_i=1)
 
 ## Examples
 
-- 1D: `examples/1D/{Diffusion, AdvectionDiffusion, LiquidMoving, SolidMoving, Concentration, BinaryMelting}`
+- 1D: `examples/1D/{Diffusion, AdvectionDiffusion, LiquidMoving, SolidMoving, Concentration, BinaryMelting, NavierStokes}`
 - 2D: `examples/2D/{Diffusion, AdvectionDiffusion, Darcy, LiquidMoving, SolidMoving, StefanFT}`
 - 3D: `examples/3D/{Diffusion, AdvectionDiffusion, Darcy, SolidMoving}`
 
@@ -99,11 +99,11 @@ Each folder contains self-contained scripts demonstrating setup, solve, and visu
 - Diphasic capacities and interface jump conditions
 - 1D/2D non‑prescribed interface motion (front tracking)
 - Fully coupled Stokes flow solver (1D/2D)
+- Fully coupled Navier-Stokes flow solver (1D/2D)
 
 In development
 - Interface tracking variants (VOF / LS / FT)
 - Streamfunction–vorticity; preconditioning
-- Add Navier (advection) term to Stokes solver (prototype currently solves unforced Stokes)
 - Multi-species transport
 
 ## Citing

@@ -1,6 +1,6 @@
 # Navier–Stokes (incompressible)
 
-This section documents the prototype incompressible Navier–Stokes solver built on the same staggered velocity / collocated pressure layout as the Stokes solvers. The current implementation targets 2D problems and exposes both unsteady and steady solves driven either by a Picard iteration or by a full Newton update.
+This section documents the prototype incompressible Navier–Stokes solver built on the same staggered velocity / collocated pressure layout as the Stokes solvers. The current implementation supports 1D and 2D problems and exposes both unsteady and steady solves driven either by a Picard iteration or by a full Newton update.
 
 ## Equations & Unknown Ordering
 
@@ -58,7 +58,7 @@ This section documents the prototype incompressible Navier–Stokes solver built
 
 ## Usage Snippets
 
-Construct a fluid/solver exactly as in the Stokes documentation (see `docs/src/blocks/stokes.md`).
+Construct a fluid/solver exactly as in the Stokes documentation (see `docs/src/blocks/stokes.md`). For 1D, pass a single velocity mesh/capacity/operator tuple; for 2D, pass the pair `(mesh_ux, mesh_uy)` etc.
 
 ```julia
 using Penguin
@@ -85,19 +85,20 @@ x_newton, it_new, res_new = solve_NavierStokesMono_steady!(solver; tol=1e-10, ma
 
 ## Validation References
 
-- **Poiseuille channel:** check parabolic velocity profile and linear pressure drop; demonstrates outlet pressure specification with `Outflow(p0)`.
+- **Poiseuille channel (1D/2D):** check parabolic velocity profile and linear pressure drop; demonstrates outlet pressure specification with `Outflow(p0)`.
 - **Lid-driven cavity:** steady benchmark for Picard/Newton iterations.
 - **Taylor–Green vortex:** unsteady regression for time integration accuracy and kinetic energy decay.
 
 ## Visualization & Examples
 
-- Steady: `examples/2D/NavierStokes/lid_driven_cavity_steady.jl` (Picard and Newton).
-- Unsteady: `examples/2D/NavierStokes/flow_around_circle_2d.jl` (goes with the animation below).
+- 1D steady: `examples/1D/NavierStokes/poiseuille_1d.jl`.
+- 2D steady: `examples/2D/NavierStokes/lid_driven_cavity_steady.jl` (Picard and Newton).
+- 2D unsteady: `examples/2D/NavierStokes/flow_around_circle_2d.jl` (goes with the animation below).
 
 ![Streamlines around a circular obstacle](./assets/navierstokes2d_streamlines.gif)
 
 ## Limitations & Future Work
 
-- Currently limited to 2D; 3D support is on the roadmap.
+- Currently limited to 1D and 2D; 3D support is on the roadmap.
 - Newton path lacks line search/preconditioning; larger problems may require custom solvers via `LinearSolve`.
 - General traction outflow (`σ·n = g`) and variable-density/viscosity models remain to be implemented.
