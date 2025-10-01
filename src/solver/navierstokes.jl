@@ -690,10 +690,32 @@ end
 function solve_navierstokes_linear_system!(s::NavierStokesMono; method=Base.:\, algorithm=nothing, kwargs...)
     Ared, bred, keep_idx_rows, keep_idx_cols = remove_zero_rows_cols!(s.A, s.b)
 
+    kwargs_nt = (; kwargs...)
+    precond_builder = haskey(kwargs_nt, :precond_builder) ? kwargs_nt.precond_builder : nothing
+    if precond_builder !== nothing
+        kwargs_nt = Base.structdiff(kwargs_nt, (precond_builder=precond_builder,))
+    end
+
+    precond_kwargs = (;)
+    if precond_builder !== nothing
+        precond_result = try
+            precond_builder(Ared, s)
+        catch err
+            if err isa MethodError
+                precond_builder(Ared)
+            else
+                rethrow(err)
+            end
+        end
+        precond_kwargs = _preconditioner_kwargs(precond_result)
+    end
+
+    solve_kwargs = merge(kwargs_nt, precond_kwargs)
+
     xred = nothing
     if algorithm !== nothing
         prob = LinearSolve.LinearProblem(Ared, bred)
-        sol = LinearSolve.solve(prob, algorithm; kwargs...)
+        sol = LinearSolve.solve(prob, algorithm; solve_kwargs...)
         xred = sol.u
     elseif method === Base.:\
         try
@@ -707,13 +729,12 @@ function solve_navierstokes_linear_system!(s::NavierStokesMono; method=Base.:\, 
             end
         end
     else
-        kwargs_nt = (; kwargs...)
-        log = get(kwargs_nt, :log, false)
+        log = get(solve_kwargs, :log, false)
         if log
-            xred, ch = method(Ared, bred; kwargs...)
+            xred, ch = method(Ared, bred; solve_kwargs...)
             push!(s.ch, ch)
         else
-            xred = method(Ared, bred; kwargs...)
+            xred = method(Ared, bred; solve_kwargs...)
         end
     end
 

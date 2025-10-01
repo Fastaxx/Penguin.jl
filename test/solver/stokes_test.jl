@@ -64,6 +64,39 @@ using LinearAlgebra
         @test norm(r, Inf) ≤ 1e-10
     end
 
+    @testset "Stokes preconditioner hook" begin
+        nx = 16
+        Lx = 1.0
+        x0 = 0.0
+        mesh_p = Penguin.Mesh((nx,), (Lx,), (x0,))
+        dx = Lx / nx
+        mesh_u = Penguin.Mesh((nx,), (Lx,), (x0 - 0.5 * dx,))
+
+        body = (x, _=0.0) -> -1.0
+        cap_u = Capacity(body, mesh_u)
+        cap_p = Capacity(body, mesh_p)
+        op_u = DiffusionOps(cap_u)
+        op_p = DiffusionOps(cap_p)
+
+        bc_u = BorderConditions(Dict(:bottom => Dirichlet(0.0), :top => Dirichlet(0.0)))
+        bc_p = BorderConditions(Dict(:bottom => Dirichlet(1.0), :top => Dirichlet(0.0)))
+        bc_cut = Dirichlet(0.0)
+
+        fluid = Fluid(mesh_u, cap_u, op_u, mesh_p, cap_p, op_p, 1.0, 1.0,
+                      (x, y=0.0, z=0.0) -> 0.0,
+                      (x, y=0.0, z=0.0) -> 0.0)
+        solver = StokesMono(fluid, bc_u, bc_p, bc_cut)
+
+        called = Ref(false)
+        precond_builder = (A, _) -> begin
+            called[] = true
+            nothing
+        end
+
+        solve_StokesMono!(solver; precond_builder=precond_builder)
+        @test called[]
+    end
+
     @testset "2D Poiseuille" begin
         nx, ny = 64, 64
         Lx, Ly = 2.0, 1.0

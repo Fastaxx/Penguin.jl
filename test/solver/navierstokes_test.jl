@@ -171,4 +171,13 @@ end
     @test iters ≥ 1
     @test res ≤ 1e-10
     @test maximum(abs, solver.x) ≤ 1e-12
+
+    called = Ref(false)
+    precond_builder = (A, _) -> begin
+        called[] = true
+        nothing
+    end
+    Penguin.solve_NavierStokesMono_steady!(solver; tol=1e-6, maxiter=1, relaxation=1.0,
+                                           nlsolve_method=:picard, precond_builder=precond_builder)
+    @test called[]
 end
