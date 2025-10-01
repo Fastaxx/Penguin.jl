@@ -46,7 +46,7 @@ mesh = Penguin.Mesh((nx, ny), (lx, ly), domain_origin)
 
 Δx = lx / nx
 Δt = 0.15 * Δx^2  # explicit-ish CFL for diffusion
-t_final = t_init + 10Δt
+t_final = t_init + 5Δt
 
 println("Mesh: $(nx)x$(ny), Δx = $(round(Δx, digits=3))")
 println("Time step Δt = $(round(Δt, digits=5))")

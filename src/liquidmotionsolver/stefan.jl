@@ -208,8 +208,7 @@ function compute_geometric_segment_displacements(front::FrontTracker,
         push!(cells_idx, cell)
         push!(residual_values, residual)
 
-        Gₛ = residual / ρL_val
-
+        # Compute total length of all segment pieces in this cell
         total_length = 0.0
         for (_, length) in entries
             total_length += max(Float64(length), 1e-12)
@@ -219,14 +218,23 @@ function compute_geometric_segment_displacements(front::FrontTracker,
             continue
         end
 
+        # Normalized displacement for this cell: D_{i,j} = residual / (ρL * L_interface)
+        # Units: [J] / ([J/m²] * [m]) = [J] / [J/m] = [m]
+        # This is the displacement needed for the interface in this cell
+        D_cell = residual / (ρL_val * total_length)
+
+        # Each segment piece in this cell contributes this displacement, weighted by its length
         for (segment_idx, length) in entries
             segment_length = max(Float64(length), 1e-12)
-            weight = segment_length / total_length
-            segment_accumulator[segment_idx] += Gₛ * weight
-            segment_weights[segment_idx] += weight
+            # Weight the displacement contribution by the segment piece length
+            # The displacement itself is D_cell, weighted by how much of the segment is in this cell
+            segment_accumulator[segment_idx] += D_cell * segment_length
+            segment_weights[segment_idx] += segment_length
         end
     end
 
+    # Average the contributions to each segment weighted by intersection lengths
+    # dJ = (|CD|*D_{i,j+1} + |DE|*D_{i,j}) / (|CD| + |DE|)
     segment_displacements = zeros(Float64, length(segments))
     for idx in eachindex(segment_displacements)
         if segment_weights[idx] > 0
@@ -306,16 +314,20 @@ function segment_to_marker_displacements(segment_displacements::Vector{Float64},
         numerator = 0.0
         denominator = 0.0
 
+        # Marker displacement is weighted by INVERSE segment lengths
+        # s_γ = (dJ/|CE| + dK/|EH|) / (1/|CE| + 1/|EH|)
         if prev_seg > 0 && segment_lengths[prev_seg] > 1e-14
             len_prev = segment_lengths[prev_seg]
-            numerator += segment_displacements[prev_seg] * len_prev
-            denominator += len_prev
+            inv_len_prev = 1.0 / len_prev
+            numerator += segment_displacements[prev_seg] * inv_len_prev
+            denominator += inv_len_prev
         end
 
         if next_seg > 0 && segment_lengths[next_seg] > 1e-14
             len_next = segment_lengths[next_seg]
-            numerator += segment_displacements[next_seg] * len_next
-            denominator += len_next
+            inv_len_next = 1.0 / len_next
+            numerator += segment_displacements[next_seg] * inv_len_next
+            denominator += inv_len_next
         end
 
         if denominator > 0
@@ -1175,7 +1187,7 @@ function solve_StefanMono2D_geom!(s::Solver, phase::Phase, front::FrontTracker, 
         normals = compute_marker_normals(front, markers)
 
         if last_displacements !== nothing && timestep > 1
-            extrapolation_factor = 0.8
+            extrapolation_factor = 1.0
             println("Initializing interface using previous displacements (geometric extrapolation factor: $extrapolation_factor)")
             n_markers = length(markers) - (front.is_closed ? 1 : 0)
             new_markers = copy(markers)
@@ -1247,18 +1259,27 @@ function solve_StefanMono2D_geom!(s::Solver, phase::Phase, front::FrontTracker, 
                 marker_displacements[end] = marker_displacements[1]
             end
 
+            # The displacement is already in the correct direction (residual/ρL gives area, divided by length gives displacement)
+            # Negative residual (flux > ρL*dV) means interface should grow (positive displacement outward)
+            # Positive residual (flux < ρL*dV) means interface should shrink (negative displacement inward)
+            # So we need to negate to get the correct motion
             marker_displacements .*= -1.0
             smooth_displacements!(marker_displacements, markers_unique, front.is_closed, smooth_factor, window_size)
-            displacements .= marker_displacements
+            
+            # Accumulate displacements for iterative refinement
+            displacements .+= marker_displacements
 
-            displacement_residual_norm = norm(marker_displacements)
-            push!(residual_norm_history, displacement_residual_norm)
+            # Use the displacement increment for convergence check
+            displacement_increment_norm = norm(marker_displacements)
+            push!(residual_norm_history, displacement_increment_norm)
 
-            position_increment_norm = displacement_residual_norm
+            position_increment_norm = displacement_increment_norm
             push!(position_increment_history, position_increment_norm)
 
-            max_disp = isempty(marker_displacements) ? 0.0 : maximum(abs.(marker_displacements))
-            println("Maximum displacement (geometric): $max_disp")
+            max_disp_increment = isempty(marker_displacements) ? 0.0 : maximum(abs.(marker_displacements))
+            max_disp_total = isempty(displacements) ? 0.0 : maximum(abs.(displacements))
+            println("Maximum displacement increment (geometric): $max_disp_increment")
+            println("Maximum total displacement (geometric): $max_disp_total")
 
             if !isempty(residual_vector)
                 residual_fig = plot_residual_heatmap(mesh, residual_vector, cells_idx, nothing, false)
@@ -1269,7 +1290,7 @@ function solve_StefanMono2D_geom!(s::Solver, phase::Phase, front::FrontTracker, 
                 println("No intersected cells for geometric update at iteration $iter")
             end
 
-            println("Residual norm (geometric displacement) = $displacement_residual_norm | energy residual = $energy_residual_norm")
+            println("Residual norm (geometric displacement increment) = $displacement_increment_norm | energy residual = $energy_residual_norm")
 
             new_markers = copy(markers)
             for i in 1:n_markers
@@ -1340,8 +1361,9 @@ function solve_StefanMono2D_geom!(s::Solver, phase::Phase, front::FrontTracker, 
             operator_2d = DiffusionOps(capacity_2d)
             phase_2d = Phase(capacity_2d, operator_2d, phase.source, phase.Diffusion_coeff)
 
-            if displacement_residual_norm < tol || (iter > 1 && abs(residual_norm_history[end] - residual_norm_history[end-1]) < reltol)
-                println("Converged after $iter iterations with residual $displacement_residual_norm and position increment $position_increment_norm")
+            # Check convergence based on displacement increment
+            if displacement_increment_norm < tol || (iter > 1 && abs(residual_norm_history[end] - residual_norm_history[end-1]) < reltol)
+                println("Converged after $iter iterations with displacement increment $displacement_increment_norm and position increment $position_increment_norm")
                 break
             end
         end
