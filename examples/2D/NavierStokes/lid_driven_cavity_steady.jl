@@ -113,6 +113,65 @@ _, newton_iters, newton_res = solve_NavierStokesMono_steady!(solver;
                                                             nlsolve_method=:newton)
 println("Newton iterations completed: iters=$(newton_iters), residual=$(newton_res)")
 
+
+# --- Mass residual (div u) visualization ---------------------------------
+# mass_residual was computed earlier as a vector on pressure DOFs
+mass_matrix = try
+    reshape(mass_residual, (length(Xs), length(Ys)))
+catch
+    # Fallback: if ordering differs, try transposed shape
+    reshape(mass_residual, (length(Ys), length(Xs)))'
+end
+
+mass_matrix = mass_matrix[1:end-2, 1:end-2]  # remove ghost cells for visualization
+
+# Determine symmetric color range rounded to a power of ten
+max_abs_val = maximum(abs, mass_matrix)
+if max_abs_val <= 0.0
+    # default small range when residuals are exactly zero
+    power = -6
+    scale = 10.0^power
+else
+    power = Int(ceil(log10(max_abs_val)))
+    scale = 10.0^power
+end
+
+fig_mass = Figure(resolution=(600,500))
+ax_mass = Axis(fig_mass[1,1], xlabel="x", ylabel="y",
+               title="Mass residual (div u)", aspect=DataAspect())
+hm_mass = heatmap!(ax_mass, Xs[1:end-2], Ys[1:end-2], mass_matrix;
+                   colormap=:balance, nan_color=:lightgrey,
+                   colorrange = (-scale, scale))
+Colorbar(fig_mass[1,2], hm_mass, label="div u")
+display(fig_mass)
+save("navierstokes2d_mass_residual.png", fig_mass)
+
+
+###########
+# Diagnostics
+###########
+data = Penguin.navierstokes2D_blocks(solver)
+
+nu_x = data.nu_x
+nu_y = data.nu_y
+
+# Extract velocity components
+uωx = solver.x[1:nu_x]
+uγx = solver.x[nu_x+1:2nu_x]
+uωy = solver.x[2nu_x+1:2nu_x+nu_y]
+uγy = solver.x[2nu_x+nu_y+1:2*(nu_x+nu_y)]
+
+mass_residual = data.div_x_ω * Vector{Float64}(uωx) + data.div_x_γ * Vector{Float64}(uγx) +
+                 data.div_y_ω * Vector{Float64}(uωy) + data.div_y_γ * Vector{Float64}(uγy)
+
+println(mass_residual)
+println("‖div(u)‖∞ = $(maximum(abs, mass_residual))")
+
+ke = 0.5 * sum(abs2, uωx) + 0.5 * sum(abs2, uωy)
+println("Kinetic energy = $(ke)")
+
+readline()
+
 ###########
 # Basic diagnostics
 ###########

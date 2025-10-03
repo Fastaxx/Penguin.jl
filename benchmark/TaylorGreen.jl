@@ -198,10 +198,10 @@ for n in ns
     push!(errors_p, err_p)
     push!(hs, max(Lx / nx, Ly / ny))
 
-    xs_ux_plot = xs_ux; ys_ux_plot = ys_ux
-    xs_uy_plot = xs_uy; ys_uy_plot = ys_uy
-    Xp_plot = Xp;       Yp_plot = Yp
-    Ux_plot = Ux; Uy_plot = Uy; P_plot = P
+    global xs_ux_plot = xs_ux; global ys_ux_plot = ys_ux
+    global xs_uy_plot = xs_uy; global ys_uy_plot = ys_uy
+    globalXp_plot = Xp;       global Yp_plot = Yp
+    global Ux_plot = Ux; global Uy_plot = Uy; global P_plot = P
 
     @printf("  h=%.5e  ||u||_L2=%.5e  ||v||_L2=%.5e  ||p||_L2=%.5e\n", hs[end], err_u, err_v, err_p)
 end
@@ -260,10 +260,6 @@ Colorbar(fig_snap[1,2], hm1)
 ax2 = Axis(fig_snap[1,3], title="u_y (n=$(last(ns)), t=$(t_end))", xlabel="x", ylabel="y")
 hm2 = heatmap!(ax2, xs_uy_plot, ys_uy_plot, Uy_plot; colormap=:thermal)
 Colorbar(fig_snap[1,4], hm2)
-
-ax3 = Axis(fig_snap[1,5], title="p (n=$(last(ns)), t=$(t_end))", xlabel="x", ylabel="y")
-hm3 = heatmap!(ax3, Xp_plot, Yp_plot, P_plot; colormap=:balance)
-Colorbar(fig_snap[1,6], hm3)
 
 save("taylor_green_highest_resolution_fields.png", fig_snap)
 display(fig_snap)
