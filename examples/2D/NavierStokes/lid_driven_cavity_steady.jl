@@ -200,30 +200,15 @@ xs_vis = xs[1:end-1]
 u_center_vertical = Ux[icol, 1:end-1]
 v_center_horizontal = Uy[1:end-1, row]
 
-# Add Gaussian perturbations concentrated near the domain boundaries
-σy = 0.05              # width of Gaussian in y
-amp_y = 0.01 * maximum(abs, u_center_vertical) + 1e-8
-gauss_y = amp_y .* (exp.(-((ys_vis .- y0).^2) ./ (2σy^2)) .+ exp.(-((ys_vis .- (y0+Ly)).^2) ./ (2σy^2)))
-
-u_center_vertical_an = u_center_vertical .+ gauss_y
-
-σx = 0.05              # width of Gaussian in x
-amp_x = 0.05 * maximum(abs, v_center_horizontal) + 1e-8
-gauss_x = amp_x .* (exp.(-((xs_vis .- x0).^2) ./ (2σx^2)) .+ exp.(-((xs_vis .- (x0+Lx)).^2) ./ (2σx^2)))
-
-v_center_horizontal_an = v_center_horizontal .+ gauss_x
-
 
 fig_profiles = Figure(resolution=(800, 350))
 ax_vert = Axis(fig_profiles[1,1], xlabel="u_x", ylabel="y",
                title="Vertical centerline u_x(x=0.5)")
 lines!(ax_vert, u_center_vertical, ys_vis, label="Numerical")
-lines!(ax_vert, u_center_vertical_an, ys_vis, color=:red, linestyle=:dash, label="Analytical")
 
 ax_horiz = Axis(fig_profiles[1,2], xlabel="x", ylabel="u_y",
                 title="Horizontal centerline u_y(y=0.5)")
 lines!(ax_horiz, xs_vis, v_center_horizontal, label="Numerical")
-lines!(ax_horiz, xs_vis, v_center_horizontal_an, color=:red, linestyle=:dash, label="Analytical")
 
 axislegend(ax_vert, position=:rb)
 axislegend(ax_horiz, position=:rb)

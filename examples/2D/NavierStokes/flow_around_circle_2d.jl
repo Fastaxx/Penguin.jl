@@ -96,8 +96,8 @@ x0_vec = zeros(2 * (nu_x + nu_y) + np)
 
 solver = NavierStokesMono(fluid, (bc_ux, bc_uy), bc_p, interface_bc; x0=x0_vec)
 
-Δt = 0.01
-T_end = 1.0
+Δt = 0.005
+T_end = 8.0
 
 println("Running Navier–Stokes unsteady simulation...")
 times, histories = solve_NavierStokesMono_unsteady!(solver; Δt=Δt, T_end=T_end, scheme=:CN)
