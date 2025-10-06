@@ -60,6 +60,16 @@ end
     end
 end
 
+@inline function enforce_zero_gradient!(A::SparseMatrixCSC{Float64, Int}, b,
+                                        row::Int, col_boundary::Int, col_adjacent::Int,
+                                        rhs_val::Float64=0.0)
+    A[row, :] .= 0.0
+    A[row, col_boundary] = 1.0
+    A[row, col_adjacent] -= 1.0
+    b[row] = rhs_val
+    return nothing
+end
+
 function stokes1D_blocks(s::StokesMono)
     op_u = s.fluid.operator_u[1]
     op_p = s.fluid.operator_p
@@ -933,6 +943,11 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
                 A[r, uωx_off + lix] =  1.0/Δy
                 A[r, uωx_off + li_adj] += -1.0/Δy
                 b[r] = Float64(g)
+            elseif bcx isa Outflow
+                lix = LIx[i, jx]
+                neighbor = normal === :bottom ? LIx[i, min(jx+1, ny)] : LIx[i, max(jx-1, 1)]
+                enforce_zero_gradient!(A, b, row_uωx_off + lix, uωx_off + lix, uωx_off + neighbor)
+                enforce_zero_gradient!(A, b, row_uγx_off + lix, uγx_off + lix, uγx_off + neighbor)
             elseif bcx isa Periodic
                 lix = LIx[i, jx]
                 opp_j = (jx == 1) ? jtop : 1
@@ -971,6 +986,11 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
                 A[r, uωy_off + liy] =  1.0/Δy
                 A[r, uωy_off + li_adj] += -1.0/Δy
                 b[r] = Float64(g)
+            elseif bcy isa Outflow
+                liy = LIy[i, jy]
+                neighbor = normal === :bottom ? LIy[i, min(jy+1, ny)] : LIy[i, max(jy-1, 1)]
+                enforce_zero_gradient!(A, b, row_uωy_off + liy, uωy_off + liy, uωy_off + neighbor)
+                enforce_zero_gradient!(A, b, row_uγy_off + liy, uγy_off + liy, uγy_off + neighbor)
             elseif bcy isa Periodic
                 liy = LIy[i, jy]
                 opp_j = (jy == 1) ? jtop : 1
@@ -1016,6 +1036,11 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
                 A[r, uωx_off + lix] =  1.0/Δx
                 A[r, uωx_off + li_adj] += -1.0/Δx
                 b[r] = Float64(g)
+            elseif bcx isa Outflow
+                lix = LIx[ix, j]
+                neighbor = normal === :left ? LIx[min(ix+1, nx), j] : LIx[max(ix-1, 1), j]
+                enforce_zero_gradient!(A, b, row_uωx_off + lix, uωx_off + lix, uωx_off + neighbor)
+                enforce_zero_gradient!(A, b, row_uγx_off + lix, uγx_off + lix, uγx_off + neighbor)
             elseif bcx isa Periodic
                 lix = LIx[ix, j]
                 opp_i = (ix == 1) ? iright : 1
@@ -1054,6 +1079,11 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
                 A[r, uωy_off + liy] =  1.0/Δx
                 A[r, uωy_off + li_adj] += -1.0/Δx
                 b[r] = Float64(g)
+            elseif bcy isa Outflow
+                liy = LIy[iy, j]
+                neighbor = normal === :left ? LIy[min(iy+1, nx), j] : LIy[max(iy-1, 1), j]
+                enforce_zero_gradient!(A, b, row_uωy_off + liy, uωy_off + liy, uωy_off + neighbor)
+                enforce_zero_gradient!(A, b, row_uγy_off + liy, uγy_off + liy, uγy_off + neighbor)
             elseif bcy isa Periodic
                 liy = LIy[iy, j]
                 opp_i = (iy == 1) ? iright : 1
@@ -1287,6 +1317,10 @@ function apply_velocity_dirichlet!(A::SparseMatrixCSC{Float64, Int}, b::Vector{F
             rt = nu + iL
             enforce_dirichlet!(A, b, rt, uγ_offset + iL, vL)
         end
+    elseif left_bc isa Outflow
+        neighbor = min(iL + 1, nu)
+        enforce_zero_gradient!(A, b, iL, uω_offset + iL, uω_offset + neighbor)
+        enforce_zero_gradient!(A, b, nu + iL, uγ_offset + iL, uγ_offset + neighbor)
     elseif left_bc isa Neumann
         g = left_bc.value isa Function ? (t === nothing ? left_bc.value(xnodes[1]) : left_bc.value(xnodes[1], 0.0, t)) : left_bc.value
         r = iL
@@ -1317,6 +1351,10 @@ function apply_velocity_dirichlet!(A::SparseMatrixCSC{Float64, Int}, b::Vector{F
             rt = nu + iR
             enforce_dirichlet!(A, b, rt, uγ_offset + iR, vR)
         end
+    elseif right_bc isa Outflow
+        neighbor = max(iR - 1, iL)
+        enforce_zero_gradient!(A, b, iR, uω_offset + iR, uω_offset + neighbor)
+        enforce_zero_gradient!(A, b, nu + iR, uγ_offset + iR, uγ_offset + neighbor)
     elseif right_bc isa Neumann
         g = right_bc.value isa Function ? (t === nothing ? right_bc.value(xnodes[end-1]) : right_bc.value(xnodes[end-1], 0.0, t)) : right_bc.value
         r = iR

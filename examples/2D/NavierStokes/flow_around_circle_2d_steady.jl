@@ -118,9 +118,9 @@ function run_steady(method::Symbol; tol=1e-8, maxiter=50, relaxation=1.0)
 end
 
 # Run Picard and Newton independently (do not reuse Picard solution as Newton's initial guess)
-picard_solver, picard_iters, picard_res, picard_hist, picard_mass = run_steady(:picard; tol=eps(), maxiter=60, relaxation=1.0)
+picard_solver, picard_iters, picard_res, picard_hist, picard_mass = run_steady(:picard; tol=eps(), maxiter=30, relaxation=1.0)
 
-solver_newton, newton_iters, newton_res, newton_hist, newton_mass = run_steady(:newton; tol=eps(), maxiter=60, relaxation=1.1)
+solver_newton, newton_iters, newton_res, newton_hist, newton_mass = run_steady(:newton; tol=eps(), maxiter=30, relaxation=1.1)
 
 # Diagnostics
 println("Picard: iters=", picard_iters, ", final residual=", picard_res)
@@ -169,6 +169,7 @@ Xs_vis = Xs[2:end-2]
 Ys_vis = Ys[2:end-2]
 
 fig_mass = Figure(resolution=(1000,400))
+axp = Axis(fig_mass[1,2], title="Mass residual (Picard)")
 hm1 = heatmap!(axp, Xs, Ys, mass_pic_mat; colormap=:balance)
 axp = Axis(fig_mass[1,1], title="Mass residual (Picard)")
 hm1 = heatmap!(axp, Xs_vis, Ys_vis, mass_pic_mat; colormap=:balance)
@@ -182,4 +183,33 @@ save("navierstokes2d_steady_convergence.png", fig_conv)
 save("navierstokes2d_steady_mass_residuals.png", fig_mass)
 
 println("Plots saved: navierstokes2d_steady_convergence.png, navierstokes2d_steady_mass_residuals.png")
+
+###########
+# Streamline plot for the Newton steady solution
+###########
+# Extract velocity from Newton solver
+nu_x = prod(operator_ux.size)
+nu_y = prod(operator_uy.size)
+uωx_new = solver_newton.x[1:nu_x]
+uωy_new = solver_newton.x[2nu_x+1:2nu_x+nu_y]
+
+xs = mesh_ux.nodes[1]
+ys = mesh_ux.nodes[2]
+
+Ux_new = reshape(uωx_new, (length(xs), length(ys)))
+Uy_new = reshape(uωy_new, (length(xs), length(ys)))
+
+nearest_index(vec, val) = clamp(argmin(abs.(vec .- val)), 1, length(vec))
+velocity_field_new(x, y) = Point2f(Ux_new[nearest_index(xs, x), nearest_index(ys, y)],
+                                    Uy_new[nearest_index(xs, x), nearest_index(ys, y)])
+fig_stream = Figure(resolution=(800,600))
+ax_s = Axis(fig_stream[1,1], xlabel="x", ylabel="y", title="Steady streamlines (Newton)")
+
+# Use a callable color function (Makie expects a function), map every point to 0.0 and use a gray colormap
+streamplot!(ax_s, velocity_field_new, xs[1]..xs[end], ys[1]..ys[end]; density=2.0, color=(p)->0.0)
+contour!(ax_s, xs, ys, [circle_body(x,y) for x in xs, y in ys]; levels=[0.0], color=:red, linewidth=2)
+display(fig_stream)
+save("navierstokes2d_steady_streamlines.png", fig_stream)
+
+println("Saved steady streamline plot: navierstokes2d_steady_streamlines.png")
 

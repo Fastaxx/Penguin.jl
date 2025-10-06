@@ -59,7 +59,7 @@ ux_top    = Dirichlet((x, y, t=0.0) -> 0.0)
 uy_zero = Dirichlet((x, y, t=0.0) -> 0.0)
 
 bc_ux = BorderConditions(Dict(
-    :left=>ux_left, :right=>ux_right, :bottom=>ux_bottom, :top=>ux_top
+    :left=>ux_left, :right=>Outflow(), :bottom=>ux_bottom, :top=>ux_top
 ))
 bc_uy = BorderConditions(Dict(
     :left=>uy_zero, :right=>uy_zero, :bottom=>uy_zero, :top=>uy_zero
@@ -97,7 +97,7 @@ x0_vec = zeros(2 * (nu_x + nu_y) + np)
 solver = NavierStokesMono(fluid, (bc_ux, bc_uy), bc_p, interface_bc; x0=x0_vec)
 
 Δt = 0.01
-T_end = 3.0
+T_end = 1.0
 
 println("Running Navier–Stokes unsteady simulation...")
 times, histories = solve_NavierStokesMono_unsteady!(solver; Δt=Δt, T_end=T_end, scheme=:CN)
@@ -105,49 +105,6 @@ times, histories = solve_NavierStokesMono_unsteady!(solver; Δt=Δt, T_end=T_end
 println("Simulation finished. Stored states = ", length(histories))
 println("Final time step = ", times[end])
 
-###########
-# Strouhal number estimate
-###########
-println("Estimating Strouhal number...")
-probe_x, probe_y = 1.0, 0.0
-ix_probe = nearest_index(xs, probe_x)
-iy_probe = nearest_index(ys, probe_y)
-
-uy_series = map(histories) do hist
-    uy_hist = hist[2nu_x+1:2nu_x+nu_y]
-    Uy_hist = reshape(uy_hist, (length(xs), length(ys)))
-    Uy_hist[ix_probe, iy_probe]
-end
-
-if length(uy_series) >= 32
-    trim_len = max(32, length(uy_series) ÷ 2)
-    signal = uy_series[end - trim_len + 1:end]
-    signal .-= mean(signal)
-
-    N = length(signal)
-    dt = Δt
-    spectrum = abs.(fft(signal))
-    freqs = (0:N-1) .* (1.0 / (dt * N))
-
-    pos_range = 2:clamp(div(N, 2), 2, N)
-    idx = pos_range[argmax(spectrum[pos_range])]
-    f_dom = freqs[idx]
-    diameter = 2 * circle_radius
-    strouhal = f_dom * diameter / Umax
-
-    println("Estimated Strouhal number = $(round(strouhal, digits=4))")
-    reference_Str = 0.2
-    if abs(strouhal - reference_Str) / reference_Str < 0.2
-        println("Strouhal number within expected range.")
-    else
-        @warn "Strouhal number deviates from expected value" strouhal reference_Str
-    end
-else
-    @warn "Insufficient samples to estimate Strouhal number" sample_count=length(uy_series)
-end
-
-
-readline()
 
 ###########
 # Visualization of final velocity and pressure
@@ -299,3 +256,44 @@ end
 
 println("Streamline animation saved as navierstokes2d_streamlines.gif")
 
+
+###########
+# Strouhal number estimate
+###########
+println("Estimating Strouhal number...")
+probe_x, probe_y = 1.0, 0.0
+ix_probe = nearest_index(xs, probe_x)
+iy_probe = nearest_index(ys, probe_y)
+
+uy_series = map(histories) do hist
+    uy_hist = hist[2nu_x+1:2nu_x+nu_y]
+    Uy_hist = reshape(uy_hist, (length(xs), length(ys)))
+    Uy_hist[ix_probe, iy_probe]
+end
+
+if length(uy_series) >= 32
+    trim_len = max(32, length(uy_series) ÷ 2)
+    signal = uy_series[end - trim_len + 1:end]
+    signal .-= mean(signal)
+
+    N = length(signal)
+    dt = Δt
+    spectrum = abs.(fft(signal))
+    freqs = (0:N-1) .* (1.0 / (dt * N))
+
+    pos_range = 2:clamp(div(N, 2), 2, N)
+    idx = pos_range[argmax(spectrum[pos_range])]
+    f_dom = freqs[idx]
+    diameter = 2 * circle_radius
+    strouhal = f_dom * diameter / Umax
+
+    println("Estimated Strouhal number = $(round(strouhal, digits=4))")
+    reference_Str = 0.2
+    if abs(strouhal - reference_Str) / reference_Str < 0.2
+        println("Strouhal number within expected range.")
+    else
+        @warn "Strouhal number deviates from expected value" strouhal reference_Str
+    end
+else
+    @warn "Insufficient samples to estimate Strouhal number" sample_count=length(uy_series)
+end

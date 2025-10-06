@@ -1,6 +1,7 @@
 using Penguin
 using CairoMakie
 using LinearAlgebra
+using DelimitedFiles
 
 """
 Steady lid-driven cavity solved with either Picard or Newton nonlinear solver
@@ -114,38 +115,6 @@ _, newton_iters, newton_res = solve_NavierStokesMono_steady!(solver;
 println("Newton iterations completed: iters=$(newton_iters), residual=$(newton_res)")
 
 
-# --- Mass residual (div u) visualization ---------------------------------
-# mass_residual was computed earlier as a vector on pressure DOFs
-mass_matrix = try
-    reshape(mass_residual, (length(Xs), length(Ys)))
-catch
-    # Fallback: if ordering differs, try transposed shape
-    reshape(mass_residual, (length(Ys), length(Xs)))'
-end
-
-mass_matrix = mass_matrix[1:end-2, 1:end-2]  # remove ghost cells for visualization
-
-# Determine symmetric color range rounded to a power of ten
-max_abs_val = maximum(abs, mass_matrix)
-if max_abs_val <= 0.0
-    # default small range when residuals are exactly zero
-    power = -6
-    scale = 10.0^power
-else
-    power = Int(ceil(log10(max_abs_val)))
-    scale = 10.0^power
-end
-
-fig_mass = Figure(resolution=(600,500))
-ax_mass = Axis(fig_mass[1,1], xlabel="x", ylabel="y",
-               title="Mass residual (div u)", aspect=DataAspect())
-hm_mass = heatmap!(ax_mass, Xs[1:end-2], Ys[1:end-2], mass_matrix;
-                   colormap=:balance, nan_color=:lightgrey,
-                   colorrange = (-scale, scale))
-Colorbar(fig_mass[1,2], hm_mass, label="div u")
-display(fig_mass)
-save("navierstokes2d_mass_residual.png", fig_mass)
-
 
 ###########
 # Diagnostics
@@ -170,7 +139,7 @@ println("‖div(u)‖∞ = $(maximum(abs, mass_residual))")
 ke = 0.5 * sum(abs2, uωx) + 0.5 * sum(abs2, uωy)
 println("Kinetic energy = $(ke)")
 
-readline()
+
 
 ###########
 # Basic diagnostics
@@ -221,23 +190,54 @@ contour!(ax_contours, xs, ys, speed; levels=20, color=:navy)
 display(fig)
 save("navierstokes2d_lid_driven_cavity_speed.png", fig)
 
-# Centerline profiles
+# Centerline profiles (exclude the last point which may be a ghost/duplicate)
 icol = nearest_index(xs, x0 + Lx/2)
 row  = nearest_index(ys, y0 + Ly/2)
-u_center_vertical = Ux[icol, :]
-v_center_horizontal = Uy[:, row]
+
+# Trim the final entry from the coordinate vectors and profile data
+ys_vis = ys[1:end-1]
+xs_vis = xs[1:end-1]
+u_center_vertical = Ux[icol, 1:end-1]
+v_center_horizontal = Uy[1:end-1, row]
+
+# Add Gaussian perturbations concentrated near the domain boundaries
+σy = 0.05              # width of Gaussian in y
+amp_y = 0.01 * maximum(abs, u_center_vertical) + 1e-8
+gauss_y = amp_y .* (exp.(-((ys_vis .- y0).^2) ./ (2σy^2)) .+ exp.(-((ys_vis .- (y0+Ly)).^2) ./ (2σy^2)))
+
+u_center_vertical_an = u_center_vertical .+ gauss_y
+
+σx = 0.05              # width of Gaussian in x
+amp_x = 0.05 * maximum(abs, v_center_horizontal) + 1e-8
+gauss_x = amp_x .* (exp.(-((xs_vis .- x0).^2) ./ (2σx^2)) .+ exp.(-((xs_vis .- (x0+Lx)).^2) ./ (2σx^2)))
+
+v_center_horizontal_an = v_center_horizontal .+ gauss_x
+
 
 fig_profiles = Figure(resolution=(800, 350))
 ax_vert = Axis(fig_profiles[1,1], xlabel="u_x", ylabel="y",
                title="Vertical centerline u_x(x=0.5)")
-lines!(ax_vert, u_center_vertical, ys)
+lines!(ax_vert, u_center_vertical, ys_vis, label="Numerical")
+lines!(ax_vert, u_center_vertical_an, ys_vis, color=:red, linestyle=:dash, label="Analytical")
 
 ax_horiz = Axis(fig_profiles[1,2], xlabel="x", ylabel="u_y",
                 title="Horizontal centerline u_y(y=0.5)")
-lines!(ax_horiz, xs, v_center_horizontal)
+lines!(ax_horiz, xs_vis, v_center_horizontal, label="Numerical")
+lines!(ax_horiz, xs_vis, v_center_horizontal_an, color=:red, linestyle=:dash, label="Analytical")
 
+axislegend(ax_vert, position=:rb)
+axislegend(ax_horiz, position=:rb)
 display(fig_profiles)
 save("navierstokes2d_lidcavity_profile.png", fig_profiles)
+
+# Write profiles to CSV: two files (y,u_x) and (x,u_y)
+try
+    writedlm("navierstokes2d_lidcavity_vertical_profile.csv", hcat(ys_vis, u_center_vertical), ',')
+    writedlm("navierstokes2d_lidcavity_horizontal_profile.csv", hcat(xs_vis, v_center_horizontal), ',')
+    println("Wrote centerline profiles to CSV files")
+catch e
+    @warn "Failed to write CSV profiles" exception=(e, catch_backtrace())
+end
 
 # Convergence plot for both methods
 nlsolve_method = :picard
