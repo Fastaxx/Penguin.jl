@@ -100,10 +100,9 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
         Tᵢ = s.x
 
         # 2) Update volumes / compute new interface
-        Vn_1 = phase.capacity.A[cap_index][1:end÷2, 1:end÷2]
-        Vn   = phase.capacity.A[cap_index][end÷2+1:end, end÷2+1:end]
-        Hₙ   = sum(diag(Vn))
-        Hₙ₊₁ = sum(diag(Vn_1))
+    Hₙ_profile, Hₙ₊₁_profile = extract_height_profiles(phase.capacity, phase.operator.size)
+    Hₙ   = sum(Hₙ_profile)
+    Hₙ₊₁ = sum(Hₙ₊₁_profile)
 
         # Compute flux
         W! = phase.operator.Wꜝ[1:end÷2, 1:end÷2]
@@ -225,10 +224,9 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
             Tᵢ = s.x
 
             # 2) Update volumes / compute new interface
-            Vn_1 = phase.capacity.A[cap_index][1:end÷2, 1:end÷2]
-            Vn   = phase.capacity.A[cap_index][end÷2+1:end, end÷2+1:end]
-            Hₙ   = sum(diag(Vn))
-            Hₙ₊₁ = sum(diag(Vn_1))
+            Hₙ_profile, Hₙ₊₁_profile = extract_height_profiles(phase.capacity, phase.operator.size)
+            Hₙ   = sum(Hₙ_profile)
+            Hₙ₊₁ = sum(Hₙ₊₁_profile)
             
             # Compute flux
             W! = phase.operator.Wꜝ[1:end÷2, 1:end÷2]

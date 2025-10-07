@@ -1,90 +1,4 @@
 # Full Moving 2D - Diffusion - Unsteady - Monophasic
-function MovingLiquidDiffusionUnsteadyMono2D(phase::Phase, bc_b::BorderConditions, bc_i::AbstractBoundary, Δt::Float64, Tᵢ::Vector{Float64}, mesh::AbstractMesh, scheme::String)
-    println("Solver Creation:")
-    println("- Moving problem")
-    println("- Non prescibed motion")
-    println("- Monophasic problem")
-    println("- Unsteady problem")
-    println("- Diffusion problem")
-    
-    s = Solver(Unsteady, Monophasic, Diffusion, nothing, nothing, nothing, [], [])
-    
-    if scheme == "CN"
-        s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, "CN")
-        s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc_i, Tᵢ, Δt, 0.0, "CN")
-    else # BE
-        s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, "BE")
-        s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc_i, Tᵢ, Δt, 0.0, "BE")
-    end
-    BC_border_mono!(s.A, s.b, bc_b, mesh)
-    return s
-end
-
-# -----------------------------------------------------------------------------
-# Height tracking utilities
-
-@inline function _spatial_shape_from_dims(dims)
-    nd = length(dims)
-    nd > 1 || error("Operator size must contain at least one spatial dimension.")
-    return Tuple(dims[1:nd-1])
-end
-
-"""
-    extract_height_fields(capacity, dims)
-
-Return the diagonal capacity contributions `Vₙ` and `Vₙ₊₁` reshaped to the
-spatial grid described by `dims`. The returned arrays carry the geometric
-weights used to reconstruct the interface height at times `n` and `n + 1`.
-"""
-function extract_height_fields(capacity::Capacity, dims)
-    cap_index = length(dims)
-    height_block = capacity.A[cap_index]
-    half = size(height_block, 1) ÷ 2
-    spatial_shape = _spatial_shape_from_dims(dims)
-
-    @views Vₙ₊₁ = reshape(diag(height_block[1:half, 1:half]), spatial_shape...)
-    @views Vₙ   = reshape(diag(height_block[half+1:end, half+1:end]), spatial_shape...)
-
-    return Vₙ, Vₙ₊₁
-end
-
-"""
-    column_height_profile(V)
-
-Collapse the height field `V` along the streamwise (x) direction to obtain the
-column-wise interface height vector.
-"""
-function column_height_profile(V::AbstractArray)
-    nd = ndims(V)
-    if nd == 1
-        return collect(V)
-    else
-        return vec(sum(V, dims=1))
-    end
-end
-
-"""
-    extract_height_profiles(capacity, dims)
-
-Convenience wrapper that returns the column-wise height vectors at times `n`
-and `n + 1`.
-"""
-function extract_height_profiles(capacity::Capacity, dims)
-    Vₙ, Vₙ₊₁ = extract_height_fields(capacity, dims)
-    return column_height_profile(Vₙ), column_height_profile(Vₙ₊₁)
-end
-
-"""
-    interface_positions_from_heights(heights, mesh)
-
-Convert a column-wise height vector into physical interface positions using the
-mesh spacing in the transverse direction.
-"""
-function interface_positions_from_heights(heights::AbstractVector, mesh::AbstractMesh)
-    Δy = mesh.nodes[2][2] - mesh.nodes[2][1]
-    x0 = mesh.nodes[1][1]
-    return x0 .+ heights ./ Δy
-end
 
 function solve_MovingLiquidDiffusionUnsteadyMono2D!(s::Solver, phase::Phase, Interface_position, Hₙ⁰, sₙ, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, bc::AbstractBoundary, ic::InterfaceConditions, mesh, scheme::String; interpo="linear", Newton_params=(1000, 1e-10, 1e-10, 1.0), cfl_target=0.5,
     Δt_min=1e-4,
@@ -124,7 +38,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono2D!(s::Solver, phase::Phase, Int
     # Determine how many dimensions
     dims = phase.operator.size
     len_dims = length(dims)
-    spatial_shape = _spatial_shape_from_dims(dims)
+    spatial_shape = spatial_shape_from_dims(dims)
     nx = spatial_shape[1]
     ny = length(spatial_shape) >= 2 ? spatial_shape[2] : 1
 
@@ -163,8 +77,8 @@ function solve_MovingLiquidDiffusionUnsteadyMono2D!(s::Solver, phase::Phase, Int
         solve_system!(s; method=method, algorithm=algorithm, kwargs...)
         Tᵢ = s.x
 
-    # 2) Recompute heights
-    Hₙ, Hₙ₊₁ = extract_height_profiles(phase.capacity, dims)
+        # 2) Recompute heights
+        Hₙ, Hₙ₊₁ = extract_height_profiles(phase.capacity, dims)
 
         # 3) Compute the interface flux term
         W! = phase.operator.Wꜝ[1:end÷2, 1:end÷2]
@@ -450,9 +364,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono2D!(s::Solver, phase::Phase, Int
 
             # 6) Compute the new interface position table
             new_xf = interface_positions_from_heights(new_Hₙ, mesh)
-            if !isempty(new_xf)
-                new_xf[end] = new_xf[1]
-            end
+            ensure_periodic!(new_xf)
 
             # 7) Construct a interpolation function for the new interface position :
             centroids = range(mesh.nodes[2][1], mesh.nodes[2][end], length=length(mesh.nodes[2]))
@@ -769,7 +681,7 @@ function solve_MovingLiquidDiffusionUnsteadyDiph2D!(s::Solver, phase1::Phase, ph
     # Determine how many dimensions
     dims = phase1.operator.size
     len_dims = length(dims)
-    spatial_shape = _spatial_shape_from_dims(dims)
+    spatial_shape = spatial_shape_from_dims(dims)
     nx = spatial_shape[1]
     ny = length(spatial_shape) >= 2 ? spatial_shape[2] : 1
 
@@ -856,9 +768,7 @@ function solve_MovingLiquidDiffusionUnsteadyDiph2D!(s::Solver, phase1::Phase, ph
 
         # 6) Compute the new interface position table
         new_xf = interface_positions_from_heights(new_Hₙ, mesh)
-        if !isempty(new_xf)
-            new_xf[end] = new_xf[1]  # Ensure periodic BC in y-direction
-        end
+        ensure_periodic!(new_xf)  # Ensure periodic BC in y-direction
 
         # 7) Construct interpolation functions for new interface position
         centroids = range(mesh.nodes[2][1], mesh.nodes[2][end], length=length(mesh.nodes[2]))
@@ -1095,9 +1005,7 @@ function solve_MovingLiquidDiffusionUnsteadyDiph2D!(s::Solver, phase1::Phase, ph
 
             # 6) Compute the new interface position table
             new_xf = interface_positions_from_heights(new_Hₙ, mesh)
-            if !isempty(new_xf)
-                new_xf[end] = new_xf[1]  # Ensure Line BC in y-direction
-            end
+            ensure_periodic!(new_xf)  # Ensure Line BC in y-direction
 
             # 7) Construct interpolation functions for new interface position
             centroids = range(mesh.nodes[2][1], mesh.nodes[2][end], length=length(mesh.nodes[2]))

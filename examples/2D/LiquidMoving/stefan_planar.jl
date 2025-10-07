@@ -76,7 +76,7 @@ reltol = 1e-5
 Newton_params = (max_iter, tol, reltol, α)
 
 # Define the solver
-solver = MovingLiquidDiffusionUnsteadyMono2D(Fluide, bc_b, bc, Δt, u0, mesh, "BE")
+solver = MovingLiquidDiffusionUnsteadyMono(Fluide, bc_b, bc, Δt, u0, mesh, "BE")
 
 # Solve the problem
 solver, residuals, xf_log, reconstruct = solve_MovingLiquidDiffusionUnsteadyMono2D!(solver, Fluide, Interface_position, Hₙ⁰, sₙ, Δt, Tend, bc_b, bc, stef_cond, mesh, "BE"; interpo="linear", Newton_params=Newton_params, method=Base.:\)

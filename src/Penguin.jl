@@ -93,12 +93,14 @@ include("prescribedmotionsolver/advectiondiffusion.jl")
 export MovingAdvDiffusionUnsteadyMono, solve_MovingAdvDiffusionUnsteadyMono!
 export MovingAdvDiffusionUnsteadyDiph, solve_MovingAdvDiffusionUnsteadyDiph!
 
+include("liquidmotionsolver/height_tracking.jl")
+
 include("liquidmotionsolver/diffusion.jl")
 export MovingLiquidDiffusionUnsteadyMono, solve_MovingLiquidDiffusionUnsteadyMono!
 export MovingLiquidDiffusionUnsteadyDiph, solve_MovingLiquidDiffusionUnsteadyDiph!
 
 include("liquidmotionsolver/diffusion2d.jl")
-export MovingLiquidDiffusionUnsteadyMono2D, solve_MovingLiquidDiffusionUnsteadyMono2D!
+export solve_MovingLiquidDiffusionUnsteadyMono2D!
 export MovingLiquidDiffusionUnsteadyDiph2D, solve_MovingLiquidDiffusionUnsteadyDiph2D!
 
 include("liquidmotionsolver/stefan.jl")
