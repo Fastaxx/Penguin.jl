@@ -129,7 +129,6 @@ export check_convergence, check_convergence_diph
 include("vtk.jl")
 export write_vtk
 
-# Stokes / Navier–Stokes (prototype)
 include("solver/stokes.jl")
 export StokesMono, solve_StokesMono!, solve_StokesMono_unsteady!
 
@@ -138,4 +137,7 @@ export StokesDiph, solve_StokesDiph!
 
 include("solver/navierstokes.jl")
 export NavierStokesMono, solve_NavierStokesMono_unsteady!, solve_NavierStokesMono_steady!, build_convection_operators
+
+include("solver/navierstokes_heat.jl")
+export NavierStokesHeat2D, solve_NavierStokesHeat2D_unsteady!
 end
