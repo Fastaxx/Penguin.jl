@@ -1,5 +1,5 @@
 """
-    mutable struct StreamVorticitySolver{N}
+    mutable struct StreamVorticity{N}
 
 Solver dedicated to two-dimensional streamfunction–vorticity simulations on
 cut-cell meshes. The discretisation follows the scalar layout already used in
@@ -34,7 +34,7 @@ equations.
 - `last_convection::Union{Nothing, ConvectionOps{N}}`: Cached convection
   operators built from the most recent velocity field.
 """
-mutable struct StreamVorticitySolver{N}
+mutable struct StreamVorticity{N}
     capacity::Capacity{N}
     operator::DiffusionOps{N}
     ν::Union{Float64, Function}
@@ -54,7 +54,7 @@ mutable struct StreamVorticitySolver{N}
 end
 
 """
-    StreamVorticitySolver(capacity::Capacity{2}, ν, Δt; kwargs...)
+    StreamVorticity(capacity::Capacity{2}, ν, Δt; kwargs...)
 
 Convenience constructor for two-dimensional streamfunction–vorticity problems.
 Optional keyword arguments:
@@ -70,14 +70,14 @@ Optional keyword arguments:
 The constructor pre-assembles the Poisson operator for the streamfunction using
 the supplied interface boundary condition.
 """
-function StreamVorticitySolver(capacity::Capacity{2}, ν, Δt;
-                               bc_stream::AbstractBoundary = Dirichlet(0.0),
-                               bc_vorticity::AbstractBoundary = Dirichlet(0.0),
-                               bc_stream_border::BorderConditions = BorderConditions(Dict{Symbol,AbstractBoundary}()),
-                               bc_vorticity_border::BorderConditions = BorderConditions(Dict{Symbol,AbstractBoundary}()),
-                               ψ0::Union{Nothing,Vector{Float64}} = nothing,
-                               ω0::Union{Nothing,Vector{Float64}} = nothing,
-                               source::Function = (args...)->0.0)
+function StreamVorticity(capacity::Capacity{2}, ν, Δt;
+                         bc_stream::AbstractBoundary = Dirichlet(0.0),
+                         bc_vorticity::AbstractBoundary = Dirichlet(0.0),
+                         bc_stream_border::BorderConditions = BorderConditions(Dict{Symbol,AbstractBoundary}()),
+                         bc_vorticity_border::BorderConditions = BorderConditions(Dict{Symbol,AbstractBoundary}()),
+                         ψ0::Union{Nothing,Vector{Float64}} = nothing,
+                         ω0::Union{Nothing,Vector{Float64}} = nothing,
+                         source::Function = (args...)->0.0)
 
     operator = DiffusionOps(capacity)
     n = prod(operator.size)
@@ -90,11 +90,11 @@ function StreamVorticitySolver(capacity::Capacity{2}, ν, Δt;
 
     states = NamedTuple[(time = 0.0, ψ = copy(ψ_init), ω = copy(ω_init))]
 
-    return StreamVorticitySolver{2}(capacity, operator, ν, Δt,
-                                    bc_stream, bc_vorticity,
-                                    bc_stream_border, bc_vorticity_border,
-                                    ψ_init, ω_init, velocity,
-                                    source, 0.0, states, Aψ, nothing)
+    return StreamVorticity{2}(capacity, operator, ν, Δt,
+                              bc_stream, bc_vorticity,
+                              bc_stream_border, bc_vorticity_border,
+                              ψ_init, ω_init, velocity,
+                              source, 0.0, states, Aψ, nothing)
 end
 
 """
@@ -123,7 +123,7 @@ Assemble the right-hand side of the Poisson equation
     ∇²ψ = -ω
 using the current vorticity field and interface boundary conditions.
 """
-function poisson_rhs(s::StreamVorticitySolver, t::Float64)
+function poisson_rhs(s::StreamVorticity, t::Float64)
     operator = s.operator
     capacity = s.capacity
     n = prod(operator.size)
@@ -143,7 +143,7 @@ end
 Reconstruct the velocity field from the streamfunction using the cut-cell
 gradient operator. Only the two-dimensional case is supported at the moment.
 """
-function update_velocity!(s::StreamVorticitySolver{2})
+function update_velocity!(s::StreamVorticity{2})
     gradψ = ∇(s.operator, s.ψ)
     n = prod(s.operator.size)
 
@@ -164,7 +164,7 @@ end
 Create or reuse the convection operators associated with the current velocity
 field.
 """
-function build_convection(s::StreamVorticitySolver{2})
+function build_convection(s::StreamVorticity{2})
     if s.last_convection !== nothing
         return s.last_convection
     end
@@ -182,16 +182,16 @@ function build_convection(s::StreamVorticitySolver{2})
 end
 
 """
-    solve_streamfunction!(solver; kwargs...)
+    _solve_streamfunction!(solver; kwargs...)
 
-Solve the Poisson problem for the streamfunction using the current vorticity as
-right-hand side. Keyword arguments are forwarded to `solve_system!` for linear
-algebra control.
+Internal helper solving the Poisson problem for the streamfunction using the
+current vorticity as right-hand side. Keyword arguments are forwarded to
+`solve_system!` for linear algebra control.
 """
-function solve_streamfunction!(s::StreamVorticitySolver{2};
-                               method::Function = Base.:\,
-                               algorithm = nothing,
-                               kwargs...)
+function _solve_streamfunction!(s::StreamVorticity{2};
+                                method::Function = Base.:\,
+                                algorithm = nothing,
+                                kwargs...)
     Aψ = copy(s.Aψ)
     bψ = poisson_rhs(s, s.time)
 
@@ -206,20 +206,20 @@ function solve_streamfunction!(s::StreamVorticitySolver{2};
 end
 
 """
-    step!(solver; kwargs...)
+    _step!(solver; kwargs...)
 
 Advance the coupled streamfunction–vorticity system by one time step. The
 vorticity transport is advanced with the backward Euler option of the existing
 advection–diffusion assembly. Keyword arguments are forwarded to the linear
 solvers.
 """
-function step!(s::StreamVorticitySolver{2};
-               scheme::String = "BE",
-               method::Function = Base.:\,
-               algorithm = nothing,
-               kwargs...)
+function _step!(s::StreamVorticity{2};
+                scheme::String = "BE",
+                method::Function = Base.:\,
+                algorithm = nothing,
+                kwargs...)
 
-    solve_streamfunction!(s; method=method, algorithm=algorithm, kwargs...)
+    _solve_streamfunction!(s; method=method, algorithm=algorithm, kwargs...)
 
     convection = build_convection(s)
 
@@ -242,26 +242,61 @@ function step!(s::StreamVorticitySolver{2};
 end
 
 """
-    run!(solver, steps; kwargs...)
+    _run!(solver, steps; kwargs...)
 
 Integrate the solver for a given number of time steps.
 """
-function run!(s::StreamVorticitySolver, steps::Integer; kwargs...)
+function _run!(s::StreamVorticity, steps::Integer; kwargs...)
     for _ in 1:steps
-        step!(s; kwargs...)
+        _step!(s; kwargs...)
     end
     return s
 end
 
 """
-    run_until!(solver, t_end; kwargs...)
+    _run_until!(solver, t_end; kwargs...)
 
 Advance the solution until the simulation time reaches `t_end`.
 """
-function run_until!(s::StreamVorticitySolver, t_end::Float64; kwargs...)
+function _run_until!(s::StreamVorticity, t_end::Float64; kwargs...)
     while s.time < t_end - 1e-12
-        step!(s; kwargs...)
+        _step!(s; kwargs...)
     end
     return s
 end
 
+"""
+    solve_StreamVorticity!(solver; kwargs...)
+
+Solve the Poisson problem for the streamfunction with the current vorticity.
+"""
+function solve_StreamVorticity!(s::StreamVorticity; kwargs...)
+    return _solve_streamfunction!(s; kwargs...)
+end
+
+"""
+    step_StreamVorticity!(solver; kwargs...)
+
+Advance the coupled streamfunction–vorticity system by one time step.
+"""
+function step_StreamVorticity!(s::StreamVorticity; kwargs...)
+    return _step!(s; kwargs...)
+end
+
+"""
+    run_StreamVorticity!(solver, steps; kwargs...)
+
+Integrate the solver for a prescribed number of time steps.
+"""
+function run_StreamVorticity!(s::StreamVorticity, steps::Integer; kwargs...)
+    return _run!(s, steps; kwargs...)
+end
+
+"""
+    run_until_StreamVorticity!(solver, t_end; kwargs...)
+
+Advance the solution until the simulation time reaches `t_end`.
+"""
+function run_until_StreamVorticity!(s::StreamVorticity, t_end::Float64; kwargs...)
+    return _run_until!(s, t_end; kwargs...)
+end

@@ -142,5 +142,5 @@ include("solver/navierstokes_heat.jl")
 export NavierStokesHeat2D, solve_NavierStokesHeat2D_unsteady!
 
 include("solver/streamfunction_vorticity.jl")
-export StreamVorticitySolver, solve_streamfunction!, step!, run!, run_until!
+export StreamVorticity, solve_StreamVorticity!, step_StreamVorticity!, run_StreamVorticity!, run_until_StreamVorticity!
 end
