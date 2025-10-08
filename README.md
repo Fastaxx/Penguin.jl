@@ -100,10 +100,11 @@ Each folder contains self-contained scripts demonstrating setup, solve, and visu
 - 1D/2D non‑prescribed interface motion (front tracking)
 - Fully coupled Stokes flow solver (1D/2D)
 - Fully coupled Navier-Stokes flow solver (1D/2D)
+- Streamfunction–vorticity formulation (2D)
 
 In development
 - Interface tracking variants (VOF / LS / FT)
-- Streamfunction–vorticity; preconditioning
+- Preconditioning and Domain Decomposition
 - Multi-species transport
 
 ## Citing
