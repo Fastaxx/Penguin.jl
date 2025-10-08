@@ -45,7 +45,7 @@ export ∇, ∇₋
 export DiffusionOps, ConvectionOps
 
 include("boundary.jl")
-export AbstractBoundary, Dirichlet, Neumann, Robin, Periodic, Outflow
+export AbstractBoundary, Dirichlet, Neumann, Robin, Periodic, Symmetry, Outflow
 export AbstractInterfaceBC, ScalarJump, FluxJump, BorderConditions, InterfaceConditions
 export GibbsThomson
 

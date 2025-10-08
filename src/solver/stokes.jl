@@ -934,6 +934,11 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
                     rt = row_uγx_off + lix
                     enforce_dirichlet!(A, b, rt, uγx_off + lix, vx)
                 end
+            elseif bcx isa Symmetry
+                lix = LIx[i, jx]
+                neighbor = normal === :bottom ? LIx[i, min(jx+1, ny)] : LIx[i, max(jx-1, 1)]
+                enforce_zero_gradient!(A, b, row_uωx_off + lix, uωx_off + lix, uωx_off + neighbor)
+                enforce_zero_gradient!(A, b, row_uγx_off + lix, uγx_off + lix, uγx_off + neighbor)
             elseif bcx isa Neumann
                 g = bcx.value isa Function ? (t === nothing ? bcx.value(xs_x[i], ys_x[jx]) : bcx.value(xs_x[i], ys_x[jx], t)) : bcx.value
                 lix = LIx[i, jx]
@@ -977,6 +982,12 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
                     rt = row_uγy_off + liy
                     enforce_dirichlet!(A, b, rt, uγy_off + liy, vy)
                 end
+            elseif bcy isa Symmetry
+                liy = LIy[i, jy]
+                r = row_uωy_off + liy
+                enforce_dirichlet!(A, b, r, uωy_off + liy, 0.0)
+                rt = row_uγy_off + liy
+                enforce_dirichlet!(A, b, rt, uγy_off + liy, 0.0)
             elseif bcy isa Neumann
                 g = bcy.value isa Function ? (t === nothing ? bcy.value(xs_y[i], ys_y[jy]) : bcy.value(xs_y[i], ys_y[jy], t)) : bcy.value
                 liy = LIy[i, jy]
@@ -1027,6 +1038,12 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
                     rt = row_uγx_off + lix
                     enforce_dirichlet!(A, b, rt, uγx_off + lix, vx)
                 end
+            elseif bcx isa Symmetry
+                lix = LIx[ix, j]
+                r = row_uωx_off + lix
+                enforce_dirichlet!(A, b, r, uωx_off + lix, 0.0)
+                rt = row_uγx_off + lix
+                enforce_dirichlet!(A, b, rt, uγx_off + lix, 0.0)
             elseif bcx isa Neumann
                 g = bcx.value isa Function ? (t === nothing ? bcx.value(xs_x[ix], ys_x[j]) : bcx.value(xs_x[ix], ys_x[j], t)) : bcx.value
                 lix = LIx[ix, j]
@@ -1070,6 +1087,11 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
                     rt = row_uγy_off + liy
                     enforce_dirichlet!(A, b, rt, uγy_off + liy, vy)
                 end
+            elseif bcy isa Symmetry
+                liy = LIy[iy, j]
+                neighbor = normal === :left ? LIy[min(iy+1, nx), j] : LIy[max(iy-1, 1), j]
+                enforce_zero_gradient!(A, b, row_uωy_off + liy, uωy_off + liy, uωy_off + neighbor)
+                enforce_zero_gradient!(A, b, row_uγy_off + liy, uγy_off + liy, uγy_off + neighbor)
             elseif bcy isa Neumann
                 g = bcy.value isa Function ? (t === nothing ? bcy.value(xs_y[iy], ys_y[j]) : bcy.value(xs_y[iy], ys_y[j], t)) : bcy.value
                 liy = LIy[iy, j]
@@ -1317,6 +1339,11 @@ function apply_velocity_dirichlet!(A::SparseMatrixCSC{Float64, Int}, b::Vector{F
             rt = nu + iL
             enforce_dirichlet!(A, b, rt, uγ_offset + iL, vL)
         end
+    elseif left_bc isa Symmetry
+        r = iL
+        enforce_dirichlet!(A, b, r, uω_offset + iL, 0.0)
+        rt = nu + iL
+        enforce_dirichlet!(A, b, rt, uγ_offset + iL, 0.0)
     elseif left_bc isa Outflow
         neighbor = min(iL + 1, nu)
         enforce_zero_gradient!(A, b, iL, uω_offset + iL, uω_offset + neighbor)
@@ -1351,6 +1378,11 @@ function apply_velocity_dirichlet!(A::SparseMatrixCSC{Float64, Int}, b::Vector{F
             rt = nu + iR
             enforce_dirichlet!(A, b, rt, uγ_offset + iR, vR)
         end
+    elseif right_bc isa Symmetry
+        r = iR
+        enforce_dirichlet!(A, b, r, uω_offset + iR, 0.0)
+        rt = nu + iR
+        enforce_dirichlet!(A, b, rt, uγ_offset + iR, 0.0)
     elseif right_bc isa Outflow
         neighbor = max(iR - 1, iL)
         enforce_zero_gradient!(A, b, iR, uω_offset + iR, uω_offset + neighbor)

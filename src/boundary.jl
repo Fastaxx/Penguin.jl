@@ -50,6 +50,15 @@ struct Periodic <: AbstractBoundary
 end
 
 """
+    Symmetry()
+
+Mirror-symmetry boundary condition. For velocity fields it corresponds to zero
+normal component and zero normal gradient of tangential components.
+"""
+struct Symmetry <: AbstractBoundary
+end
+
+"""
     Outflow(; pressure=nothing)
 
 Outflow boundary condition prescribing a zero normal gradient for velocity and

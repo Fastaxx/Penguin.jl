@@ -59,7 +59,7 @@ ux_top    = Dirichlet((x, y, t=0.0) -> 0.0)
 uy_zero = Dirichlet((x, y, t=0.0) -> 0.0)
 
 bc_ux = BorderConditions(Dict(
-    :left=>ux_left, :right=>Outflow(), :bottom=>ux_bottom, :top=>ux_top
+    :left=>ux_left, :right=>Outflow(), :bottom=>Symmetry(), :top=>Symmetry()
 ))
 bc_uy = BorderConditions(Dict(
     :left=>uy_zero, :right=>uy_zero, :bottom=>uy_zero, :top=>uy_zero
@@ -97,7 +97,7 @@ x0_vec = zeros(2 * (nu_x + nu_y) + np)
 solver = NavierStokesMono(fluid, (bc_ux, bc_uy), bc_p, interface_bc; x0=x0_vec)
 
 Δt = 0.005
-T_end = 8.0
+T_end = 0.1
 
 println("Running Navier–Stokes unsteady simulation...")
 times, histories = solve_NavierStokesMono_unsteady!(solver; Δt=Δt, T_end=T_end, scheme=:CN)
@@ -146,7 +146,7 @@ ax_contours = Axis(fig[2,3], xlabel="x", ylabel="y", title="Velocity magnitude c
 contour!(ax_contours, xs, ys, speed; levels=10, color=:navy)
 contour!(ax_contours, xs, ys, [circle_body(x,y) for x in xs, y in ys]; levels=[0.0], color=:black, linewidth=2)
 
-save("navierstokes2d_circle_flow.png", fig)
+save("navierstokes2d_circle_flow_.png", fig)
 display(fig)
 
 ###########
@@ -189,7 +189,7 @@ function update_frame!(frame_idx)
 end
 
 # Create animation
-record(fig_anim, "navierstokes2d_vonkarman.gif", 1:n_frames; framerate=8) do frame
+record(fig_anim, "navierstokes2d_vonkarman_.gif", 1:n_frames; framerate=8) do frame
     update_frame!(frame)
 end
 
@@ -223,7 +223,7 @@ end
 
 using GeometryBasics
 
-record(fig_stream, "navierstokes2d_streamlines.gif", 1:n_frames; framerate=8) do frame
+record(fig_stream, "navierstokes2d_streamlines_.gif", 1:n_frames; framerate=8) do frame
     empty!(ax_stream_anim)
     
     # Extract velocity from history
