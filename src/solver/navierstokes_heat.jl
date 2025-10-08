@@ -1,11 +1,11 @@
 """
     NavierStokesHeat2D
 
-Monolithic time integrator for a two-dimensional Navier–Stokes / heat system
-under the Boussinesq approximation. The velocity/pressure block reuses the
-staggered Navier–Stokes assembly while the temperature block leverages the
-advection–diffusion operators. Buoyancy forcing is obtained from the current
-temperature field and injected in the momentum equations.
+Two-way coupled time integrator for a two-dimensional Navier–Stokes / heat system
+under the Boussinesq approximation. The velocity/pressure are solved first with
+buoyancy forcing from the previous temperature field, then the temperature is
+advected by the new velocity field. This is a fractional step (operator splitting)
+approach that is easier to debug and extend than monolithic coupling.
 """
 mutable struct NavierStokesHeat2D
     momentum::NavierStokesMono{2}
@@ -145,32 +145,6 @@ function build_temperature_interpolation(temp_cap::Capacity{2},
     return sparse(rows, cols, vals, length(coords_vel), length(coords_temp))
 end
 
-function add_sparse_block!(A::SparseMatrixCSC{Float64,Int},
-                           block::SparseMatrixCSC{Float64,Int},
-                           row_offset::Int,
-                           col_offset::Int,
-                           scale::Float64)
-    nnz_block = nnz(block)
-    nnz_block == 0 && return A
-
-    rows = Vector{Int}(undef, nnz_block)
-    cols = Vector{Int}(undef, nnz_block)
-    vals = Vector{Float64}(undef, nnz_block)
-
-    idx = 1
-    for j in 1:size(block, 2)
-        for ptr in block.colptr[j]:(block.colptr[j+1]-1)
-            rows[idx] = row_offset + block.rowval[ptr]
-            cols[idx] = col_offset + j
-            vals[idx] = scale * block.nzval[ptr]
-            idx += 1
-        end
-    end
-
-    A .+= sparse(rows, cols, vals, size(A, 1), size(A, 2))
-    return A
-end
-
 function _scheme_string(scheme::Symbol)
     s = lowercase(String(scheme))
     if s in ("cn", "crank_nicolson", "cranknicolson")
@@ -184,24 +158,41 @@ end
 
 function solve_linear_system(A::SparseMatrixCSC{Float64,Int}, b::Vector{Float64};
                              method=Base.:\, algorithm=nothing, kwargs...)
+    Ared, bred, keep_idx_rows, keep_idx_cols = remove_zero_rows_cols!(A, b)
+
+    # If reduced system empty, return zero vector of appropriate size
+    nfull = size(A, 2)
+    if isempty(bred)
+        return zeros(Float64, nfull)
+    end
+
+    # Solve reduced system
+    sol_red = nothing
     if algorithm !== nothing
-        prob = LinearSolve.LinearProblem(A, b)
+        prob = LinearSolve.LinearProblem(Ared, bred)
         sol = LinearSolve.solve(prob, algorithm; kwargs...)
-        return Vector{Float64}(sol.u)
+        sol_red = Vector{Float64}(sol.u)
     elseif method === Base.:\
         try
-            return A \ b
+            sol_red = Ared \ bred
         catch err
             if err isa SingularException
-                @warn "Direct solve failed with SingularException; falling back to bicgstabl" sizeA=size(A)
-                return IterativeSolvers.bicgstabl(A, b)
+                @warn "Direct solve failed with SingularException on reduced system; falling back to bicgstabl" sizeA=size(Ared)
+                sol_red = IterativeSolvers.bicgstabl(Ared, bred)
             else
                 rethrow(err)
             end
         end
     else
-        return method(A, b; kwargs...)
+        sol_red = method(Ared, bred; kwargs...)
     end
+
+    # Expand reduced solution back to full size (zeros at removed columns)
+    N = size(A, 2)
+    x_full = zeros(N)
+    x_full[keep_idx_cols] = sol_red
+
+    return x_full
 end
 
 function build_temperature_system(s::NavierStokesHeat2D,
@@ -244,19 +235,23 @@ function solve_NavierStokesHeat2D_unsteady!(s::NavierStokesHeat2D;
                                             store_states::Bool=true,
                                             kwargs...)
     θ = scheme_to_theta(scheme)
+    scheme_str = _scheme_string(scheme)
     ns = s.momentum
     data = navierstokes2D_blocks(ns)
     p_offset = 2 * (data.nu_x + data.nu_y)
     np = data.np
 
+    # Initialize velocity state
     x_prev = length(ns.x) == p_offset + np ? copy(ns.x) : zeros(p_offset + np)
     p_half_prev = zeros(Float64, np)
     if length(ns.x) == p_offset + np && !isempty(ns.x)
         p_half_prev .= ns.x[p_offset+1:p_offset+np]
     end
 
+    # Initialize temperature state
     T_prev = copy(s.temperature)
 
+    # Store initial states
     s.velocity_states = store_states ? Vector{Vector{Float64}}([copy(x_prev)]) : Vector{Vector{Float64}}()
     s.temperature_states = store_states ? Vector{Vector{Float64}}([copy(T_prev)]) : Vector{Vector{Float64}}()
     s.times = Float64[0.0]
@@ -273,69 +268,70 @@ function solve_NavierStokesHeat2D_unsteady!(s::NavierStokesHeat2D;
         dt_step = min(Δt, T_end - t)
         t_next = t + dt_step
 
+        println("="^60)
+        println("[NavierStokesHeat2D] Time step: t = $(round(t; digits=6)) → $(round(t_next; digits=6))")
+        
+        # ============================================================
+        # STEP 1: Solve momentum with buoyancy forcing from T_prev
+        # ============================================================
+        
+        # Assemble standard Navier-Stokes system
         conv_curr = assemble_navierstokes2D_unsteady!(ns, data, dt_step,
                                                       x_prev, p_half_prev,
                                                       t, t_next, θ, conv_prev)
-        A_mom = copy(ns.A)
-        b_mom = copy(ns.b)
-
-        A_T, b_T = build_temperature_system(s, data, x_prev, dt_step, t, scheme, T_prev)
-
-        rows_mom = size(A_mom, 1)
-        Ntemp_total = length(T_prev)
-        total_size = rows_mom + Ntemp_total
-
-        A_c = [A_mom  spzeros(Float64, rows_mom, Ntemp_total);
-               spzeros(Float64, Ntemp_total, rows_mom)  A_T]
-        b_c = vcat(b_mom, b_T)
-
+        
+        # Add Boussinesq buoyancy forcing: f_buoyancy = ρ * β * g * (T - T_ref)
         ρ = ns.fluid.ρ
         ρ_val = ρ isa Function ? 1.0 : ρ
         β = s.β
         g = s.gravity
-        scale_x = ρ_val * β * g[1]
-        scale_y = ρ_val * β * g[2]
-
-        off_Tω = rows_mom
+        
+        # Extract bulk temperatures and interpolate to velocity grids
+        N_temp = length(s.scalar_nodes[1]) * length(s.scalar_nodes[2])
+        Tω_prev = T_prev[1:N_temp]
+        T_deviation = Tω_prev .- s.T_ref
+        
+        # Interpolate temperature to velocity grid and compute buoyancy force
+        T_on_ux = s.interp_ux * T_deviation
+        T_on_uy = s.interp_uy * T_deviation
+        
+        buoyancy_x = -ρ_val * β * g[1] .* T_on_ux
+        buoyancy_y = -ρ_val * β * g[2] .* T_on_uy
+        
+        # Add to RHS (momentum equations)
         row_uωx = 0
         row_uωy = 2 * data.nu_x
-
-        if !iszero(scale_x)
-            Bu_x = data.Vx * s.interp_ux
-            add_sparse_block!(A_c, Bu_x, row_uωx, off_Tω, -scale_x)
-            if !iszero(s.T_ref)
-                ones_x = ones(Float64, data.nu_x)
-                b_c[row_uωx+1:row_uωx+data.nu_x] .-= scale_x * s.T_ref .* (data.Vx * ones_x)
-            end
-        end
-
-        if !iszero(scale_y)
-            Bu_y = data.Vy * s.interp_uy
-            add_sparse_block!(A_c, Bu_y, row_uωy, off_Tω, -scale_y)
-            if !iszero(s.T_ref)
-                ones_y = ones(Float64, data.nu_y)
-                b_c[row_uωy+1:row_uωy+data.nu_y] .-= scale_y * s.T_ref .* (data.Vy * ones_y)
-            end
-        end
-
-        Ared, bred, _, keep_idx_cols = remove_zero_rows_cols!(A_c, b_c)
-        x_red = solve_linear_system(Ared, bred; method=method, algorithm=algorithm, kwargs_nt...)
-
-        full_state = zeros(Float64, total_size)
-        full_state[keep_idx_cols] = x_red
-
-        x_new = full_state[1:rows_mom]
-        T_next = full_state[rows_mom+1:end]
-
+        ns.b[row_uωx+1:row_uωx+data.nu_x] .+= data.Vx * buoyancy_x
+        ns.b[row_uωy+1:row_uωy+data.nu_y] .+= data.Vy * buoyancy_y
+        
+        # Solve momentum system
+        x_new = solve_linear_system(ns.A, ns.b; method=method, algorithm=algorithm, kwargs_nt...)
         ns.x .= x_new
+        
+        println("  → Momentum solved: max|u| = $(round(maximum(abs, x_new); digits=6))")
+        
+        # ============================================================
+        # STEP 2: Solve temperature advected by new velocity field
+        # ============================================================
+        
+        # Build convection operators with updated velocity
+        A_T, b_T = build_temperature_system(s, data, x_new, dt_step, t, scheme, T_prev)
+        
+        # Solve temperature system
+        T_next = solve_linear_system(A_T, b_T; method=method, algorithm=algorithm, kwargs_nt...)
         s.temperature .= T_next
-
+        
+        println("  → Temperature solved: T ∈ [$(round(minimum(T_next); digits=4)), $(round(maximum(T_next); digits=4))]")
+        
+        # ============================================================
+        # STEP 3: Update state for next iteration
+        # ============================================================
+        
         x_prev = copy(x_new)
         p_half_prev .= x_new[p_offset+1:p_offset+np]
         conv_prev = ntuple(Val(2)) do i
             copy(conv_curr[Int(i)])
         end
-
         T_prev = copy(T_next)
         ns.prev_conv = conv_prev
 
@@ -345,9 +341,9 @@ function solve_NavierStokesHeat2D_unsteady!(s::NavierStokesHeat2D;
             push!(s.velocity_states, copy(x_new))
             push!(s.temperature_states, copy(T_next))
         end
-        max_state = maximum(abs, x_new)
-        println("[NavierStokesHeat2D] t=$(round(t; digits=6)) max|state|=$(max_state)")
     end
 
+    println("="^60)
+    println("Simulation complete: $(length(s.times)) time steps")
     return s.times, s.velocity_states, s.temperature_states
 end
