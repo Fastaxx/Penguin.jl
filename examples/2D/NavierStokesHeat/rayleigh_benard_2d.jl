@@ -55,7 +55,7 @@ bc_uy = BorderConditions(Dict(
     :bottom=>zero_dirichlet,
     :top=>zero_dirichlet
 ))
-bc_p = BorderConditions(Dict{Symbol,AbstractBoundary}())
+pressure_gauge = MeanPressureGauge()
 interface_bc = Dirichlet(0.0)
 
 # Fluid properties
@@ -82,7 +82,7 @@ nu_x = prod(operator_ux.size)
 nu_y = prod(operator_uy.size)
 np = prod(operator_p.size)
 x0_vec = zeros(2 * (nu_x + nu_y) + np)
-ns_solver = NavierStokesMono(fluid, (bc_ux, bc_uy), bc_p, interface_bc; x0=x0_vec)
+ns_solver = NavierStokesMono(fluid, (bc_ux, bc_uy), pressure_gauge, interface_bc; x0=x0_vec)
 
 # Temperature boundary conditions
 T_hot = 1.0

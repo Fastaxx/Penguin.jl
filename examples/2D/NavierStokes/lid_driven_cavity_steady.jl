@@ -72,7 +72,7 @@ bc_uy = BorderConditions(Dict(
     :top=>uy_zero
 ))
 
-bc_p = BorderConditions(Dict{Symbol,AbstractBoundary}())
+pressure_gauge = PinPressureGauge()
 bc_cut = Dirichlet(0.0)
 
 ###########
@@ -101,7 +101,7 @@ np = prod(operator_p.size)
 
 x0_vec = zeros(2 * (nu_x + nu_y) + np)
 
-solver = NavierStokesMono(fluid, (bc_ux, bc_uy), bc_p, bc_cut; x0=x0_vec)
+solver = NavierStokesMono(fluid, (bc_ux, bc_uy), pressure_gauge, bc_cut; x0=x0_vec)
 
 tol = 1e-9
 maxiter = 40

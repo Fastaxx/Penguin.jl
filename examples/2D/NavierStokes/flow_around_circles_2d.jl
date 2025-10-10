@@ -80,7 +80,7 @@ bc_ux = BorderConditions(Dict(
 bc_uy = BorderConditions(Dict(
     :left=>uy_zero, :right=>uy_zero, :bottom=>uy_zero, :top=>uy_zero
 ))
-bc_p = BorderConditions(Dict{Symbol,AbstractBoundary}())
+pressure_gauge = MeanPressureGauge()
 
 interface_bc = Dirichlet(0.0)
 
@@ -110,7 +110,7 @@ np = prod(operator_p.size)
 
 x0_vec = zeros(2 * (nu_x + nu_y) + np)
 
-solver = NavierStokesMono(fluid, (bc_ux, bc_uy), bc_p, interface_bc; x0=x0_vec)
+solver = NavierStokesMono(fluid, (bc_ux, bc_uy), pressure_gauge, interface_bc; x0=x0_vec)
 
 Δt = 0.005
 T_end = 5.0
@@ -310,4 +310,3 @@ record(fig_stream, "navierstokes2d_streamlines_circles.gif", 1:n_frames; framera
 end
 
 println("Streamline animation saved as navierstokes2d_streamlines_circles.gif")
-

@@ -22,13 +22,11 @@ using LinearAlgebra
         u_right = Dirichlet(0.0)
         bc_u = BorderConditions(Dict(:bottom => u_left, :top => u_right))
 
-        p_left = Dirichlet(1.0)
-        p_right = Dirichlet(0.0)
-        bc_p = BorderConditions(Dict(:bottom => p_left, :top => p_right))
-
+        body_force = 1.0
+        pressure_gauge = PinPressureGauge()
         bc_cut = Dirichlet(0.0)
 
-        fᵤ = (x, y=0.0, z=0.0) -> 0.0
+        fᵤ = (x, y=0.0, z=0.0) -> body_force
         fₚ = (x, y=0.0, z=0.0) -> 0.0
 
         μ = 1.0
@@ -36,7 +34,7 @@ using LinearAlgebra
 
         fluid = Fluid(mesh_u, capacity_u, operator_u, mesh_p, capacity_p, operator_p, μ, ρ, fᵤ, fₚ)
 
-        solver = StokesMono(fluid, bc_u, bc_p, bc_cut)
+        solver = StokesMono(fluid, bc_u, pressure_gauge, bc_cut)
         solve_StokesMono!(solver; method=Base.:\)
 
         nu = prod(operator_u.size)
@@ -52,11 +50,11 @@ using LinearAlgebra
         x_right = last(xs_u)
         x_left_p = first(xp)
         x_right_p = last(xp)
-        dpdx = (p_right.value - p_left.value) / (x_right_p - x_left_p)
+        dpdx = body_force
 
         u_exact = [-dpdx / (2μ) * (x - x_left) * (x_right - x) for x in xs_u]
 
-        p_exact = [p_left.value + dpdx * (x - x_left_p) for x in xp]
+        p_exact = zeros(length(xp))
 
         Atrim, btrim, _, idx_cols = remove_zero_rows_cols!(solver.A, solver.b)
         xtrim = solver.x[idx_cols]
@@ -78,14 +76,15 @@ using LinearAlgebra
         op_u = DiffusionOps(cap_u)
         op_p = DiffusionOps(cap_p)
 
+        body_force = 1.0
         bc_u = BorderConditions(Dict(:bottom => Dirichlet(0.0), :top => Dirichlet(0.0)))
-        bc_p = BorderConditions(Dict(:bottom => Dirichlet(1.0), :top => Dirichlet(0.0)))
+        pressure_gauge = PinPressureGauge()
         bc_cut = Dirichlet(0.0)
 
         fluid = Fluid(mesh_u, cap_u, op_u, mesh_p, cap_p, op_p, 1.0, 1.0,
-                      (x, y=0.0, z=0.0) -> 0.0,
+                      (x, y=0.0, z=0.0) -> body_force,
                       (x, y=0.0, z=0.0) -> 0.0)
-        solver = StokesMono(fluid, bc_u, bc_p, bc_cut)
+        solver = StokesMono(fluid, bc_u, pressure_gauge, bc_cut)
 
         called = Ref(false)
         precond_builder = (A, _) -> begin
@@ -137,7 +136,7 @@ using LinearAlgebra
             :top => uy_zero,
         ))
 
-        bc_p = BorderConditions(Dict{Symbol, AbstractBoundary}())
+        pressure_gauge = MeanPressureGauge()
         bc_cut = Dirichlet(0.0)
 
         fᵤ = (x, y, z=0.0) -> 0.0
@@ -151,7 +150,7 @@ using LinearAlgebra
                       mesh_p, capacity_p, operator_p,
                       μ, ρ, fᵤ, fₚ)
 
-        solver = StokesMono(fluid, bc_ux, bc_uy; bc_p=bc_p, bc_cut=bc_cut)
+        solver = StokesMono(fluid, bc_ux, bc_uy; pressure_gauge=pressure_gauge, bc_cut=bc_cut)
         solve_StokesMono!(solver; method=Base.:\)
 
         nu_x = prod(operator_ux.size)
@@ -223,7 +222,7 @@ using LinearAlgebra
             :top    => Dirichlet(0.0),
         ))
 
-        bc_p = BorderConditions(Dict(:right => Outflow(0.0)))
+        pressure_gauge = PinPressureGauge()
         bc_cut = Dirichlet(0.0)
 
         μ = 1.0
@@ -239,7 +238,7 @@ using LinearAlgebra
                       operator_p,
                       μ, ρ, fᵤ, fₚ)
 
-        solver = StokesMono(fluid, (bc_ux, bc_uy), bc_p, bc_cut)
+        solver = StokesMono(fluid, (bc_ux, bc_uy), pressure_gauge, bc_cut)
         solve_StokesMono!(solver; method=Base.:\)
 
         @test maximum(abs, solver.x) ≤ 1e-10
@@ -265,7 +264,7 @@ end
         u_right = Neumann(0.0)
         bc_u = BorderConditions(Dict(:bottom => u_left, :top => u_right))
 
-        bc_p = BorderConditions(Dict{Symbol,AbstractBoundary}())
+        pressure_gauge = PinPressureGauge()
         bc_cut = Dirichlet(0.0)
 
         fᵤ = (x, y=0.0, z=0.0) -> 0.0
@@ -273,7 +272,7 @@ end
         μ = 1.0; ρ = 1.0
         fluid = Fluid(mesh_u, capacity_u, operator_u, mesh_p, capacity_p, operator_p, μ, ρ, fᵤ, fₚ)
 
-        solver = StokesMono(fluid, bc_u, bc_p, bc_cut)
+        solver = StokesMono(fluid, bc_u, pressure_gauge, bc_cut)
         solve_StokesMono!(solver; method=Base.:\)
         nu = prod(operator_u.size)
         uω = solver.x[1:nu]
@@ -301,7 +300,7 @@ end
         # Periodic left-right for ux; no-slip top/bottom
         bc_ux = BorderConditions(Dict(:left => Periodic(), :right => Periodic(), :bottom => Dirichlet(0.0), :top => Dirichlet(0.0)))
         bc_uy = BorderConditions(Dict(:left => Dirichlet(0.0), :right => Dirichlet(0.0), :bottom => Dirichlet(0.0), :top => Dirichlet(0.0)))
-        bc_p = BorderConditions(Dict{Symbol,AbstractBoundary}())
+        pressure_gauge = PinPressureGauge()
         bc_cut = Dirichlet(0.0)
 
         fᵤ = (x, y, z=0.0) -> 0.0
@@ -309,7 +308,7 @@ end
         μ = 1.0; ρ = 1.0
         fluid = Fluid((mesh_ux, mesh_uy), (capacity_ux, capacity_uy), (op_ux, op_uy), mesh_p, capacity_p, op_p, μ, ρ, fᵤ, fₚ)
 
-        solver = StokesMono(fluid, bc_ux, bc_uy; bc_p=bc_p, bc_cut=bc_cut)
+        solver = StokesMono(fluid, bc_ux, bc_uy; pressure_gauge=pressure_gauge, bc_cut=bc_cut)
         solve_StokesMono!(solver; method=Base.:\)
 
         nu_x = prod(op_ux.size)

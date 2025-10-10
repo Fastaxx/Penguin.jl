@@ -25,7 +25,7 @@ function build_simple_navierstokes(; nx=6, ny=5)
     bc_zero = Dirichlet((x, y, t=0.0) -> 0.0)
     bc_ux = BorderConditions(Dict(:left=>bc_zero, :right=>bc_zero, :bottom=>bc_zero, :top=>bc_zero))
     bc_uy = BorderConditions(Dict(:left=>bc_zero, :right=>bc_zero, :bottom=>bc_zero, :top=>bc_zero))
-    bc_p  = BorderConditions(Dict{Symbol,AbstractBoundary}())
+    pressure_gauge = PinPressureGauge()
     bc_cut = Dirichlet(0.0)
 
     μ = 1.0
@@ -41,7 +41,7 @@ function build_simple_navierstokes(; nx=6, ny=5)
                   op_p,
                   μ, ρ, fᵤ, fₚ)
 
-    solver = NavierStokesMono(fluid, (bc_ux, bc_uy), bc_p, bc_cut)
+    solver = NavierStokesMono(fluid, (bc_ux, bc_uy), pressure_gauge, bc_cut)
     data = Penguin.navierstokes2D_blocks(solver)
     return solver, data
 end
@@ -64,7 +64,7 @@ function build_simple_navierstokes_1d(; nx=8)
 
     bc_zero = Dirichlet((x, t=0.0) -> 0.0)
     bc_u = BorderConditions(Dict(:left => bc_zero, :right => bc_zero))
-    bc_p = BorderConditions(Dict{Symbol,AbstractBoundary}())
+    pressure_gauge = PinPressureGauge()
     bc_cut = Dirichlet(0.0)
 
     μ = 1.0
@@ -74,7 +74,7 @@ function build_simple_navierstokes_1d(; nx=8)
 
     fluid = Fluid(mesh_u, cap_u, op_u, mesh_p, cap_p, op_p, μ, ρ, fᵤ, fₚ)
 
-    solver = NavierStokesMono(fluid, bc_u, bc_p, bc_cut)
+    solver = NavierStokesMono(fluid, bc_u, pressure_gauge, bc_cut)
     data = Penguin.navierstokes1D_blocks(solver)
     return solver, data
 end
@@ -147,7 +147,6 @@ end
     solver, data = build_simple_navierstokes()
     solver.bc_u[1].borders[:right] = Outflow()
     solver.bc_u[2].borders[:right] = Outflow()
-    solver.bc_p.borders[:right] = Outflow(0.0)
     solver.x .= 0.0
     _, iters, res = Penguin.solve_NavierStokesMono_steady!(solver; tol=1e-9, maxiter=10, nlsolve_method=:picard)
     @test iters ≥ 1

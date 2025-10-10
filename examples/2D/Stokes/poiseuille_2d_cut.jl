@@ -87,8 +87,8 @@ bc_uy = BorderConditions(Dict(
     :left=>uy_zero, :right=>uy_zero, :bottom=>uy_zero, :top=>uy_zero
 ))
 
-# Pressure: gauge only
-bc_p = BorderConditions(Dict())
+# Pressure gauge
+pressure_gauge = PinPressureGauge()
 
 # Cut-cell / interface BC for uγ (no-slip on channel walls)
 u_bc = Dirichlet(0.0)
@@ -120,7 +120,7 @@ x0 = zeros(4*nu + np)
 ###########
 # Solver and solve
 ###########
-solver = StokesMono(fluid, (bc_ux, bc_uy), bc_p, u_bc; x0=x0)
+solver = StokesMono(fluid, (bc_ux, bc_uy), pressure_gauge, u_bc; x0=x0)
 solve_StokesMono!(solver; algorithm=UMFPACKFactorization())
 
 println("2D Cut-Cell Poiseuille solved. Unknowns = ", length(solver.x))
@@ -323,4 +323,3 @@ if !isempty(all_cut_indices)
         println("  ⚠ Warning: Very small cut cells detected")
     end
 end
-

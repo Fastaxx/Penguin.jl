@@ -47,7 +47,7 @@ periodic_bc = BorderConditions(Dict(
 
 bc_ux = periodic_bc
 bc_uy = periodic_bc
-bc_p = BorderConditions(Dict{Symbol,AbstractBoundary}())
+pressure_gauge = MeanPressureGauge()
 interface_bc = Dirichlet(0.0)
 
 # ---------------------------------------------------------------------------
@@ -92,7 +92,7 @@ x0_vec[off_uγx+1:off_uγx+nu_x] .= noise_x
 x0_vec[off_uωy+1:off_uωy+nu_y] .= noise_y
 x0_vec[off_uγy+1:off_uγy+nu_y] .= noise_y
 
-solver = NavierStokesMono(fluid, (bc_ux, bc_uy), bc_p, interface_bc; x0=x0_vec)
+solver = NavierStokesMono(fluid, (bc_ux, bc_uy), pressure_gauge, interface_bc; x0=x0_vec)
 
 # ---------------------------------------------------------------------------
 # Time integration parameters

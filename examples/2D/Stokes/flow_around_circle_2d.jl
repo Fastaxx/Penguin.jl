@@ -63,7 +63,7 @@ bc_ux = BorderConditions(Dict(
 bc_uy = BorderConditions(Dict(
     :left=>uy_zero, :right=>uy_zero, :bottom=>uy_zero, :top=>uy_zero
 ))
-bc_p = BorderConditions(Dict{Symbol,AbstractBoundary}())
+pressure_gauge = PinPressureGauge()
 
 u_bc = Dirichlet(0.0)  # enforce u^γ = 0 on the interface
 
@@ -90,7 +90,7 @@ nu = prod(operator_ux.size)
 np = prod(operator_p.size)
 x0_vec = zeros(4*nu + np)
 
-solver = StokesMono(fluid, (bc_ux, bc_uy), bc_p, u_bc; x0=x0_vec)
+solver = StokesMono(fluid, (bc_ux, bc_uy), pressure_gauge, u_bc; x0=x0_vec)
 solve_StokesMono!(solver; method=Base.:\)
 
 println("Stokes flow around circle solved. Unknowns = ", length(solver.x))

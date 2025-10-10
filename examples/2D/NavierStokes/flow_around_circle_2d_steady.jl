@@ -63,7 +63,7 @@ bc_ux = BorderConditions(Dict(
 bc_uy = BorderConditions(Dict(
     :left=>uy_zero, :right=>uy_zero, :bottom=>uy_zero, :top=>uy_zero
 ))
-bc_p = BorderConditions(Dict{Symbol,AbstractBoundary}())
+pressure_gauge = MeanPressureGauge()
 
 interface_bc = Dirichlet(0.0)
 
@@ -95,7 +95,7 @@ x0_vec = zeros(2 * (nu_x + nu_y) + np)
 
 # helper to run steady solve with specified nonlinear method
 function run_steady(method::Symbol; tol=1e-8, maxiter=50, relaxation=1.0)
-    solver = NavierStokesMono(fluid, (bc_ux, bc_uy), bc_p, interface_bc; x0=x0_vec)
+    solver = NavierStokesMono(fluid, (bc_ux, bc_uy), pressure_gauge, interface_bc; x0=x0_vec)
     println("Running steady solver with method=", method)
     iters, final_res = solve_NavierStokesMono_steady!(solver; nlsolve_method=method, tol=tol, maxiter=maxiter, relaxation=relaxation)
 
@@ -212,4 +212,3 @@ display(fig_stream)
 save("navierstokes2d_steady_streamlines.png", fig_stream)
 
 println("Saved steady streamline plot: navierstokes2d_steady_streamlines.png")
-

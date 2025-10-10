@@ -91,7 +91,7 @@ solver = MovingLiquidDiffusionUnsteadyMono(Fluide, bc_b, bc, Δt, u0, mesh, "BE"
 # Solve the problem
 solver_coupled, residuals, xf_log, timestep_history = solve_MovingLiquidDiffusionUnsteadyMono_coupledNewton!(solver, Fluide, xf, Δt, Tstart, Tend, bc_b, bc, stef_cond, mesh, "BE"; Newton_params=Newton_params)
 
-"""
+
 # Save residuals in csv
 using CSV
 using DataFrames
@@ -125,7 +125,7 @@ end
 
 # Write to CSV file
 CSV.write("residuals.csv", df)
-"""
+
 
 using CSV
 using DataFrames

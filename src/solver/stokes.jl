@@ -1,3 +1,21 @@
+abstract type AbstractPressureGauge end
+
+struct PinPressureGauge <: AbstractPressureGauge
+    index::Union{Nothing,Int}
+end
+PinPressureGauge(; index::Union{Nothing,Int}=nothing) = PinPressureGauge(index)
+
+struct MeanPressureGauge <: AbstractPressureGauge end
+
+const DEFAULT_PRESSURE_GAUGE = PinPressureGauge()
+
+normalize_pressure_gauge(gauge::AbstractPressureGauge) = gauge
+normalize_pressure_gauge(::Nothing) = DEFAULT_PRESSURE_GAUGE
+function normalize_pressure_gauge(bc::BorderConditions)
+    isempty(bc.borders) || error("Pressure boundary conditions are not supported for incompressible flow. Provide a pressure gauge (PinPressureGauge or MeanPressureGauge) instead.")
+    return DEFAULT_PRESSURE_GAUGE
+end
+
 """
     StokesMono
 
@@ -9,7 +27,7 @@ Actual discretization assembly (coupled momentum + continuity) will be added lat
 mutable struct StokesMono{N}
     fluid::Fluid{N}
     bc_u::NTuple{N, BorderConditions}
-    bc_p::BorderConditions
+    pressure_gauge::AbstractPressureGauge
     bc_cut::AbstractBoundary  # cut-cell/interface BC for uγ
 
     A::SparseMatrixCSC{Float64, Int}
@@ -258,7 +276,7 @@ end
 
 function StokesMono(fluid::Fluid{N},
                     bc_u::NTuple{N,BorderConditions},
-                    bc_p::BorderConditions,
+                    pressure_gauge::AbstractPressureGauge,
                     bc_cut::AbstractBoundary;
                     x0=zeros(0)) where {N}
     # Number of velocity dofs per component
@@ -272,7 +290,7 @@ function StokesMono(fluid::Fluid{N},
     A = spzeros(Float64, Ntot, Ntot)
     b = zeros(Ntot)
 
-    s = StokesMono{N}(fluid, bc_u, bc_p, bc_cut,
+    s = StokesMono{N}(fluid, bc_u, pressure_gauge, bc_cut,
                       A, b, x_init, Any[])
     assemble_stokes!(s)
     return s
@@ -280,16 +298,18 @@ end
 
 StokesMono(fluid::Fluid{1},
            bc_u::BorderConditions,
-           bc_p::BorderConditions,
+           pressure_gauge::AbstractPressureGauge,
            bc_cut::AbstractBoundary;
-           x0=zeros(0)) = StokesMono(fluid, (bc_u,), bc_p, bc_cut; x0=x0)
+           x0=zeros(0)) = StokesMono(fluid, (bc_u,), pressure_gauge, bc_cut; x0=x0)
 
 function StokesMono(fluid::Fluid{N},
                     bc_u_args::Vararg{BorderConditions,N};
-                    bc_p::BorderConditions,
+                    pressure_gauge::AbstractPressureGauge=DEFAULT_PRESSURE_GAUGE,
                     bc_cut::AbstractBoundary,
+                    bc_p::Union{Nothing,BorderConditions}=nothing,
                     x0=zeros(0)) where {N}
-    return StokesMono(fluid, Tuple(bc_u_args), bc_p, bc_cut; x0=x0)
+    gauge = bc_p === nothing ? pressure_gauge : normalize_pressure_gauge(bc_p)
+    return StokesMono(fluid, Tuple(bc_u_args), gauge, bc_cut; x0=x0)
 end
 
 """
@@ -351,7 +371,7 @@ function assemble_stokes1D!(s::StokesMono)
     apply_velocity_dirichlet!(A, b, s.bc_u[1], s.fluid.mesh_u[1];
                               nu=nu, uω_offset=0, uγ_offset=nu)
 
-    apply_pressure_gauge!(A, b, s.bc_p, s.fluid.mesh_p, s.fluid.capacity_p;
+    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=2nu, np=np, row_start=2nu+1)
 
     s.A = A
@@ -429,7 +449,7 @@ function assemble_stokes2D!(s::StokesMono)
                                  row_uωy_off=row_uωy, row_uγy_off=row_uγy)
 
     # Fix pressure gauge or apply pressure Dirichlet at boundaries if provided
-    apply_pressure_gauge!(A, b, s.bc_p, s.fluid.mesh_p, s.fluid.capacity_p;
+    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=off_p, np=np, row_start=row_con+1)
 
     s.A = A
@@ -522,7 +542,7 @@ function assemble_stokes3D!(s::StokesMono)
                                  row_uωz_off=row_uωz, row_uγz_off=row_uγz)
 
     # Fix pressure gauge or apply pressure Dirichlet at boundaries if provided
-    apply_pressure_gauge!(A, b, s.bc_p, s.fluid.mesh_p, s.fluid.capacity_p;
+    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=off_p, np=np, row_start=row_con+1)
 
     s.A = A
@@ -591,7 +611,7 @@ function assemble_stokes1D_unsteady!(s::StokesMono, data, Δt::Float64,
     apply_velocity_dirichlet!(A, b, s.bc_u[1], s.fluid.mesh_u[1];
                               nu=nu, uω_offset=0, uγ_offset=nu, t=t_next)
 
-    apply_pressure_gauge!(A, b, s.bc_p, s.fluid.mesh_p, s.fluid.capacity_p;
+    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=2nu, np=np, row_start=2nu+1)
 
     s.A = A
@@ -695,7 +715,7 @@ function assemble_stokes2D_unsteady!(s::StokesMono, data, Δt::Float64,
                                  row_uωy_off=row_uωy, row_uγy_off=row_uγy,
                                  t=t_next)
 
-    apply_pressure_gauge!(A, b, s.bc_p, s.fluid.mesh_p, s.fluid.capacity_p;
+    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=off_p, np=np, row_start=row_con+1)
 
     s.A = A
@@ -828,7 +848,7 @@ function assemble_stokes3D_unsteady!(s::StokesMono, data, Δt::Float64,
                                  row_uωz_off=row_uωz, row_uγz_off=row_uγz,
                                  t=t_next)
 
-    apply_pressure_gauge!(A, b, s.bc_p, s.fluid.mesh_p, s.fluid.capacity_p;
+    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=off_p, np=np, row_start=row_con+1)
 
     s.A = A
@@ -1410,106 +1430,50 @@ function apply_velocity_dirichlet!(A::SparseMatrixCSC{Float64, Int}, b::Vector{F
 end
 
 """
-    apply_pressure_gauge!(A, b, bc_p, mesh_p, capacity_p; p_offset, np, row_start)
+    apply_pressure_gauge!(A, b, gauge, mesh_p, capacity_p; p_offset, np, row_start)
 
-Fix one pressure dof: if left/right pressure Dirichlet exist, enforce them; otherwise
-set p=0 in the first fluid cell (based on capacity). Rows
-`row_start : row_start+np-1` belong to the continuity block.
+Apply the pressure gauge constraint. Two gauges are supported:
+
+- `PinPressureGauge`: fixes a single pressure DOF to zero.
+- `MeanPressureGauge`: enforces a zero-mean pressure over the domain using
+  volume weights from the pressure capacity.
 """
 function apply_pressure_gauge!(A::SparseMatrixCSC{Float64, Int}, b,
-                               bc_p::BorderConditions,
-                               mesh_p::AbstractMesh,
+                               gauge::AbstractPressureGauge,
+                               _mesh_p::AbstractMesh,
                                capacity_p::AbstractCapacity;
                                p_offset::Int, np::Int, row_start::Int)
-    nodes = mesh_p.nodes
-    nd = length(nodes)
-    dims = ntuple(i -> length(nodes[i]), nd)
-    LI = LinearIndices(Tuple(dims))
-
-    side_specs = Dict{Symbol,Tuple{Int,Int}}(
-        :left  => (1, 1),
-        :right => (1, dims[1]),
-    )
-    if nd >= 2
-        side_specs[:bottom] = (2, 1)
-        side_specs[:top]    = (2, dims[2])
-    else
-        side_specs[:bottom] = (1, 1)
-        side_specs[:top]    = (1, dims[1])
-    end
-    if nd >= 3
-        side_specs[:front] = (3, 1)
-        side_specs[:back]  = (3, dims[3])
-    end
-
-    firstn(coords::NTuple{N,Float64}, m::Int) where {N} = ntuple(i -> coords[i], m)
-    function call_boundary_value(f::Function, coords::NTuple{N,Float64}) where {N}
-        for m in N:-1:0
-            args = m == 0 ? () : firstn(coords, m)
-            try
-                return f(args...)
-            catch err
-                err isa MethodError || rethrow(err)
-            end
+    diagV = diag(capacity_p.V)
+    if gauge isa PinPressureGauge
+        idx = gauge.index
+        if idx === nothing
+            tol = 1e-12
+            idx = findfirst(x -> x > tol, diagV)
+            idx === nothing && (idx = 1)
         end
-        return nothing
-    end
-
-    function eval_dirichlet(bc::AbstractBoundary, coords::NTuple{N,Float64}) where {N}
-        if bc isa Dirichlet
-            val = bc.value
-        elseif bc isa Outflow
-            val = bc.pressure
-        else
-            return nothing
-        end
-        if val === nothing
-            return nothing
-        elseif val isa Function
-            return call_boundary_value(val, coords)
-        else
-            return val
-        end
-    end
-
-    applied = false
-    ranges_full = ntuple(i -> 1:dims[i], nd)
-
-    function apply_face!(dim::Int, fixed_idx::Int, bc::AbstractBoundary)
-        dim <= nd || return false
-        if !(bc isa Dirichlet || (bc isa Outflow && bc.pressure !== nothing))
-            return false
-        end
-        ranges = collect(ranges_full)
-        ranges[dim] = fixed_idx:fixed_idx
-        did_apply = false
-        for idx in Iterators.product(ranges...)
-            coords = ntuple(i -> nodes[i][idx[i]], nd)
-            val = eval_dirichlet(bc, coords)
-            val === nothing && continue
-            lin = LI[idx...]
-            row = row_start + lin - 1
-            col = p_offset + lin
-            enforce_dirichlet!(A, b, row, col, Float64(val))
-            did_apply = true
-        end
-        return did_apply
-    end
-
-    for (side, bc) in bc_p.borders
-        spec = get(side_specs, side, nothing)
-        isnothing(spec) && continue
-        applied |= apply_face!(spec[1], spec[2], bc)
-    end
-
-    if !applied
-        diagV = diag(capacity_p.V)
-        tol = 1e-12
-        idx = findfirst(x -> x > tol, diagV)
-        gauge_idx = idx === nothing ? 1 : idx
-        row = row_start + gauge_idx - 1
-        col = p_offset + gauge_idx
+        1 ≤ idx ≤ np || error("PinPressureGauge index $(idx) outside valid range 1:$(np)")
+        row = row_start + idx - 1
+        col = p_offset + idx
         enforce_dirichlet!(A, b, row, col, 0.0)
+    elseif gauge isa MeanPressureGauge
+        weights = copy(diagV)
+        if isempty(weights)
+            error("MeanPressureGauge requires at least one pressure DOF")
+        end
+        if all(isapprox.(weights, 0.0; atol=1e-12))
+            weights .= 1.0
+        end
+        total = sum(weights)
+        total == 0.0 && (weights .= 1.0; total = sum(weights))
+        weights ./= total
+        row = row_start
+        A[row, :] .= 0.0
+        for j in 1:np
+            A[row, p_offset + j] = weights[j]
+        end
+        b[row] = 0.0
+    else
+        error("Unknown pressure gauge type $(typeof(gauge))")
     end
     return nothing
 end

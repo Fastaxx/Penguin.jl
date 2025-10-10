@@ -81,7 +81,7 @@ for n in ns
         :top   => Dirichlet((x,y,t)->v_exact(x,y,t)),
     ))
 
-    bc_p = BorderConditions(Dict{Symbol,AbstractBoundary}())
+    pressure_gauge = MeanPressureGauge()
     bc_cut = Dirichlet(0.0)
 
     fᵤ = (x,y,z=0.0) -> 0.0
@@ -133,7 +133,7 @@ for n in ns
     x0_vec[2nu_x+nu_y+1:2*(nu_x+nu_y)] .= v_init
     x0_vec[2*(nu_x+nu_y)+1:end] .= p_init
 
-    solver = NavierStokesMono(fluid, (bc_ux, bc_uy), bc_p, bc_cut; x0=x0_vec)
+    solver = NavierStokesMono(fluid, (bc_ux, bc_uy), pressure_gauge, bc_cut; x0=x0_vec)
 
     @printf("Running Navier–Stokes resolution %d×%d ...\n", nx, ny)
     times, states = solve_NavierStokesMono_unsteady!(solver; Δt=Δt, T_end=t_end, scheme=scheme, method=Base.:\)

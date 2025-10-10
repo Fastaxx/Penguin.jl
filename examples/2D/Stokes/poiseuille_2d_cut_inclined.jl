@@ -197,7 +197,7 @@ for (i, θ) in enumerate(angles_rad)
         :top => Dirichlet(uy_bc_func)
     ))
     
-    bc_p = BorderConditions(Dict())  # Gauge fixing
+    pressure_gauge = PinPressureGauge()  # Gauge fixing
     u_bc = Dirichlet(0.0)  # No-slip on cut boundaries
     
     # Sources and material
@@ -215,7 +215,7 @@ for (i, θ) in enumerate(angles_rad)
     np = prod(operator_p.size)
     x0_init = zeros(4*nu + np)
     
-    solver = StokesMono(fluid, (bc_ux, bc_uy), bc_p, u_bc; x0=x0_init)
+    solver = StokesMono(fluid, (bc_ux, bc_uy), pressure_gauge, u_bc; x0=x0_init)
     solve_StokesMono!(solver; algorithm=UMFPACKFactorization())
     
     # Extract solution

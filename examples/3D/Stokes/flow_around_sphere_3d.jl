@@ -95,7 +95,7 @@ bc_uz = BorderConditions(Dict(
     :front=>uz_zero, :back=>uz_zero
 ))
 
-bc_p = BorderConditions(Dict{Symbol,AbstractBoundary}())
+pressure_gauge = PinPressureGauge()
 
 # Cut-cell interface (sphere) -> enforce u^γ = 0
 bc_cut = Dirichlet(0.0)
@@ -124,7 +124,7 @@ np = prod(op_p.size)
 xlen = 2*(nu_x+nu_y+nu_z) + np
 x0_vec = zeros(xlen)
 
-solver = StokesMono(fluid, (bc_ux, bc_uy, bc_uz), bc_p, bc_cut; x0=x0_vec)
+solver = StokesMono(fluid, (bc_ux, bc_uy, bc_uz), pressure_gauge, bc_cut; x0=x0_vec)
 solve_StokesMono!(solver; algorithm=UMFPACKFactorization())
 println("3D Stokes flow around sphere solved. Unknowns = ", length(solver.x))
 

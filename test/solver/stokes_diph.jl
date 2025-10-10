@@ -32,7 +32,7 @@ using Test
 
         bc_u = BorderConditions(Dict(:bottom => Dirichlet(0.0),
                                      :top => Dirichlet(0.0)))
-        bc_p = BorderConditions(Dict())
+        pressure_gauge = PinPressureGauge()
         interface = InterfaceConditions(ScalarJump(1.0, 1.0, 0.0),
                                         FluxJump(1.0, 1.0, 0.0))
 
@@ -41,7 +41,7 @@ using Test
         expected_size = 4 * nu + 2 * np
         initial_state = collect(Float64.(1:expected_size))
 
-        solver = StokesDiph(fluid₁, fluid₂, (bc_u,), (bc_u,), bc_p,
+        solver = StokesDiph(fluid₁, fluid₂, (bc_u,), (bc_u,), pressure_gauge,
                              interface, Dirichlet(0.0); x0=initial_state)
 
         @test solver.x === initial_state
@@ -86,7 +86,9 @@ using Test
         μ_top = 2.0
         μ_bot = 1.0
         ρ = 1.0
-        fᵤ = (x, y, z=0.0) -> 0.0
+        Δp = 1.0
+        gradP = Δp / Lx
+        fᵤ = (x, y, z=0.0) -> gradP
         fₚ = (x, y, z=0.0) -> 0.0
 
         fluid_top = Fluid((mesh_ux, mesh_uy), (cap_ux_top, cap_uy_top), (op_ux_top, op_uy_top),
@@ -103,11 +105,7 @@ using Test
         bc_ux_bot = BorderConditions(Dict(:bottom => ux_wall, :top => ux_wall))
         bc_uy_bot = BorderConditions(Dict(:bottom => uy_wall, :top => uy_wall))
 
-        Δp = 1.0
-        p_in = Δp
-        p_out = 0.0
-        bc_p = BorderConditions(Dict(:left => Dirichlet(p_in),
-                                     :right => Dirichlet(p_out)))
+        pressure_gauge = MeanPressureGauge()
 
         interface = InterfaceConditions(ScalarJump(1.0, 1.0, 0.0),
                                         FluxJump(1.0, 1.0, 0.0))
@@ -121,7 +119,7 @@ using Test
         solver = StokesDiph(fluid_top, fluid_bot,
                              (bc_ux_top, bc_uy_top),
                              (bc_ux_bot, bc_uy_bot),
-                             bc_p, interface, Dirichlet(0.0); x0=initial_state)
+                             pressure_gauge, interface, Dirichlet(0.0); x0=initial_state)
 
         @test solver.x === initial_state
         @test size(solver.A) == (expected_size, expected_size)

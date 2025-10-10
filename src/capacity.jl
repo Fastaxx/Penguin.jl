@@ -51,12 +51,12 @@ Compute the capacity of a body in a given mesh using a specified method.
 function Capacity(body::Function, mesh::AbstractMesh; method::String = "VOFI", compute_centroids::Bool = true)
 
     if method == "VOFI"
-        println("When using VOFI, the body must be a scalar function.")
+        #println("When using VOFI, the body must be a scalar function.")
         A, B, V, W, C_ω, C_γ, Γ, cell_types = VOFI(body, mesh; compute_centroids=compute_centroids)
         N = length(A)
         return Capacity{N}(A, B, V, W, C_ω, C_γ, Γ, cell_types, mesh, body)
     elseif method == "ImplicitIntegration"
-        println("Computing capacity using geometric moments integration.")
+        #println("Computing capacity using geometric moments integration.")
         A, B, V, W, C_ω, C_γ, Γ, cell_types = GeometricMoments(body, mesh; compute_centroids=compute_centroids)
         N = length(A)
         return Capacity{N}(A, B, V, W, C_ω, C_γ, Γ, cell_types, mesh, body)

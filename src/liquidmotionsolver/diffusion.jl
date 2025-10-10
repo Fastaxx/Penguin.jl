@@ -491,7 +491,9 @@ function coupled_newton_step!(phase::Phase, bc::AbstractBoundary, scheme::String
     J_bot = hcat(zero_block, I_half, zero_block)
     J = vcat(J_top, J_mid, J_bot)
 
-    δ = -(J \ residual_vec)
+
+    # Solve for the increments
+    δ = IterativeSolvers.gmres(J,-residual_vec)
     δΦω = δ[1:half]
     δΦγ = δ[half+1:2*half]
     δV = δ[2*half+1:3*half]

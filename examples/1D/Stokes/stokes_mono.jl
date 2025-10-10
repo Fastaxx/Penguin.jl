@@ -52,10 +52,8 @@ u_left  = Dirichlet(0.0)
 u_right = Dirichlet(0.0)
 bc_u = BorderConditions(Dict{Symbol, AbstractBoundary}(:bottom => u_left, :top => u_right))
 
-# Pressure BCs: reference Dirichlet at left, Neumann at right (zero-gradient)
-p_left  = Dirichlet(0.0)
-p_right = Dirichlet(0.0)
-bc_p = BorderConditions(Dict{Symbol, AbstractBoundary}(:bottom => p_left, :top => p_right))
+# Pressure gauge: pin one cell to zero (leaves rest free)
+pressure_gauge = PinPressureGauge()
 
 # Cut-cell/interface boundary condition for uγ (prototype: Dirichlet constant)
 u_bc = Dirichlet(1.0)
@@ -100,7 +98,7 @@ x0 = vcat(u0_ω, u0_γ, p0_ω)
 ###########
 # Build and run the (stub) solver
 ###########
-solver = StokesMono(fluid, bc_u, bc_p, u_bc; x0=x0)
+solver = StokesMono(fluid, bc_u, pressure_gauge, u_bc; x0=x0)
 solve_StokesMono!(solver)
 
 println(solver.x)

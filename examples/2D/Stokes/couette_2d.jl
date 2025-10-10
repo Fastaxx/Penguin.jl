@@ -55,8 +55,8 @@ bc_uy = BorderConditions(Dict(
     :left=>uy_zero, :right=>uy_zero, :bottom=>uy_zero, :top=>uy_zero
 ))
 
-# Pressure: gauge only (or set fixed value on one boundary if desired)
-bc_p = BorderConditions(Dict{Symbol,AbstractBoundary}())
+# Pressure gauge
+pressure_gauge = PinPressureGauge()
 
 # Cut-cell / interface BC for uγ (not used here)
 u_bc = Dirichlet(0.0)
@@ -87,7 +87,7 @@ x0 = zeros(4*nu + np)
 ###########
 # Solver and solve
 ###########
-solver = StokesMono(fluid, (bc_ux, bc_uy), bc_p, u_bc; x0=x0)
+solver = StokesMono(fluid, (bc_ux, bc_uy), pressure_gauge, u_bc; x0=x0)
 solve_StokesMono!(solver; method=Base.:\)
 
 println("2D Couette solved. Unknowns = ", length(solver.x))

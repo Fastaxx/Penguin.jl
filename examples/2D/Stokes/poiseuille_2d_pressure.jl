@@ -60,7 +60,7 @@ bc_uy = BorderConditions(Dict(
     :top=>uy_wall
 ))
 
-bc_p = BorderConditions(Dict())
+pressure_gauge = PinPressureGauge()
 
 u_bc = Dirichlet(0.0)
 
@@ -89,7 +89,7 @@ x0 = zeros(4*nu + np)
 ###########
 # Solve
 ###########
-solver = StokesMono(fluid, (bc_ux, bc_uy), bc_p, u_bc; x0=x0)
+solver = StokesMono(fluid, (bc_ux, bc_uy), pressure_gauge, u_bc; x0=x0)
 solve_StokesMono!(solver; algorithm=UMFPACKFactorization())
 
 println("2D body-force Poiseuille solved. Unknowns = ", length(solver.x))

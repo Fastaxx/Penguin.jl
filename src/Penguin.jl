@@ -131,6 +131,7 @@ include("vtk.jl")
 export write_vtk
 
 include("solver/stokes.jl")
+export AbstractPressureGauge, PinPressureGauge, MeanPressureGauge
 export StokesMono, solve_StokesMono!, solve_StokesMono_unsteady!
 
 include("solver/stokes_diph.jl")

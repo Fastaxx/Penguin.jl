@@ -183,9 +183,9 @@ function run_stefan_1d_mesh_convergence(
         solver = MovingLiquidDiffusionUnsteadyMono(Liquid, bc_b, bc1, Δt, u0, mesh, "BE")
         
         # Newton parameters
-        max_iter = 10
-        tol = 1e-8
-        reltol = 1e-8
+        max_iter = 20
+        tol = 1e-12
+        reltol = 1e-12
         α = 1.0
         Newton_params = (max_iter, tol, reltol, α)
         
@@ -780,8 +780,8 @@ function run_stefan_benchmark()
         T₀,
         k,
         Stefan_number,
-        lx=2.0*xint_final,  # Domain size based on expected interface position
-        x0=0.0,
+        lx=10.0*xint_final,  # Domain size based on expected interface position
+        x0=0.1,
         Tstart=t_start,
         Tend=t_final,
         norm=2,

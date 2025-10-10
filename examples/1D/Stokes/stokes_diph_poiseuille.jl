@@ -33,14 +33,14 @@ fluid2 = Fluid(mesh_u, capacity_u, operator_u,
                μ2, ρ, fᵤ, fₚ)
 
 bc_u = BorderConditions(Dict(:bottom=>Dirichlet(0.0), :top=>Dirichlet(0.0)))
-bc_p = BorderConditions(Dict())
+pressure_gauge = PinPressureGauge()
 interface = InterfaceConditions(ScalarJump(1.0, 1.0, 0.0), FluxJump(1.0, 1.0, 0.0))
 
 nu = prod(operator_u.size)
 np = prod(operator_p.size)
 x0 = zeros(4 * nu + 2 * np)
 
-solver = StokesDiph(fluid1, fluid2, (bc_u,), (bc_u,), bc_p, interface, Dirichlet(0.0); x0=x0)
+solver = StokesDiph(fluid1, fluid2, (bc_u,), (bc_u,), pressure_gauge, interface, Dirichlet(0.0); x0=x0)
 solve_StokesDiph!(solver)
 
 uω1 = solver.x[1:nu]

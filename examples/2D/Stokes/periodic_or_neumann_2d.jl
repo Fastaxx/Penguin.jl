@@ -11,7 +11,7 @@ Expected: ux is parabolic in y and independent of x; uy≈0; left/right strips i
 
 Case B (Neumann-x Poiseuille):
 - Velocity BCs: left/right Neumann(0) for both ux, uy; top/bottom no-slip (Dirichlet 0)
-- Pressure: Dirichlet p(left)=ΔP, p(right)=0 to drive the flow
+- Pressure: gauge only; uniform body force mimics the pressure gradient
 Expected: ux parabolic in y, uy≈0; zero x-gradient at both ends
 """
 
@@ -54,10 +54,7 @@ bc_uy_A = BorderConditions(Dict(
     :left=>Periodic(), :right=>Periodic(),
     :bottom=>Dirichlet(0.0), :top=>Dirichlet(0.0)
 ))
-ΔP = 1.0
-bc_p_A = BorderConditions(Dict(
-    :left=>Dirichlet(ΔP), :right=>Dirichlet(0.0)
-))
+pressure_gauge_A = MeanPressureGauge()
 bc_cut = Dirichlet(0.0)
 
 fluid_A = Fluid((mesh_ux, mesh_uy),
@@ -66,7 +63,7 @@ fluid_A = Fluid((mesh_ux, mesh_uy),
                 mesh_p, cap_p, op_p,
                 μ, ρ, fᵤ_A, fₚ_A)
 
-solver_A = StokesMono(fluid_A, bc_ux_A, bc_uy_A; bc_p=bc_p_A, bc_cut=bc_cut)
+solver_A = StokesMono(fluid_A, bc_ux_A, bc_uy_A; pressure_gauge=pressure_gauge_A, bc_cut=bc_cut)
 solve_StokesMono!(solver_A; method=Base.:\)
 
 nu_x = prod(op_ux.size)
@@ -100,9 +97,11 @@ save("stokes2d_periodic_x.png", figA)
 println("Saved stokes2d_periodic_x.png")
 
 ###########
-# Case B: Neumann-x Poiseuille (driven by ΔP)
+# Case B: Neumann-x Poiseuille (driven by body force)
 ###########
-fᵤ_B = (x, y, z=0.0) -> 0.0
+ΔP_B = 10.0
+gradP_B = ΔP_B / Lx
+fᵤ_B = (x, y, z=0.0) -> gradP_B
 fₚ_B = (x, y, z=0.0) -> 0.0
 
 bc_ux_B = BorderConditions(Dict(
@@ -114,10 +113,7 @@ bc_uy_B = BorderConditions(Dict(
     :bottom=>Dirichlet(0.0), :top=>Dirichlet(0.0)
 ))
 
-ΔP = 10.0
-bc_p_B = BorderConditions(Dict(
-    :left=>Dirichlet(-ΔP), :right=>Dirichlet(0.0)
-))
+pressure_gauge_B = MeanPressureGauge()
 
 fluid_B = Fluid((mesh_ux, mesh_uy),
                 (cap_ux, cap_uy),
@@ -125,7 +121,7 @@ fluid_B = Fluid((mesh_ux, mesh_uy),
                 mesh_p, cap_p, op_p,
                 μ, ρ, fᵤ_B, fₚ_B)
 
-solver_B = StokesMono(fluid_B, bc_ux_B, bc_uy_B; bc_p=bc_p_B, bc_cut=bc_cut)
+solver_B = StokesMono(fluid_B, bc_ux_B, bc_uy_B; pressure_gauge=pressure_gauge_B, bc_cut=bc_cut)
 solve_StokesMono!(solver_B; method=Base.:\)
 
 uωx_B = solver_B.x[1:nu_x]
@@ -148,4 +144,3 @@ lines!(axB2, ys, Ux_B[ix_mid, :])
 
 save("stokes2d_neumann_x.png", figB)
 println("Saved stokes2d_neumann_x.png")
-

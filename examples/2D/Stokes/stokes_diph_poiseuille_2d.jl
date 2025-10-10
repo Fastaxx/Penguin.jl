@@ -3,8 +3,8 @@ using CairoMakie
 using LinearAlgebra
 
 """
-Two-layer 2D Stokes Poiseuille (steady): top/bottom no-slip, pressure-driven in x.
-Interface at y = Ly/2: enforce u-continuity and μ-weighted flux continuity.
+Two-layer 2D Stokes Poiseuille (steady): top/bottom no-slip, streamwise body-force drive.
+Interface at y = Ly/2 enforces velocity continuity and μ-weighted flux continuity.
 """
 
 nx, ny = 96, 64
@@ -42,7 +42,10 @@ op_p_bot  = DiffusionOps(cap_p_bot)
 μ_bot = 1.0
 ρ = 1.0
 
-fᵤ = (x, y, z=0.0) -> 0.0
+Δp = 1.0               # reference pressure drop over the domain length
+gradP = Δp / Lx
+
+fᵤ = (x, y, z=0.0) -> gradP   # body-force equivalent of streamwise pressure gradient
 fₚ = (x, y, z=0.0) -> 0.0
 
 fluid_top = Fluid((mesh_ux, mesh_uy), (cap_ux_top, cap_uy_top), (op_ux_top, op_uy_top),
@@ -50,7 +53,7 @@ fluid_top = Fluid((mesh_ux, mesh_uy), (cap_ux_top, cap_uy_top), (op_ux_top, op_u
 fluid_bot = Fluid((mesh_ux, mesh_uy), (cap_ux_bot, cap_uy_bot), (op_ux_bot, op_uy_bot),
                   mesh_p, cap_p_bot, op_p_bot, μ_bot, ρ, fᵤ, fₚ)
 
-# BCs: top/bottom no-slip; pressure drop left->right
+# BCs: top/bottom no-slip; streamwise body force drives flow
 ux_wall = Dirichlet((x, y) -> 0.0)
 uy_wall = Dirichlet((x, y) -> 0.0)
 
@@ -60,10 +63,7 @@ bc_uy_top = BorderConditions(Dict(:bottom=>uy_wall, :top=>uy_wall))
 bc_ux_bot = BorderConditions(Dict(:bottom=>ux_wall, :top=>ux_wall))
 bc_uy_bot = BorderConditions(Dict(:bottom=>uy_wall, :top=>uy_wall))
 
-Δp = 1.0
-p_in = Δp
-p_out = 0.0
-bc_p = BorderConditions(Dict(:left=>Dirichlet(p_in), :right=>Dirichlet(p_out)))
+pressure_gauge = MeanPressureGauge()
 
 # Interface conditions (continuity of velocity and flux)
 interface = InterfaceConditions(ScalarJump(1.0, 1.0, 0.0), FluxJump(1.0, 1.0, 0.0))
@@ -73,7 +73,7 @@ nu = prod(op_ux_top.size)
 np = prod(op_p_top.size)
 x0 = zeros(2 * (2*nu + np))
 
-solver = StokesDiph(fluid_top, fluid_bot, (bc_ux_top, bc_uy_top), (bc_ux_bot, bc_uy_bot), bc_p, interface, Dirichlet(0.0); x0=x0)
+solver = StokesDiph(fluid_top, fluid_bot, (bc_ux_top, bc_uy_top), (bc_ux_bot, bc_uy_bot), pressure_gauge, interface, Dirichlet(0.0); x0=x0)
 solve_StokesDiph!(solver; method=Base.:\)
 
 nu_x = prod(op_ux_top.size)

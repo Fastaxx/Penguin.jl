@@ -80,7 +80,7 @@ bc_uy = BorderConditions(Dict(
     :left=>uy_left, :right=>uy_right, :bottom=>uy_bottom, :top=>uy_top
 ))
 
-bc_p = BorderConditions(Dict{Symbol,AbstractBoundary}())
+pressure_gauge = MeanPressureGauge()
 interface_bc = Dirichlet(0.0)  # no-slip on the cylinder
 
 # body forces (none)
@@ -102,7 +102,7 @@ np = prod(operator_p.size)
 Ntot = 2 * (nu_x + nu_y) + np
 x0_vec = zeros(Float64, Ntot)
 
-solver = NavierStokesMono(fluid, (bc_ux, bc_uy), bc_p, interface_bc; x0=x0_vec)
+solver = NavierStokesMono(fluid, (bc_ux, bc_uy), pressure_gauge, interface_bc; x0=x0_vec)
 
 # ---------------------------------------------------------------------------
 # Time integration parameters

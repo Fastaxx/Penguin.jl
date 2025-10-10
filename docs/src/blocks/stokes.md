@@ -31,16 +31,16 @@ fluid = Fluid((mesh_ux, mesh_uy), (cap_ux, cap_uy), (op_ux, op_uy), mesh_p, cap_
 bc_ux = BorderConditions(Dict(:left=>Dirichlet(0.0), :right=>Dirichlet(0.0), :bottom=>Dirichlet(0.0), :top=>Dirichlet(1.0)))
 bc_uy = BorderConditions(Dict(:left=>Dirichlet(0.0), :right=>Dirichlet(0.0), :bottom=>Dirichlet(0.0), :top=>Dirichlet(0.0)))
 
-bc_p = BorderConditions(Dict{Symbol,AbstractBoundary}())   # all pressure DOFs free except gauge fixing
+pressure_gauge = PinPressureGauge()   # or MeanPressureGauge() for zero-mean pressure
 bc_cut = Dirichlet(0.0)  # placeholder cut boundary (no internal interface)
 
-solver = StokesMono(fluid, (bc_ux, bc_uy), bc_p, bc_cut)
+solver = StokesMono(fluid, (bc_ux, bc_uy), pressure_gauge, bc_cut)
 solve_StokesMono_unsteady!(solver; Δt=Δt, T_end=Tend, scheme=:CN)
 ```
 
 ## Diphasic Variant
 
-For `StokesDiph`, construct two `Fluid` objects (A,B) with their own properties `(μ_A, ρ_A)` and `(μ_B, ρ_B)` over the same geometrical region but different signed-distance capacities. Provide interface conditions through `bc_cut` and call `StokesDiph(fluid_a, fluid_b, (bc_uxA, bc_uyA), (bc_uxB, bc_uyB), bc_p, bc_cut)` then `solve_StokesDiph!` / unsteady variant.
+For `StokesDiph`, construct two `Fluid` objects (A,B) with their own properties `(μ_A, ρ_A)` and `(μ_B, ρ_B)` over the same geometrical region but different signed-distance capacities. Provide interface conditions through `bc_cut` and call `StokesDiph(fluid_a, fluid_b, (bc_uxA, bc_uyA), (bc_uxB, bc_uyB), pressure_gauge, bc_cut)` then `solve_StokesDiph!` / unsteady variant.
 
 ## Limitations / Roadmap
 

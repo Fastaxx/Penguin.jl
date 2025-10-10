@@ -24,7 +24,7 @@ convection is advanced with an Adams–Bashforth extrapolation.
 mutable struct NavierStokesMono{N}
     fluid::Fluid{N}
     bc_u::NTuple{N, BorderConditions}
-    bc_p::BorderConditions
+    pressure_gauge::AbstractPressureGauge
     bc_cut::AbstractBoundary
     convection::Union{Nothing,NavierStokesConvection{N}}  # Convection data when available (N ≥ 1)
     A::SparseMatrixCSC{Float64, Int}
@@ -44,7 +44,7 @@ setup: `[uω₁, uγ₁, ..., uωₙ, uγₙ, pω]`.
 """
 function NavierStokesMono(fluid::Fluid{N},
                           bc_u::NTuple{N,BorderConditions},
-                          bc_p::BorderConditions,
+                          pressure_gauge::AbstractPressureGauge,
                           bc_cut::AbstractBoundary;
                           x0=zeros(0)) where {N}
     nu_components = ntuple(i -> prod(fluid.operator_u[i].size), N)
@@ -57,23 +57,25 @@ function NavierStokesMono(fluid::Fluid{N},
 
     convection = build_convection_data(fluid)
 
-    return NavierStokesMono{N}(fluid, bc_u, bc_p, bc_cut,
+    return NavierStokesMono{N}(fluid, bc_u, pressure_gauge, bc_cut,
                                convection, A, b, x_init,
                                nothing, nothing, Any[], Float64[])
 end
 
 NavierStokesMono(fluid::Fluid{1},
                  bc_u::BorderConditions,
-                 bc_p::BorderConditions,
+                 pressure_gauge::AbstractPressureGauge,
                  bc_cut::AbstractBoundary;
-                 x0=zeros(0)) = NavierStokesMono(fluid, (bc_u,), bc_p, bc_cut; x0=x0)
+                 x0=zeros(0)) = NavierStokesMono(fluid, (bc_u,), pressure_gauge, bc_cut; x0=x0)
 
 function NavierStokesMono(fluid::Fluid{N},
                           bc_u_args::Vararg{BorderConditions,N};
-                          bc_p::BorderConditions,
+                          pressure_gauge::AbstractPressureGauge=DEFAULT_PRESSURE_GAUGE,
                           bc_cut::AbstractBoundary,
+                          bc_p::Union{Nothing,BorderConditions}=nothing,
                           x0=zeros(0)) where {N}
-    return NavierStokesMono(fluid, Tuple(bc_u_args), bc_p, bc_cut; x0=x0)
+    gauge = bc_p === nothing ? pressure_gauge : normalize_pressure_gauge(bc_p)
+    return NavierStokesMono(fluid, Tuple(bc_u_args), gauge, bc_cut; x0=x0)
 end
 
 function build_convection_data(fluid::Fluid{N}) where {N}
@@ -425,7 +427,7 @@ function assemble_navierstokes1D_unsteady!(s::NavierStokesMono, data, Δt::Float
     apply_velocity_dirichlet!(A, b, s.bc_u[1], s.fluid.mesh_u[1];
                               nu=nu, uω_offset=off_uω, uγ_offset=off_uγ, t=t_next)
 
-    apply_pressure_gauge!(A, b, s.bc_p, s.fluid.mesh_p, s.fluid.capacity_p;
+    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=off_p, np=np, row_start=row_con+1)
 
     s.A = A
@@ -539,7 +541,7 @@ function assemble_navierstokes2D_unsteady!(s::NavierStokesMono, data, Δt::Float
                                  row_uωy_off=row_uωy, row_uγy_off=row_uγy,
                                  t=t_next)
 
-    apply_pressure_gauge!(A, b, s.bc_p, s.fluid.mesh_p, s.fluid.capacity_p;
+    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=off_p, np=np, row_start=row_con+1)
 
     s.A = A
@@ -595,7 +597,7 @@ function assemble_navierstokes1D_steady_picard!(s::NavierStokesMono,
     apply_velocity_dirichlet!(A, b, s.bc_u[1], s.fluid.mesh_u[1];
                               nu=nu, uω_offset=off_uω, uγ_offset=off_uγ, t=nothing)
 
-    apply_pressure_gauge!(A, b, s.bc_p, s.fluid.mesh_p, s.fluid.capacity_p;
+    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=off_p, np=np, row_start=row_con+1)
 
     s.A = A
@@ -677,7 +679,7 @@ function assemble_navierstokes2D_steady_picard!(s::NavierStokesMono,
                                  row_uωy_off=row_uωy, row_uγy_off=row_uγy,
                                  t=nothing)
 
-    apply_pressure_gauge!(A, b, s.bc_p, s.fluid.mesh_p, s.fluid.capacity_p;
+    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=off_p, np=np, row_start=row_con+1)
 
     s.A = A
@@ -977,7 +979,7 @@ function solve_NavierStokesMono_steady_newton_1D!(s::NavierStokesMono; tol=1e-8,
                                              row_uω_off=0, row_uγ_off=nu,
                                              t=nothing)
 
-        apply_pressure_gauge_newton!(J_val, rhs, x_iter, s.bc_p, s.fluid.mesh_p, s.fluid.capacity_p;
+        apply_pressure_gauge_newton!(J_val, rhs, x_iter, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
                                      p_offset=off_p, np=data.np,
                                      row_start=2 * nu + 1,
                                      t=nothing)
@@ -1093,7 +1095,7 @@ function solve_NavierStokesMono_steady_newton!(s::NavierStokesMono; tol=1e-8, ma
                                              row_uωy_off=2*nu_x, row_uγy_off=2*nu_x+nu_y,
                                              t=nothing)
 
-        apply_pressure_gauge_newton!(J_val, rhs, x_iter, s.bc_p, s.fluid.mesh_p, s.fluid.capacity_p;
+        apply_pressure_gauge_newton!(J_val, rhs, x_iter, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
                                      p_offset=off_p, np=data.np,
                                      row_start=2*sum_nu+1,
                                      t=nothing)
@@ -1613,106 +1615,45 @@ end
 
 function apply_pressure_gauge_newton!(A::SparseMatrixCSC{Float64,Int}, rhs::Vector{Float64},
                                       x_state::AbstractVector{<:Real},
-                                      bc_p::BorderConditions,
-                                      mesh_p::AbstractMesh,
+                                      gauge::AbstractPressureGauge,
+                                      _mesh_p::AbstractMesh,
                                       capacity_p::AbstractCapacity;
                                       p_offset::Int, np::Int,
                                       row_start::Int,
                                       t::Union{Nothing,Float64}=nothing)
-    nodes = mesh_p.nodes
-    nd = length(nodes)
-    dims = ntuple(i -> length(nodes[i]), nd)
-    LI = LinearIndices(Tuple(dims))
-
-    ranges_full = ntuple(i -> 1:dims[i], nd)
-
-    firstn(coords::NTuple{N,Float64}, m::Int) where {N} = ntuple(i -> coords[i], m)
-    function call_boundary_value(f::Function, coords::NTuple{N,Float64}, t_input::Union{Nothing,Float64}) where {N}
-        for m in N:-1:0
-            args = m == 0 ? () : firstn(coords, m)
-            try
-                return f(args...)
-            catch err
-                err isa MethodError || rethrow(err)
-            end
-            if t_input !== nothing
-                try
-                    return f(args..., t_input)
-                catch err
-                    err isa MethodError || rethrow(err)
-                end
-            end
+    diagV = diag(capacity_p.V)
+    if gauge isa PinPressureGauge
+        idx = gauge.index
+        if idx === nothing
+            tol = 1e-12
+            idx = findfirst(x -> x > tol, diagV)
+            idx === nothing && (idx = 1)
         end
-        return nothing
-    end
-
-    function eval_pressure_bc(bc::AbstractBoundary, coords::NTuple{N,Float64}) where {N}
-        val = if bc isa Dirichlet
-            bc.value
-        elseif bc isa Outflow
-            bc.pressure
-        else
-            nothing
-        end
-        val === nothing && return nothing
-        if val isa Function
-            t_arg = t === nothing ? nothing : t
-            evaluated = call_boundary_value(val, coords, t_arg)
-            evaluated === nothing && return nothing
-            return Float64(evaluated)
-        else
-            return Float64(val)
-        end
-    end
-
-    function apply_face!(dim::Int, fixed_idx::Int, bc::AbstractBoundary)
-        dim <= nd || return
-        if !(bc isa Dirichlet || (bc isa Outflow && bc.pressure !== nothing))
-            return
-        end
-        ranges = collect(ranges_full)
-        ranges[dim] = fixed_idx:fixed_idx
-        for idx in Iterators.product(ranges...)
-            lin = LI[idx...]
-            row = row_start + lin - 1
-            col = p_offset + lin
-            coords = ntuple(i -> nodes[i][idx[i]], nd)
-            val = eval_pressure_bc(bc, coords)
-            val = val === nothing ? 0.0 : val
-            delta = val - Float64(x_state[col])
-            enforce_dirichlet!(A, rhs, row, col, delta)
-        end
-    end
-
-    side_specs = Dict{Symbol,Tuple{Int,Int}}(
-        :left  => (1, 1),
-        :right => (1, dims[1]),
-    )
-    if nd >= 2
-        side_specs[:bottom] = (2, 1)
-        side_specs[:top]    = (2, dims[2])
-    else
-        side_specs[:bottom] = (1, 1)
-        side_specs[:top]    = (1, dims[1])
-    end
-    if nd >= 3
-        side_specs[:front] = (3, 1)
-        side_specs[:back]  = (3, dims[3])
-    end
-
-    for (side, bc) in bc_p.borders
-        haskey(side_specs, side) || continue
-        dim, fixed_idx = side_specs[side]
-        apply_face!(dim, fixed_idx, bc)
-    end
-
-    # If no explicit Dirichlet, pin gauge at first cell
-    if isempty(bc_p.borders)
-        row = row_start
-        col = p_offset + 1
+        1 ≤ idx ≤ np || error("PinPressureGauge index $(idx) outside valid range 1:$(np)")
+        row = row_start + idx - 1
+        col = p_offset + idx
         delta = -Float64(x_state[col])
         enforce_dirichlet!(A, rhs, row, col, delta)
+    elseif gauge isa MeanPressureGauge
+        weights = copy(diagV)
+        if isempty(weights)
+            error("MeanPressureGauge requires at least one pressure DOF")
+        end
+        if all(isapprox.(weights, 0.0; atol=1e-12))
+            weights .= 1.0
+        end
+        total = sum(weights)
+        total == 0.0 && (weights .= 1.0; total = sum(weights))
+        weights ./= total
+        row = row_start
+        A[row, :] .= 0.0
+        for j in 1:np
+            A[row, p_offset + j] = weights[j]
+        end
+        p_segment = view(x_state, p_offset+1:p_offset+np)
+        rhs[row] = -dot(weights, p_segment)
+    else
+        error("Unknown pressure gauge type $(typeof(gauge))")
     end
-
     return nothing
 end

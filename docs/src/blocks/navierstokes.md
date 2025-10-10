@@ -48,12 +48,12 @@ This section documents the prototype incompressible Navier–Stokes solver built
 - **Dirichlet:** enforced strongly on both momentum and tie rows (and respected inside the Newton residual/Jacobian).
 - **Neumann:** implemented as one-sided derivative constraints on the staggered faces.
 - **Periodic:** pairs opposite faces for both bulk and interface unknowns.
-- **Pressure:** if no Dirichlet pressure is prescribed, a gauge row fixes one cell; otherwise the declared pressure values are enforced on the corresponding continuity rows.
+- **Pressure gauge:** no pressure Dirichlet values are imposed. Choose either a pin gauge (fix one cell) or a mean gauge to enforce `∫p dV = 0`. Provide the gauge when constructing the solver.
 
 ### Outflow Boundaries
 
 - Current implementation treats velocity outlets as traction-free (the natural “do-nothing” boundary from the weak form).
-- `Outflow()` keeps the velocity natural; `Outflow(p0)` can be added to the pressure BCs to impose a reference outlet pressure.
+- `Outflow()` keeps the velocity natural; the global pressure reference is handled solely by the chosen gauge (pin or mean).
 - Roadmap: extend the outlet handling to support arbitrary traction `σ·n = g`, including non-zero normal/tangential components; this will subsume the pressure reference and allow proper stress specification.
 
 ## Usage Snippets
@@ -65,7 +65,8 @@ using Penguin
 
 # ... build meshes, capacities, operators, construct Fluid and boundary conditions ...
 
-solver = NavierStokesMono(fluid, (bc_ux, bc_uy), bc_p, bc_cut; x0=zeros(Ntot))
+pressure_gauge = MeanPressureGauge()  # or PinPressureGauge()
+solver = NavierStokesMono(fluid, (bc_ux, bc_uy), pressure_gauge, bc_cut; x0=zeros(Ntot))
 
 # Unsteady solve
 times, histories = solve_NavierStokesMono_unsteady!(solver; Δt=Δt, T_end=Tend, scheme=:CN)
@@ -85,7 +86,7 @@ x_newton, it_new, res_new = solve_NavierStokesMono_steady!(solver; tol=1e-10, ma
 
 ## Validation References
 
-- **Poiseuille channel (1D/2D):** check parabolic velocity profile and linear pressure drop; demonstrates outlet pressure specification with `Outflow(p0)`.
+- **Poiseuille channel (1D/2D):** check parabolic velocity profile under a uniform body-force driving term; pressure is determined up to the gauge.
 - **Lid-driven cavity:** steady benchmark for Picard/Newton iterations.
 - **Taylor–Green vortex:** unsteady regression for time integration accuracy and kinetic energy decay.
 

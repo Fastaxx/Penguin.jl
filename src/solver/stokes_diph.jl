@@ -9,7 +9,7 @@ mutable struct StokesDiph{N}
     fluid_b::Fluid{N}
     bc_u_a::NTuple{N, BorderConditions}
     bc_u_b::NTuple{N, BorderConditions}
-    bc_p::BorderConditions
+    pressure_gauge::AbstractPressureGauge
     interface::InterfaceConditions
     bc_cut::AbstractBoundary
 
@@ -148,7 +148,7 @@ end
 function StokesDiph(fluid_a::Fluid{N}, fluid_b::Fluid{N},
                     bc_u_a::NTuple{N,BorderConditions},
                     bc_u_b::NTuple{N,BorderConditions},
-                    bc_p::BorderConditions,
+                    pressure_gauge::AbstractPressureGauge,
                     interface::InterfaceConditions,
                     bc_cut::AbstractBoundary;
                     x0=zeros(0)) where {N}
@@ -163,8 +163,32 @@ function StokesDiph(fluid_a::Fluid{N}, fluid_b::Fluid{N},
 
     return StokesDiph{N}(fluid_a, fluid_b,
                          bc_u_a, bc_u_b,
-                         bc_p, interface, bc_cut,
+                         pressure_gauge, interface, bc_cut,
                          A, b, x_init, Any[])
+end
+
+StokesDiph(fluid_a::Fluid{1}, fluid_b::Fluid{1},
+           bc_u_a::BorderConditions,
+           bc_u_b::BorderConditions,
+           pressure_gauge::AbstractPressureGauge,
+           interface::InterfaceConditions,
+           bc_cut::AbstractBoundary;
+           x0=zeros(0)) = StokesDiph(fluid_a, fluid_b,
+                                     (bc_u_a,), (bc_u_b,),
+                                     pressure_gauge, interface, bc_cut;
+                                     x0=x0)
+
+function StokesDiph(fluid_a::Fluid{N}, fluid_b::Fluid{N},
+                    bc_u_a::NTuple{N,BorderConditions},
+                    bc_u_b::NTuple{N,BorderConditions},
+                    bc_p::BorderConditions,
+                    interface::InterfaceConditions,
+                    bc_cut::AbstractBoundary;
+                    x0=zeros(0)) where {N}
+    return StokesDiph(fluid_a, fluid_b,
+                      bc_u_a, bc_u_b,
+                      normalize_pressure_gauge(bc_p),
+                      interface, bc_cut; x0=x0)
 end
 
 StokesDiph(fluid_a::Fluid{1}, fluid_b::Fluid{1},
@@ -175,7 +199,8 @@ StokesDiph(fluid_a::Fluid{1}, fluid_b::Fluid{1},
            bc_cut::AbstractBoundary;
            x0=zeros(0)) = StokesDiph(fluid_a, fluid_b,
                                      (bc_u_a,), (bc_u_b,),
-                                     bc_p, interface, bc_cut;
+                                     normalize_pressure_gauge(bc_p),
+                                     interface, bc_cut;
                                      x0=x0)
 
 function assemble_stokes!(s::StokesDiph)
@@ -376,9 +401,9 @@ function assemble_stokes2D!(s::StokesDiph)
                                  row_uωx_off=row_m2x, row_uγx_off=row_m2x+nx,
                                  row_uωy_off=row_m2y, row_uγy_off=row_m2y+ny)
 
-    apply_pressure_gauge!(A, b, s.bc_p, s.fluid_a.mesh_p, s.fluid_a.capacity_p;
+    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid_a.mesh_p, s.fluid_a.capacity_p;
                           p_offset=off_p1, np=np, row_start=row_div1+1)
-    apply_pressure_gauge!(A, b, s.bc_p, s.fluid_b.mesh_p, s.fluid_b.capacity_p;
+    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid_b.mesh_p, s.fluid_b.capacity_p;
                           p_offset=off_p2, np=np, row_start=row_div2+1)
 
     s.A = A
@@ -479,9 +504,9 @@ function assemble_stokes1D!(s::StokesDiph)
                               nu=nu, uω_offset=off_u2ω, uγ_offset=off_u2γ)
 
     # Pressure gauge/Dirichlet for each phase
-    apply_pressure_gauge!(A, b, s.bc_p, s.fluid_a.mesh_p, s.fluid_a.capacity_p;
+    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid_a.mesh_p, s.fluid_a.capacity_p;
                           p_offset=off_p1, np=np, row_start=row_div1+1)
-    apply_pressure_gauge!(A, b, s.bc_p, s.fluid_b.mesh_p, s.fluid_b.capacity_p;
+    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid_b.mesh_p, s.fluid_b.capacity_p;
                           p_offset=off_p2, np=np, row_start=row_div2+1)
 
     s.A = A
