@@ -73,6 +73,16 @@ struct Outflow <: AbstractBoundary
     end
 end
 
+"""
+    Traction(value)
+Interface traction boundary condition prescribing the total stress vector on a cut surface.
+`value` can be a scalar (1D) or a tuple/vector providing one entry per velocity component.
+Functions may depend on space (and optionally time) coordinates.
+"""
+struct Traction <: AbstractBoundary
+    value::Union{Function,Float64,Tuple,AbstractVector}
+end
+
 abstract type AbstractInterfaceBC end
 
 """

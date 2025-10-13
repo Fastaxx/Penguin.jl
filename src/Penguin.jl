@@ -45,7 +45,7 @@ export ∇, ∇₋
 export DiffusionOps, ConvectionOps
 
 include("boundary.jl")
-export AbstractBoundary, Dirichlet, Neumann, Robin, Periodic, Symmetry, Outflow
+export AbstractBoundary, Dirichlet, Neumann, Robin, Periodic, Symmetry, Outflow, Traction
 export AbstractInterfaceBC, ScalarJump, FluxJump, BorderConditions, InterfaceConditions
 export GibbsThomson
 
@@ -99,6 +99,9 @@ include("liquidmotionsolver/diffusion.jl")
 export MovingLiquidDiffusionUnsteadyMono, solve_MovingLiquidDiffusionUnsteadyMono!
 export solve_MovingLiquidDiffusionUnsteadyMono_coupledNewton!
 export MovingLiquidDiffusionUnsteadyDiph, solve_MovingLiquidDiffusionUnsteadyDiph!
+
+include("liquidmotionsolver/diffusion_coupled.jl")
+export solve_MovingLiquidDiffusionUnsteadyMono_coupledNewton!
 
 include("liquidmotionsolver/diffusion2d.jl")
 export solve_MovingLiquidDiffusionUnsteadyMono2D!
