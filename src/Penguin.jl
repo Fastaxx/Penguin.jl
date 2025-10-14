@@ -146,6 +146,9 @@ export NavierStokesMono, solve_NavierStokesMono_unsteady!, solve_NavierStokesMon
 include("solver/navierstokes_heat.jl")
 export NavierStokesHeat2D, solve_NavierStokesHeat2D_unsteady!
 
+include("solver/shallowwater.jl")
+export ShallowWater2D, solve_ShallowWater2D_unsteady!, extract_shallowwater_fields, interpolate_height
+
 include("solver/streamfunction_vorticity.jl")
 export StreamVorticity, solve_StreamVorticity!, step_StreamVorticity!, run_StreamVorticity!, run_until_StreamVorticity!
 end
