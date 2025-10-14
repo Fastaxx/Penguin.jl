@@ -1,4 +1,140 @@
 # Full Moving - Diffusion - Unsteady - Monophasic
+
+mutable struct LearningRateState
+    strategy::Symbol
+    base_lr::Float64
+    eps::Float64
+    beta1::Float64
+    beta2::Float64
+    decay::Float64
+    grad_accum::Float64
+    mean_grad_sq::Float64
+    m::Float64
+    v::Float64
+    t::Int
+    prev_xf::Union{Nothing, Float64}
+    prev_grad::Union{Nothing, Float64}
+    min_lr::Float64
+    max_lr::Float64
+    last_lr::Float64
+end
+
+function normalize_lr_strategy(strategy::Union{Symbol, String})
+    normalized = lowercase(String(strategy))
+    normalized in ("constant", "none") && return :fixed
+    normalized in ("bb", "barzilaiborwein", "barzilai-borwein") && return :barzilai_borwein
+    normalized in ("rms_prop",) && return :rmsprop
+    normalized in ("secant",) && return :secant
+    return Symbol(normalized)
+end
+
+function init_learning_rate_state(strategy::Union{Symbol, String}, base_lr::Float64;
+        eps::Float64=1e-8,
+        beta1::Float64=0.9,
+        beta2::Float64=0.999,
+        decay::Float64=0.0,
+        min_lr::Float64=0.0,
+        max_lr::Float64=Inf)
+    strat = normalize_lr_strategy(strategy)
+    max_lr = max(max_lr, min_lr)
+    return LearningRateState(strat, base_lr, eps, beta1, beta2, decay, 0.0, 0.0, 0.0, 0.0, 0, nothing, nothing, min_lr, max_lr, base_lr)
+end
+
+function apply_learning_rate_step!(state::LearningRateState, current_xf::Float64, grad::Float64)
+    state.t += 1
+    base_lr = state.decay > 0 ? state.base_lr / (1 + state.decay * (state.t - 1)) : state.base_lr
+    lr = base_lr
+    direction = grad
+    custom_step = nothing
+
+    if state.strategy === :adagrad
+        state.grad_accum += grad * grad
+        denom = sqrt(state.grad_accum) + state.eps
+        lr = base_lr / denom
+    elseif state.strategy === :rmsprop
+        state.mean_grad_sq = state.beta2 * state.mean_grad_sq + (1 - state.beta2) * grad * grad
+        denom = sqrt(state.mean_grad_sq) + state.eps
+        lr = base_lr / denom
+    elseif state.strategy === :nadam
+        state.m = state.beta1 * state.m + (1 - state.beta1) * grad
+        state.v = state.beta2 * state.v + (1 - state.beta2) * grad * grad
+        bias_correction1 = max(1 - state.beta1^state.t, state.eps)
+        bias_correction2 = max(1 - state.beta2^state.t, state.eps)
+        m_hat = state.m / bias_correction1
+        v_hat = state.v / bias_correction2
+        denom = sqrt(v_hat) + state.eps
+        lr = base_lr / denom
+        direction = state.beta1 * m_hat + (1 - state.beta1) * grad / bias_correction1
+    elseif state.strategy === :barzilai_borwein
+        if !(state.prev_xf === nothing || state.prev_grad === nothing)
+            prev_xf = state.prev_xf::Float64
+            prev_grad = state.prev_grad::Float64
+            Δx = current_xf - prev_xf
+            Δg = grad - prev_grad
+            denom = abs(Δg) > state.eps ? Δg * Δg : 0.0
+            if denom > 0
+                lr = abs(Δx * Δg) / denom
+            end
+        end
+    elseif state.strategy === :secant
+        if !(state.prev_xf === nothing || state.prev_grad === nothing)
+            prev_xf = state.prev_xf::Float64
+            prev_grad = state.prev_grad::Float64
+            Δx = current_xf - prev_xf
+            Δg = grad - prev_grad
+            if abs(Δg) > state.eps
+                proposed_step = -grad * (Δx / Δg)
+                if grad == 0.0
+                    custom_step = proposed_step
+                    lr = state.base_lr
+                else
+                    max_step = state.max_lr * abs(grad)
+                    min_step = state.min_lr * abs(grad)
+                    if isfinite(max_step)
+                        proposed_step = clamp(proposed_step, -max_step, max_step)
+                    end
+                    if min_step > 0
+                        if abs(proposed_step) < min_step
+                            proposed_step = sign(proposed_step) * min_step
+                        end
+                    end
+                    custom_step = proposed_step
+                    lr = abs(proposed_step) / max(abs(grad), state.eps)
+                end
+            end
+        end
+    end
+
+    if custom_step === nothing
+        lr = clamp(lr, state.min_lr, state.max_lr)
+        step = lr * direction
+    else
+        step = custom_step
+    end
+    if !isfinite(step)
+        step = 0.0
+    end
+
+    state.prev_xf = current_xf
+    state.prev_grad = grad
+    state.last_lr = lr
+    return step
+end
+
+function normalize_lr_options(options)
+    if options === nothing
+        return (;)
+    elseif options isa NamedTuple
+        return options
+    elseif options isa AbstractDict
+        return (; options...)
+    elseif options isa AbstractVector
+        return (; options...)
+    else
+        error("learning_rate_options must be provided as a NamedTuple, Dict, vector of Pairs, or nothing.")
+    end
+end
+
 """
     MovingLiquidDiffusionUnsteadyMono(phase::Phase, bc_b::BorderConditions, bc_i::AbstractBoundary, Δt::Float64, Tᵢ::Vector{Float64}, mesh::AbstractMesh, scheme::String)
 
@@ -38,7 +174,8 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
     Δt_min=1e-4,
     Δt_max=1.0,
     adaptive_timestep=true, method=IterativeSolvers.gmres,
-    algorithm=nothing, kwargs...)
+    algorithm=nothing, learning_rate_strategy::Union{Symbol, String}=:fixed,
+    learning_rate_options=nothing, kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
@@ -60,6 +197,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
     tol      = Newton_params[2]
     reltol   = Newton_params[3]
     α        = Newton_params[4]
+    lr_opts = normalize_lr_options(learning_rate_options)
 
     # Log residuals and interface positions for each time step:
     nt = Int(round(Tₑ/Δt))
@@ -91,6 +229,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
     current_xf = xf
     new_xf = current_xf
     xf = current_xf
+    lr_state = init_learning_rate_state(learning_rate_strategy, α; lr_opts...)
     # First time step : Newton to compute the interface position xf1
     while (iter < max_iter) && (err > tol) && (err > reltol * abs(current_xf))
         iter += 1
@@ -117,9 +256,10 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
 
         # New interface position
         res = Hₙ₊₁ - Hₙ - Interface_term
-        new_xf = current_xf + α * res
+        step = apply_learning_rate_step!(lr_state, current_xf, res)
+        new_xf = current_xf + step
         err = abs(res)
-        println("Iteration $iter | xf = $new_xf | error = $err | res = $res")
+        println("Iteration $iter | xf = $new_xf | error = $err | res = $res | α = $(lr_state.last_lr)")
         
         # Store residuals
         if !haskey(residuals, 1)
@@ -215,6 +355,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
         current_xf = new_xf
         new_xf = current_xf
         xf = current_xf
+        lr_state = init_learning_rate_state(learning_rate_strategy, α; lr_opts...)
         # Newton to compute the interface position xf1
         while (iter < max_iter) && (err > tol) && (err > reltol * abs(current_xf))
             iter += 1
@@ -241,9 +382,10 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
 
             # New interface position
             res = Hₙ₊₁ - Hₙ - Interface_term
-            new_xf = current_xf + α * res
-            err = abs(new_xf - current_xf)
-            println("Iteration $iter | xf = $new_xf | error = $err | res = $res")
+            step = apply_learning_rate_step!(lr_state, current_xf, res)
+            new_xf = current_xf + step
+            err = abs(step)
+            println("Iteration $iter | xf = $new_xf | error = $err | res = $res | α = $(lr_state.last_lr)")
             # Store residuals
             if !haskey(residuals, k)
                 residuals[k] = Float64[]
@@ -404,240 +546,6 @@ function A_diph_unstead_diff_moving_stef(operator1::DiffusionOps, operator2::Dif
     return A
 end
 
-"""
-    overwrite_future_volume!(capacity, new_diag)
-
-Replace the future-time diagonal block of the capacity matrix with the
-entries provided in `new_diag`. This helper acts in-place on the sparse
-matrix stored inside the capacity object and keeps the previous-time block
-unchanged.
-"""
-function overwrite_future_volume!(capacity::Capacity, new_diag::AbstractVector{T}) where {T}
-    cap_index = length(capacity.A)
-    block = capacity.A[cap_index]
-    half = size(block, 1) ÷ 2
-    length(new_diag) == half || throw(DimensionMismatch("Expected $(half) entries, got $(length(new_diag))"))
-    @inbounds for (idx, value) in enumerate(new_diag)
-        block[idx, idx] = value
-    end
-    return capacity
-end
-
-"""
-    coupled_newton_step!(phase, bc, scheme, φω, φγ, rhsω, rhsγ)
-
-Assemble the 3×3 block Jacobian associated with the coupled Newton update of
-the one-phase moving diffusion problem and compute the increments for the
-bulk, interface and geometric unknowns. The function returns the increments
-`δΦᵒ`, `δΦᵞ`, `δV` together with the residual vector evaluated at the current
-iterate.
-"""
-function coupled_newton_step!(phase::Phase, bc::AbstractBoundary, scheme::String,
-    φω::AbstractVector{T}, φγ::AbstractVector{T}, rhsω::AbstractVector{T}, rhsγ::AbstractVector{T}) where {T<:Real}
-
-    operator = phase.operator
-    capacity = phase.capacity
-    dims = operator.size
-    len_dims = length(dims)
-    cap_index = len_dims
-    half = length(φω)
-
-    height_block = capacity.A[cap_index]
-    size(height_block, 1) == 2 * half || throw(DimensionMismatch("Incompatible operator and state dimensions."))
-
-    V_future = height_block[1:half, 1:half]
-    V_past = height_block[half+1:end, half+1:end]
-    V_future_diag = LinearAlgebra.diag(V_future)
-    V_past_diag = LinearAlgebra.diag(V_past)
-
-    Id = build_I_D(operator, phase.Diffusion_coeff, capacity)
-    W! = operator.Wꜝ[1:half, 1:half]
-    G = operator.G[1:half, 1:half]
-    H = operator.H[1:half, 1:half]
-    Id = Id[1:half, 1:half]
-
-    Iα, Iβ = build_I_bc(operator, bc)
-    Iα = Iα[1:half, 1:half]
-    Iβ = Iβ[1:half, 1:half]
-    Iγ = capacity.Γ[1:half, 1:half]
-
-    psip = scheme == "CN" ? psip_cn : psip_be
-    θ = scheme == "CN" ? 0.5 : 1.0
-    Ψ = SparseArrays.spdiagm(0 => psip.(V_past_diag, V_future_diag))
-
-    Lωω = Id * G' * W! * G * Ψ
-    Lωγ = Id * G' * W! * H * Ψ
-    Lγω = Iβ * H' * W! * G
-    Lγγ = Iβ * H' * W! * H + Iα * Iγ
-
-    Fω = V_future_diag .* φω + θ * (Lωω * φω) + (Lωγ * φγ) + (V_past_diag .- V_future_diag) .* φγ - rhsω
-    R = V_future_diag .- V_past_diag + θ * (Lγω * φω) + Lγγ * φγ
-    Gres = φγ - rhsγ
-    residual_vec = vcat(Fω, R, Gres)
-
-    J11 = SparseArrays.spdiagm(0 => V_future_diag) + θ * Lωω
-    J12 = Lωγ + SparseArrays.spdiagm(0 => V_past_diag .- V_future_diag)
-    J13 = SparseArrays.spdiagm(0 => φω .- φγ)
-
-    J21 = θ * Lγω
-    J22 = Lγγ
-    J23 = SparseArrays.spdiagm(0 => ones(T, half))
-
-    zero_block = SparseArrays.spzeros(T, half, half)
-    I_half = SparseArrays.spdiagm(0 => ones(T, half))
-
-    J_top = hcat(J11, J12, J13)
-    J_mid = hcat(J21, J22, J23)
-    J_bot = hcat(zero_block, I_half, zero_block)
-    J = vcat(J_top, J_mid, J_bot)
-
-
-    # Solve for the increments
-    δ = IterativeSolvers.gmres(J,-residual_vec)
-    δΦω = δ[1:half]
-    δΦγ = δ[half+1:2*half]
-    δV = δ[2*half+1:3*half]
-
-    return δΦω, δΦγ, δV, residual_vec
-end
-
-"""
-    solve_MovingLiquidDiffusionUnsteadyMono_coupledNewton!(...)
-
-Experimental coupled-Newton driver for the one-phase moving diffusion
-problem. The routine mirrors the structure of
-`solve_MovingLiquidDiffusionUnsteadyMono!` but replaces the fixed-point
-update of the interface position with the fully coupled 3×3 Newton solve
-described in the implementation notes. The current implementation is focused
-on 1D tests of the Stefan problem.
-"""
-function solve_MovingLiquidDiffusionUnsteadyMono_coupledNewton!(s::Solver, phase::Phase, xf, Δt::Float64, Tₛ::Float64, Tₑ::Float64,
-    bc_b::BorderConditions, bc::AbstractBoundary, ic::InterfaceConditions, mesh::AbstractMesh, scheme::String;
-    Newton_params=(100, 1e-10, 1e-10, 1.0))
-
-    s.A === nothing && error("Solver is not initialized. Call a solver constructor first.")
-
-    println("Solving the problem (coupled Newton):")
-    println("- Moving problem")
-    println("- Non prescibed motion")
-    println("- Monophasic problem")
-    println("- Unsteady problem")
-    println("- Diffusion problem")
-
-    dims = phase.operator.size
-    len_dims = length(dims)
-    len_dims == 2 || error("Coupled Newton routine currently supports 1D problems.")
-    n = dims[1]
-    cap_index = len_dims
-
-    max_iter, tol, reltol, damping = Newton_params
-
-    residuals = Dict{Int, Vector{Float64}}()
-    xf_log = Float64[]
-    timestep_history = Tuple{Float64, Float64}[]
-
-    t = Tₛ
-    push!(timestep_history, (t, Δt))
-
-    φω = s.x === nothing ? zeros(n) : copy(s.x[1:n])
-    φγ = s.x === nothing ? zeros(n) : copy(s.x[n+1:2n])
-    if s.x === nothing
-        s.x = vcat(φω, φγ)
-    end
-
-    V_future_diag = LinearAlgebra.diag(phase.capacity.A[cap_index][1:n, 1:n])
-    current_xf = xf
-    step_id = 1
-
-    while t < Tₑ + eps()
-        rhsω = s.b[1:n]
-        rhsγ = s.b[n+1:2n]
-
-        iter = 0
-        residual_norm = Inf
-        new_xf = current_xf
-
-        while iter < max_iter && residual_norm > tol && residual_norm > reltol * max(1.0, abs(current_xf))
-            iter += 1
-
-            δΦω, δΦγ, δV, residual_vec = coupled_newton_step!(phase, bc, scheme, φω, φγ, rhsω, rhsγ)
-
-            φω .+= damping .* δΦω
-            φγ .+= damping .* δΦγ
-            V_future_diag .+= damping .* δV
-            overwrite_future_volume!(phase.capacity, V_future_diag)
-
-            s.x = vcat(φω, φγ)
-
-            residual_norm = LinearAlgebra.norm(residual_vec)
-
-            if !haskey(residuals, step_id)
-                residuals[step_id] = Float64[]
-            end
-            push!(residuals[step_id], residual_norm)
-
-            δxf = damping * Statistics.mean(δV)
-            new_xf = current_xf + δxf
-
-            println("Iteration $(iter) | xf = $(new_xf) | residual = $(residual_norm)")
-
-            if residual_norm <= tol || residual_norm <= reltol * max(1.0, abs(new_xf))
-                break
-            end
-
-            tn = t
-            tn1 = min(t + Δt, Tₑ)
-            body = (xx, tt, _=0) -> (xx - (current_xf * (tn1 - tt) / Δt + new_xf * (tt - tn) / Δt))
-            STmesh = SpaceTimeMesh(mesh, [tn, tn1], tag=mesh.tag)
-            capacity = Capacity(body, STmesh)
-            operator = DiffusionOps(capacity)
-            phase = Phase(capacity, operator, phase.source, phase.Diffusion_coeff)
-
-            s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc, scheme)
-            s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc, vcat(φω, φγ), Δt, tn, scheme)
-            BC_border_mono!(s.A, s.b, bc_b, mesh)
-
-            rhsω = s.b[1:n]
-            rhsγ = s.b[n+1:2n]
-            V_future_diag = LinearAlgebra.diag(phase.capacity.A[cap_index][1:n, 1:n])
-            current_xf = new_xf
-        end
-
-        current_xf = new_xf
-        push!(xf_log, current_xf)
-
-        println("Converged after $(iter) iterations with xf = $(current_xf), residual = $(residual_norm)")
-
-        Tᵢ = vcat(φω, φγ)
-        s.x = Tᵢ
-        push!(s.states, s.x)
-
-        if t >= Tₑ
-            break
-        end
-
-        t += Δt
-        push!(timestep_history, (t, Δt))
-
-        body = (xx, tt, _=0) -> (xx - current_xf)
-        STmesh = SpaceTimeMesh(mesh, [Δt, 2Δt], tag=mesh.tag)
-        capacity = Capacity(body, STmesh)
-        operator = DiffusionOps(capacity)
-        phase = Phase(capacity, operator, phase.source, phase.Diffusion_coeff)
-
-        s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc, scheme)
-        s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc, Tᵢ, Δt, 0.0, scheme)
-        BC_border_mono!(s.A, s.b, bc_b, mesh)
-
-        rhsω = s.b[1:n]
-        rhsγ = s.b[n+1:2n]
-        V_future_diag = LinearAlgebra.diag(phase.capacity.A[cap_index][1:n, 1:n])
-
-        step_id += 1
-    end
-
-    return s, residuals, xf_log, timestep_history
-end
 
 function b_diph_unstead_diff_moving_stef(operator1::DiffusionOps, operator2::DiffusionOps, capacity1::Capacity, capacity2::Capacity, D1, D2, f1::Function, f2::Function, ic::InterfaceConditions, Tᵢ::Vector{Float64}, Δt::Float64, t::Float64, scheme::String)
     # 1) Determine total degrees of freedom for each operator
@@ -764,7 +672,8 @@ function MovingLiquidDiffusionUnsteadyDiph(phase1::Phase, phase2::Phase, bc_b::B
 end
 
 
-function solve_MovingLiquidDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phase2::Phase, xf, Δt::Float64, Tₛ::Float64, Tₑ::Float64, bc_b::BorderConditions, ic::InterfaceConditions, mesh::AbstractMesh, scheme::String; Newton_params=(1000, 1e-10, 1e-10, 1.0), method = IterativeSolvers.gmres, algorithm=nothin, kwargs...)
+function solve_MovingLiquidDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phase2::Phase, xf, Δt::Float64, Tₛ::Float64, Tₑ::Float64, bc_b::BorderConditions, ic::InterfaceConditions, mesh::AbstractMesh, scheme::String; Newton_params=(1000, 1e-10, 1e-10, 1.0), method = IterativeSolvers.gmres, algorithm=nothing,
+    learning_rate_strategy::Union{Symbol, String}=:fixed, learning_rate_options=nothing, kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
@@ -786,6 +695,7 @@ function solve_MovingLiquidDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phas
     tol      = Newton_params[2]
     reltol   = Newton_params[3]
     α        = Newton_params[4]
+    lr_opts = normalize_lr_options(learning_rate_options)
 
     # Log residuals and interface positions for each time step:
     nt = Int(round(Tₑ/Δt))
@@ -815,6 +725,7 @@ function solve_MovingLiquidDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phas
     current_xf = xf
     new_xf = current_xf
     xf = current_xf
+    lr_state = init_learning_rate_state(learning_rate_strategy, α; lr_opts...)
     # First time step : Newton to compute the interface position xf1
     while (iter < max_iter) && (err > tol) && (err > reltol * abs(current_xf))
         iter += 1
@@ -856,9 +767,10 @@ function solve_MovingLiquidDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phas
 
         # New interface position
         res = Hₙ₊₁ - Hₙ - Interface_term
-        new_xf = current_xf + α * res
+        step = apply_learning_rate_step!(lr_state, current_xf, res)
+        new_xf = current_xf + step
         err = abs(res)
-        println("Iteration $iter | xf = $new_xf | error = $err | res = $res")
+        println("Iteration $iter | xf = $new_xf | error = $err | res = $res | α = $(lr_state.last_lr)")
         # Store residuals
         push!(residuals[1], err)
 
@@ -932,6 +844,7 @@ function solve_MovingLiquidDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phas
         current_xf = new_xf
         new_xf = current_xf
         xf = current_xf
+        lr_state = init_learning_rate_state(learning_rate_strategy, α; lr_opts...)
         # Newton to compute the interface position xf1
         while (iter < max_iter) && (err > tol) && (err > reltol * abs(current_xf))
             iter += 1
@@ -973,9 +886,10 @@ function solve_MovingLiquidDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phas
 
             # New interface position
             res = Hₙ₊₁ - Hₙ - Interface_term
-            new_xf = current_xf + α * res
-            err = abs(new_xf - current_xf)
-            println("Iteration $iter | xf = $new_xf | error = $err | res = $res")
+            step = apply_learning_rate_step!(lr_state, current_xf, res)
+            new_xf = current_xf + step
+            err = abs(step)
+            println("Iteration $iter | xf = $new_xf | error = $err | res = $res | α = $(lr_state.last_lr)")
             # Store residuals
             push!(residuals[k], err)
 

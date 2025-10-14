@@ -89,7 +89,7 @@ Newton_params = (max_iter, tol, reltol, α)
 solver = MovingLiquidDiffusionUnsteadyMono(Fluide, bc_b, bc, Δt, u0, mesh, "BE")
 
 # Solve the problem
-solver_coupled, residuals, xf_log, timestep_history = solve_MovingLiquidDiffusionUnsteadyMono_coupledNewton!(solver, Fluide, xf, Δt, Tstart, Tend, bc_b, bc, stef_cond, mesh, "BE"; Newton_params=Newton_params)
+solver, residuals, xf_log, timestep_history = solve_MovingLiquidDiffusionUnsteadyMono!(solver, Fluide, xf, Δt, Tstart, Tend, bc_b, bc, stef_cond, mesh, "CN"; Newton_params=Newton_params, adaptive_timestep=false, method=Base.:\)
 
 
 # Save residuals in csv

@@ -649,7 +649,7 @@ end
 
 
 # Main solver function for the diphasic Stefan problem in 2D
-function solve_MovingLiquidDiffusionUnsteadyDiph2D!(s::Solver, phase1::Phase, phase2::Phase, Interface_position, Hₙ⁰,sₙ, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, ic::InterfaceConditions, mesh, scheme::String; interpo="quad", Newton_params=(1000, 1e-10, 1e-10, 1.0), method=IterativeSolvers.gmres, algorithm=nothin, kwargs...)
+function solve_MovingLiquidDiffusionUnsteadyDiph2D!(s::Solver, phase1::Phase, phase2::Phase, Interface_position, Hₙ⁰,sₙ, Δt::Float64, Tₑ::Float64, bc_b::BorderConditions, ic::InterfaceConditions, mesh, scheme::String; interpo="quad", Newton_params=(1000, 1e-10, 1e-10, 1.0), method=IterativeSolvers.gmres, algorithm=nothing, kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
