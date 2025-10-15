@@ -15,11 +15,12 @@ explicit Adams–Bashforth extrapolation while viscosity/pressure use an implici
 ###########
 nx, ny = 128, 64
 channel_length = 4.0
-channel_height = 1.0
-x0, y0 = -0.5, -0.5
+channel_height = 2.0
+x0, y0 = -1.0, -1.0
 
-circle_center = (0.5, 0.0)
-circle_radius = 0.2
+circle_center = (0.0, 0.0)
+circle_radius = 0.5
+diameter = 2 * circle_radius
 circle_body = (x, y, _=0.0) -> circle_radius - sqrt((x - circle_center[1])^2 + (y - circle_center[2])^2)
 
 ###########
@@ -59,7 +60,7 @@ ux_top    = Dirichlet((x, y, t=0.0) -> 0.0)
 uy_zero = Dirichlet((x, y, t=0.0) -> 0.0)
 
 bc_ux = BorderConditions(Dict(
-    :left=>ux_left, :right=>Outflow(), :bottom=>Symmetry(), :top=>Symmetry()
+    :left=>ux_left, :right=>Outflow(), :bottom=>ux_bottom, :top=>ux_top
 ))
 bc_uy = BorderConditions(Dict(
     :left=>uy_zero, :right=>uy_zero, :bottom=>uy_zero, :top=>uy_zero
@@ -71,7 +72,7 @@ interface_bc = Dirichlet(0.0)
 ###########
 # Physics
 ###########
-μ = 0.001 
+μ = 0.01 
 ρ = 1.0
 println("Re=", ρ * Umax * (2 * circle_radius) / μ)
 fᵤ = (x, y, z=0.0, t=0.0) -> 0.0
@@ -97,13 +98,30 @@ x0_vec = zeros(2 * (nu_x + nu_y) + np)
 solver = NavierStokesMono(fluid, (bc_ux, bc_uy), pressure_gauge, interface_bc; x0=x0_vec)
 
 Δt = 0.005
-T_end = 0.1
+T_end = 0.5
 
-println("Running Navier–Stokes unsteady simulation...")
-times, histories = solve_NavierStokesMono_unsteady!(solver; Δt=Δt, T_end=T_end, scheme=:CN)
+println("Running Navier–Stokes unsteady simulation (Picard iterations each step)...")
+times, histories = solve_NavierStokesMono_unsteady_picard!(solver; Δt=Δt, T_end=T_end,
+                                                           scheme=:BE, inner_tol=1e-6,
+                                                           inner_maxiter=12, relaxation=1.0)
 
 println("Simulation finished. Stored states = ", length(histories))
 println("Final time step = ", times[end])
+
+###########
+# Force diagnostics
+###########
+force_diag = compute_navierstokes_force_diagnostics(solver)
+body_force = navierstokes_reaction_force_components(force_diag; acting_on=:body)
+pressure_body = -force_diag.integrated_pressure
+viscous_body = -force_diag.integrated_viscous
+coeffs = drag_lift_coefficients(force_diag; ρ=ρ, U_ref=Umax, length_ref=diameter, acting_on=:body)
+println("Integrated forces on the cylinder (body reaction):")
+println("  Fx = $(round(body_force[1]; sigdigits=6)) (pressure=$(round(pressure_body[1]; sigdigits=6)), viscous=$(round(viscous_body[1]; sigdigits=6)))")
+println("  Fy = $(round(body_force[2]; sigdigits=6)) (pressure=$(round(pressure_body[2]; sigdigits=6)), viscous=$(round(viscous_body[2]; sigdigits=6)))")
+println("  Drag coefficient Cd = $(round(coeffs.Cd; sigdigits=6)), lift coefficient Cl = $(round(coeffs.Cl; sigdigits=6))")
+
+pressure_trace = pressure_trace_on_cut(solver; center=circle_center)
 
 
 ###########
@@ -148,6 +166,14 @@ contour!(ax_contours, xs, ys, [circle_body(x,y) for x in xs, y in ys]; levels=[0
 
 save("navierstokes2d_circle_flow_.png", fig)
 display(fig)
+
+if !isempty(pressure_trace.θ)
+    fig_pressure = Figure(resolution=(700, 400))
+    ax_pressure_trace = Axis(fig_pressure[1,1], xlabel="θ [rad]", ylabel="p", title="Pressure around the cylinder")
+    lines!(ax_pressure_trace, pressure_trace.θ, pressure_trace.p; color=:royalblue)
+    scatter!(ax_pressure_trace, pressure_trace.θ, pressure_trace.p; color=:orange, markersize=6)
+    display(fig_pressure)
+end
 
 ###########
 # Animation of time evolution

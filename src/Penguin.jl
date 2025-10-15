@@ -141,7 +141,9 @@ include("solver/stokes_diph.jl")
 export StokesDiph, solve_StokesDiph!
 
 include("solver/navierstokes.jl")
-export NavierStokesMono, solve_NavierStokesMono_unsteady!, solve_NavierStokesMono_steady!, build_convection_operators
+export NavierStokesMono, solve_NavierStokesMono_unsteady!, solve_NavierStokesMono_unsteady_picard!, solve_NavierStokesMono_steady!, build_convection_operators
+export compute_navierstokes_force_diagnostics, navierstokes_reaction_force_components
+export drag_lift_coefficients, pressure_trace_on_cut
 
 include("solver/navierstokes_heat.jl")
 export NavierStokesHeat2D, solve_NavierStokesHeat2D_unsteady!

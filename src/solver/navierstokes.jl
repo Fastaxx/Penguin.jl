@@ -549,6 +549,200 @@ function assemble_navierstokes2D_unsteady!(s::NavierStokesMono, data, Δt::Float
     return conv_curr
 end
 
+function assemble_navierstokes1D_unsteady_picard!(s::NavierStokesMono, data, Δt::Float64,
+                                                  x_prev::AbstractVector{<:Real},
+                                                  x_iter::AbstractVector{<:Real},
+                                                  p_half_prev::AbstractVector{<:Real},
+                                                  t_prev::Float64, t_next::Float64,
+                                                  θ::Float64,
+                                                  conv_prev::Union{Nothing,NTuple{1,Vector{Float64}}})
+    nu = data.nu
+    np = data.np
+
+    rows = 2 * nu + np
+    cols = 2 * nu + np
+    A = spzeros(Float64, rows, cols)
+
+    mass_dt = (1.0 / Δt) * data.mass
+    θc = 1.0 - θ
+
+    off_uω = 0
+    off_uγ = nu
+    off_p  = 2 * nu
+
+    row_uω = 0
+    row_uγ = nu
+    row_con = 2 * nu
+
+    compute_convection_vectors!(s, data, x_iter)
+    ops = s.last_conv_ops
+    @assert ops !== nothing
+    bulk = ops.bulk
+    K_adv = ops.K_adv
+
+    ρ = s.fluid.ρ
+    ρ_val = ρ isa Function ? 1.0 : ρ
+
+    conv_prev_vec = conv_prev === nothing ? zeros(Float64, nu) : conv_prev[1]
+
+    # Momentum block with Picard linearized convection
+    A[row_uω+1:row_uω+nu, off_uω+1:off_uω+nu] = mass_dt + θ * (data.visc_u_ω + ρ_val * bulk[1] - 0.5 * ρ_val * K_adv[1])
+    A[row_uω+1:row_uω+nu, off_uγ+1:off_uγ+nu] = θ * data.visc_u_γ
+    A[row_uω+1:row_uω+nu, off_p+1:off_p+np]   = data.grad
+
+    # Tie row
+    A[row_uγ+1:row_uγ+nu, off_uγ+1:off_uγ+nu] = data.tie
+
+    # Continuity row
+    con_rows = row_con + 1:row_con + np
+    A[con_rows, off_uω+1:off_uω+nu] = data.div_u_ω
+    A[con_rows, off_uγ+1:off_uγ+nu] = data.div_u_γ
+
+    uω_prev = view(x_prev, off_uω+1:off_uω+nu)
+    uγ_prev = view(x_prev, off_uγ+1:off_uγ+nu)
+
+    f_prev = safe_build_source(data.op_u, s.fluid.fᵤ, data.cap_u, t_prev)
+    f_next = safe_build_source(data.op_u, s.fluid.fᵤ, data.cap_u, t_next)
+    load = data.V * (θ .* f_next .+ θc .* f_prev)
+
+    rhs_mom = mass_dt * Vector{Float64}(uω_prev)
+    rhs_mom .-= θc * (data.visc_u_ω * Vector{Float64}(uω_prev) + data.visc_u_γ * Vector{Float64}(uγ_prev))
+
+    grad_prev_coeff = θ == 1.0 ? 0.0 : (1.0 - θ) / θ
+    if grad_prev_coeff != 0.0
+        rhs_mom .+= grad_prev_coeff * (data.grad * p_half_prev)
+    end
+
+    rhs_mom .+= load
+    rhs_mom .-= (1.0 - θ) * ρ_val .* conv_prev_vec
+
+    g_cut_next = safe_build_g(data.op_u, s.bc_cut, data.cap_u, t_next)
+    b = vcat(rhs_mom, g_cut_next, zeros(np))
+
+    apply_velocity_dirichlet!(A, b, s.bc_u[1], s.fluid.mesh_u[1];
+                              nu=nu, uω_offset=off_uω, uγ_offset=off_uγ, t=t_next)
+
+    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
+                          p_offset=off_p, np=np, row_start=row_con+1)
+
+    s.A = A
+    s.b = b
+    return nothing
+end
+
+function assemble_navierstokes2D_unsteady_picard!(s::NavierStokesMono, data, Δt::Float64,
+                                                  x_prev::AbstractVector{<:Real},
+                                                  x_iter::AbstractVector{<:Real},
+                                                  p_half_prev::AbstractVector{<:Real},
+                                                  t_prev::Float64, t_next::Float64,
+                                                  θ::Float64,
+                                                  conv_prev::Union{Nothing,NTuple{2,Vector{Float64}}})
+    nu_x = data.nu_x
+    nu_y = data.nu_y
+    sum_nu = nu_x + nu_y
+    np = data.np
+
+    rows = 2 * sum_nu + np
+    cols = 2 * sum_nu + np
+    A = spzeros(Float64, rows, cols)
+
+    mass_x_dt = (1.0 / Δt) * data.mass_x
+    mass_y_dt = (1.0 / Δt) * data.mass_y
+    θc = 1.0 - θ
+
+    off_uωx = 0
+    off_uγx = nu_x
+    off_uωy = 2 * nu_x
+    off_uγy = 2 * nu_x + nu_y
+    off_p   = 2 * sum_nu
+
+    row_uωx = 0
+    row_uγx = nu_x
+    row_uωy = 2 * nu_x
+    row_uγy = 2 * nu_x + nu_y
+    row_con = 2 * sum_nu
+
+    compute_convection_vectors!(s, data, x_iter)
+    ops = s.last_conv_ops
+    @assert ops !== nothing
+    bulk = ops.bulk
+    K_adv = ops.K_adv
+
+    ρ = s.fluid.ρ
+    ρ_val = ρ isa Function ? 1.0 : ρ
+
+    conv_prev_x = conv_prev === nothing ? zeros(Float64, nu_x) : conv_prev[1]
+    conv_prev_y = conv_prev === nothing ? zeros(Float64, nu_y) : conv_prev[2]
+
+    A[row_uωx+1:row_uωx+nu_x, off_uωx+1:off_uωx+nu_x] = mass_x_dt + θ * (data.visc_x_ω + ρ_val * bulk[1] - 0.5 * ρ_val * K_adv[1])
+    A[row_uωx+1:row_uωx+nu_x, off_uγx+1:off_uγx+nu_x] = θ * data.visc_x_γ
+    A[row_uωx+1:row_uωx+nu_x, off_p+1:off_p+np]       = data.grad_x
+
+    A[row_uωy+1:row_uωy+nu_y, off_uωy+1:off_uωy+nu_y] = mass_y_dt + θ * (data.visc_y_ω + ρ_val * bulk[2] - 0.5 * ρ_val * K_adv[2])
+    A[row_uωy+1:row_uωy+nu_y, off_uγy+1:off_uγy+nu_y] = θ * data.visc_y_γ
+    A[row_uωy+1:row_uωy+nu_y, off_p+1:off_p+np]       = data.grad_y
+
+    A[row_uγx+1:row_uγx+nu_x, off_uγx+1:off_uγx+nu_x] = data.tie_x
+    A[row_uγy+1:row_uγy+nu_y, off_uγy+1:off_uγy+nu_y] = data.tie_y
+
+    con_rows = row_con+1:row_con+np
+    A[con_rows, off_uωx+1:off_uωx+nu_x] = data.div_x_ω
+    A[con_rows, off_uγx+1:off_uγx+nu_x] = data.div_x_γ
+    A[con_rows, off_uωy+1:off_uωy+nu_y] = data.div_y_ω
+    A[con_rows, off_uγy+1:off_uγy+nu_y] = data.div_y_γ
+
+    uωx_prev = view(x_prev, off_uωx+1:off_uωx+nu_x)
+    uγx_prev = view(x_prev, off_uγx+1:off_uγx+nu_x)
+    uωy_prev = view(x_prev, off_uωy+1:off_uωy+nu_y)
+    uγy_prev = view(x_prev, off_uγy+1:off_uγy+nu_y)
+
+    f_prev_x = safe_build_source(data.op_ux, s.fluid.fᵤ, data.cap_px, t_prev)
+    f_next_x = safe_build_source(data.op_ux, s.fluid.fᵤ, data.cap_px, t_next)
+    load_x = data.Vx * (θ .* f_next_x .+ θc .* f_prev_x)
+
+    f_prev_y = safe_build_source(data.op_uy, s.fluid.fᵤ, data.cap_py, t_prev)
+    f_next_y = safe_build_source(data.op_uy, s.fluid.fᵤ, data.cap_py, t_next)
+    load_y = data.Vy * (θ .* f_next_y .+ θc .* f_prev_y)
+
+    rhs_mom_x = mass_x_dt * Vector{Float64}(uωx_prev)
+    rhs_mom_x .-= θc * (data.visc_x_ω * Vector{Float64}(uωx_prev) + data.visc_x_γ * Vector{Float64}(uγx_prev))
+
+    rhs_mom_y = mass_y_dt * Vector{Float64}(uωy_prev)
+    rhs_mom_y .-= θc * (data.visc_y_ω * Vector{Float64}(uωy_prev) + data.visc_y_γ * Vector{Float64}(uγy_prev))
+
+    grad_prev_coeff = θ == 1.0 ? 0.0 : (1.0 - θ) / θ
+    if grad_prev_coeff != 0.0
+        rhs_mom_x .+= grad_prev_coeff * (data.grad_x * p_half_prev)
+        rhs_mom_y .+= grad_prev_coeff * (data.grad_y * p_half_prev)
+    end
+
+    rhs_mom_x .+= load_x
+    rhs_mom_y .+= load_y
+
+    rhs_mom_x .-= (1.0 - θ) * ρ_val .* conv_prev_x
+    rhs_mom_y .-= (1.0 - θ) * ρ_val .* conv_prev_y
+
+    g_cut_x = safe_build_g(data.op_ux, s.bc_cut, data.cap_px, t_next)
+    g_cut_y = safe_build_g(data.op_uy, s.bc_cut, data.cap_py, t_next)
+
+    b = vcat(rhs_mom_x, g_cut_x, rhs_mom_y, g_cut_y, zeros(np))
+
+    apply_velocity_dirichlet_2D!(A, b, s.bc_u[1], s.bc_u[2], s.fluid.mesh_u;
+                                 nu_x=nu_x, nu_y=nu_y,
+                                 uωx_off=off_uωx, uγx_off=off_uγx,
+                                 uωy_off=off_uωy, uγy_off=off_uγy,
+                                 row_uωx_off=row_uωx, row_uγx_off=row_uγx,
+                                 row_uωy_off=row_uωy, row_uγy_off=row_uγy,
+                                 t=t_next)
+
+    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
+                          p_offset=off_p, np=np, row_start=row_con+1)
+
+    s.A = A
+    s.b = b
+    return nothing
+end
+
 
 function assemble_navierstokes1D_steady_picard!(s::NavierStokesMono,
                                                 data,
@@ -862,6 +1056,162 @@ function solve_NavierStokesMono_unsteady!(s::NavierStokesMono; Δt::Float64, T_e
         return times, histories
     else
         error("Navier–Stokes unsteady solver not implemented for N=$(N)")
+    end
+end
+
+function solve_NavierStokesMono_unsteady_picard!(s::NavierStokesMono; Δt::Float64, T_end::Float64,
+                                                 scheme::Symbol=:CN, inner_tol::Float64=1e-6,
+                                                 inner_maxiter::Int=10, relaxation::Float64=1.0,
+                                                 method=Base.:\, algorithm=nothing,
+                                                 store_states::Bool=true, kwargs...)
+    θ = scheme_to_theta(scheme)
+    θ_relax = clamp(relaxation, 0.0, 1.0)
+    N = length(s.fluid.operator_u)
+    empty!(s.residual_history)
+    s.prev_conv = nothing
+
+    if N == 1
+        data = navierstokes1D_blocks(s)
+
+        p_offset = 2 * data.nu
+        np = data.np
+        Ntot = p_offset + np
+
+        x_prev = length(s.x) == Ntot ? copy(s.x) : zeros(Ntot)
+
+        p_half_prev = zeros(np)
+        if length(s.x) == Ntot && !isempty(s.x)
+            p_half_prev .= s.x[p_offset+1:p_offset+np]
+        end
+
+        histories = store_states ? Vector{Vector{Float64}}() : Vector{Vector{Float64}}()
+        if store_states
+            push!(histories, copy(x_prev))
+        end
+        times = Float64[0.0]
+
+        t = 0.0
+        println("[NavierStokesMono] Starting unsteady 1D Picard solve up to T=$(T_end) with Δt=$(Δt) and θ=$(θ)")
+        while t < T_end - 1e-12 * max(1.0, T_end)
+            dt_step = min(Δt, T_end - t)
+            t_next = t + dt_step
+
+            conv_prev_tuple = (1.0 - θ) == 0.0 ? nothing : compute_convection_vectors!(s, data, x_prev)
+
+            x_iter = copy(x_prev)
+            residual = Inf
+            iter = 0
+
+            while iter < inner_maxiter && residual > inner_tol
+                assemble_navierstokes1D_unsteady_picard!(s, data, dt_step, x_prev, x_iter, p_half_prev,
+                                                         t, t_next, θ, conv_prev_tuple)
+                solve_navierstokes_linear_system!(s; method=method, algorithm=algorithm, kwargs...)
+
+                x_raw = s.x
+                x_new = θ_relax .* x_raw .+ (1.0 - θ_relax) .* x_iter
+
+                vel_residual = maximum(abs, (x_new .- x_iter)[1:p_offset])
+                residual = vel_residual
+                push!(s.residual_history, residual)
+
+                x_iter .= x_new
+                s.x .= x_new
+
+                iter += 1
+                println("[NavierStokesMono] t=$(round(t_next; digits=6)) Picard iter=$(iter) max|Δu|=$(residual)")
+            end
+
+            if residual > inner_tol
+                @warn "Navier–Stokes unsteady Picard (1D) did not reach tolerance" time=t_next final_residual=residual iterations=iter tol=inner_tol
+            end
+
+            x_prev = copy(x_iter)
+            p_half_prev .= x_prev[p_offset+1:p_offset+np]
+
+            push!(times, t_next)
+            if store_states
+                push!(histories, copy(x_prev))
+            end
+            max_state = maximum(abs, x_prev)
+            println("[NavierStokesMono] t=$(round(t_next; digits=6)) max|state|=$(max_state)")
+
+            t = t_next
+        end
+
+        s.prev_conv = nothing
+        return times, histories
+    elseif N == 2
+        data = navierstokes2D_blocks(s)
+
+        p_offset = 2 * (data.nu_x + data.nu_y)
+        np = data.np
+        Ntot = p_offset + np
+
+        x_prev = length(s.x) == Ntot ? copy(s.x) : zeros(Ntot)
+
+        p_half_prev = zeros(np)
+        if length(s.x) == Ntot && !isempty(s.x)
+            p_half_prev .= s.x[p_offset+1:p_offset+np]
+        end
+
+        histories = store_states ? Vector{Vector{Float64}}() : Vector{Vector{Float64}}()
+        if store_states
+            push!(histories, copy(x_prev))
+        end
+        times = Float64[0.0]
+
+        t = 0.0
+        println("[NavierStokesMono] Starting unsteady Picard solve up to T=$(T_end) with Δt=$(Δt) and θ=$(θ)")
+        while t < T_end - 1e-12 * max(1.0, T_end)
+            dt_step = min(Δt, T_end - t)
+            t_next = t + dt_step
+
+            conv_prev_tuple = (1.0 - θ) == 0.0 ? nothing : compute_convection_vectors!(s, data, x_prev)
+
+            x_iter = copy(x_prev)
+            residual = Inf
+            iter = 0
+
+            while iter < inner_maxiter && residual > inner_tol
+                assemble_navierstokes2D_unsteady_picard!(s, data, dt_step, x_prev, x_iter, p_half_prev,
+                                                         t, t_next, θ, conv_prev_tuple)
+                solve_navierstokes_linear_system!(s; method=method, algorithm=algorithm, kwargs...)
+
+                x_raw = s.x
+                x_new = θ_relax .* x_raw .+ (1.0 - θ_relax) .* x_iter
+
+                vel_residual = maximum(abs, (x_new .- x_iter)[1:p_offset])
+                residual = vel_residual
+                push!(s.residual_history, residual)
+
+                x_iter .= x_new
+                s.x .= x_new
+
+                iter += 1
+                println("[NavierStokesMono] t=$(round(t_next; digits=6)) Picard iter=$(iter) max|Δu|=$(residual)")
+            end
+
+            if residual > inner_tol
+                @warn "Navier–Stokes unsteady Picard (2D) did not reach tolerance" time=t_next final_residual=residual iterations=iter tol=inner_tol
+            end
+
+            x_prev = copy(x_iter)
+            p_half_prev .= x_prev[p_offset+1:p_offset+np]
+
+            push!(times, t_next)
+            if store_states
+                push!(histories, copy(x_prev))
+            end
+            max_state = maximum(abs, x_prev)
+            println("[NavierStokesMono] t=$(round(t_next; digits=6)) max|state|=$(max_state)")
+
+            t = t_next
+        end
+
+        s.prev_conv = nothing
+        return times, histories
+    else
+        error("Navier–Stokes unsteady Picard solver not implemented for N=$(N)")
     end
 end
 
@@ -1656,4 +2006,151 @@ function apply_pressure_gauge_newton!(A::SparseMatrixCSC{Float64,Int}, rhs::Vect
         error("Unknown pressure gauge type $(typeof(gauge))")
     end
     return nothing
+end
+
+function compute_navierstokes_force_diagnostics(s::NavierStokesMono)
+    N = length(s.fluid.operator_u)
+    data = N == 1 ? navierstokes1D_blocks(s) :
+           N == 2 ? navierstokes2D_blocks(s) :
+           error("Force diagnostics currently implemented for 1D or 2D Navier–Stokes (got N=$(N)).")
+
+    nu_components = data.nu_components
+    total_velocity_dofs = 2 * sum(nu_components)
+    np = data.np
+    length(s.x) == total_velocity_dofs + np || error("State vector length mismatch: expected $(total_velocity_dofs + np), got $(length(s.x)).")
+    pω = Vector{Float64}(view(s.x, total_velocity_dofs + 1:total_velocity_dofs + np))
+
+    grads = Vector{SparseMatrixCSC{Float64,Int}}(undef, N)
+    Vmats = Vector{SparseMatrixCSC{Float64,Int}}(undef, N)
+    if N == 1
+        grads[1] = data.grad
+        Vmats[1] = data.V
+    elseif N == 2
+        grads[1] = data.grad_x
+        grads[2] = data.grad_y
+        Vmats[1] = data.Vx
+        Vmats[2] = data.Vy
+    end
+
+    g_p = Vector{Vector{Float64}}(undef, N)
+    L_u = Vector{Vector{Float64}}(undef, N)
+    pressure_part = Vector{Vector{Float64}}(undef, N)
+    viscous_part = Vector{Vector{Float64}}(undef, N)
+    force_density = Vector{Vector{Float64}}(undef, N)
+
+    integrated_pressure = zeros(Float64, N)
+    integrated_viscous = zeros(Float64, N)
+    integrated_force = zeros(Float64, N)
+
+    offset = 0
+    for α in 1:N
+        nu = nu_components[α]
+        uω = Vector{Float64}(view(s.x, offset + 1:offset + nu))
+        uγ = Vector{Float64}(view(s.x, offset + nu + 1:offset + 2nu))
+        offset += 2nu
+
+        grad = grads[α]
+        gp_vec = -Vector{Float64}(grad * pω)
+        pressure_vec = -gp_vec
+
+        op = s.fluid.operator_u[α]
+        G_u = Vector{Float64}(op.G * uω)
+        if size(op.H, 2) == 0
+            H_u = zeros(Float64, size(op.G, 1))
+        else
+            H_u = Vector{Float64}(op.H * uγ)
+        end
+        W_dagger = op.Wꜝ
+        mixed = Vector{Float64}(W_dagger * (G_u + H_u))
+        Lu_vec = Vector{Float64}(op.G' * mixed)
+        Iμ = build_I_D(op, s.fluid.μ, s.fluid.capacity_u[α])
+        visc_vec = Vector{Float64}(Iμ * Lu_vec)
+
+        force_vec = pressure_vec .+ visc_vec
+
+        g_p[α] = gp_vec
+        L_u[α] = Lu_vec
+        pressure_part[α] = pressure_vec
+        viscous_part[α] = visc_vec
+        force_density[α] = force_vec
+
+        V = Vmats[α]
+        integrated_pressure[α] = sum(Vector{Float64}(V * pressure_vec))
+        integrated_viscous[α] = sum(Vector{Float64}(V * visc_vec))
+        integrated_force[α] = sum(Vector{Float64}(V * force_vec))
+    end
+
+    return (; g_p=Tuple(g_p),
+            L_u=Tuple(L_u),
+            pressure=Tuple(pressure_part),
+            viscous=Tuple(viscous_part),
+            force_density=Tuple(force_density),
+            integrated_pressure=integrated_pressure,
+            integrated_viscous=integrated_viscous,
+            integrated_force=integrated_force)
+end
+
+function navierstokes_reaction_force_components(force_data::NamedTuple; acting_on::Symbol=:body)
+    allowed = (:body, :fluid)
+    acting_on ∈ allowed || error("acting_on must be one of $(allowed), got $(acting_on).")
+    sign = acting_on === :body ? -1.0 : 1.0
+    forces = force_data.integrated_force
+    return sign .* forces
+end
+
+function drag_lift_coefficients(force_data::NamedTuple; ρ::Real, U_ref::Real, length_ref::Real, acting_on::Symbol=:body)
+    forces = navierstokes_reaction_force_components(force_data; acting_on=acting_on)
+    length(forces) ≥ 2 || error("Drag/Lift coefficients require at least 2 components (found $(length(forces))).")
+    denom = ρ * U_ref^2 * length_ref
+    denom == 0 && error("Reference denominator for drag/lift coefficients is zero.")
+    drag = forces[1]
+    lift = forces[2]
+    Cd = 2 * drag / denom
+    Cl = 2 * lift / denom
+    return (; drag=drag,
+            lift=lift,
+            Cd=Cd,
+            Cl=Cl,
+            reference=(ρ=ρ, U_ref=U_ref, length=length_ref))
+end
+
+function pressure_trace_on_cut(s::NavierStokesMono; center::NTuple{2,Float64}, tol::Float64=1e-10, sort_by_angle::Bool=true)
+    length(s.fluid.operator_u) == 2 || error("pressure_trace_on_cut currently implemented for 2D configurations.")
+    cap = s.fluid.capacity_p
+    np = prod(s.fluid.operator_p.size)
+    nu_components = ntuple(i -> prod(s.fluid.operator_u[i].size), 2)
+    total_velocity_dofs = 2 * sum(nu_components)
+    pω = Vector{Float64}(view(s.x, total_velocity_dofs + 1:total_velocity_dofs + np))
+
+    Γ_diag = diag(cap.Γ)
+    Cγ = cap.C_γ
+    θ = Float64[]
+    p_vals = Float64[]
+    weights = Float64[]
+    coords = Vector{Tuple{Float64,Float64}}()
+
+    for (i, γ) in enumerate(Γ_diag)
+        if γ ≤ tol || i > length(pω)
+            continue
+        end
+        centroid = i ≤ length(Cγ) ? Cγ[i] : nothing
+        if centroid === nothing || all(iszero, centroid)
+            continue
+        end
+        angle = atan(centroid[2] - center[2], centroid[1] - center[1])
+        push!(θ, angle)
+        push!(p_vals, pω[i])
+        push!(weights, γ)
+        push!(coords, (centroid[1], centroid[2]))
+    end
+
+    if sort_by_angle
+        order = sortperm(θ)
+        θ = θ[order]
+        p_vals = p_vals[order]
+        weights = weights[order]
+        coords = coords[order]
+    end
+
+    return (; θ=θ, p=p_vals, weights=weights, coords=coords)
 end

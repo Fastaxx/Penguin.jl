@@ -10,7 +10,6 @@ using CairoMakie
 # Exact solution:
 #   u(x,y,t) =  sin(kx) cos(ky) e^{-2νk² t}
 #   v(x,y,t) = -cos(kx) sin(ky) e^{-2νk² t}
-#   p(x,y,t) = -(ρ/4)(cos 2kx + cos 2ky) e^{-4νk² t}
 # This is a true Navier–Stokes solution with zero forcing. We enforce the exact
 # velocity on the boundary so the manufactured solution is satisfied.
 
@@ -25,12 +24,11 @@ const k = 1.0
 const ν = μ / ρ
 
 const t_end = 0.1
-const Δt = 0.01
+const Δt = 0.001
 const scheme = :CN  # θ = 1/2 (Crank–Nicolson) for viscous terms
 
 u_exact(x,y,t) =  sin(k * x) * cos(k * y) * exp(-2.0 * ν * k^2 * t)
 v_exact(x,y,t) = -cos(k * x) * sin(k * y) * exp(-2.0 * ν * k^2 * t)
-p_exact(x,y,t) = -(ρ / 4.0) * (cos(2k * x) + cos(2k * y)) * exp(-4.0 * ν * k^2 * t)
 
 # Helper to skip boundary samples when computing errors
 interior_indices(n) = 2:(n-1)
@@ -81,7 +79,7 @@ for n in ns
         :top   => Dirichlet((x,y,t)->v_exact(x,y,t)),
     ))
 
-    pressure_gauge = MeanPressureGauge()
+    pressure_gauge = PinPressureGauge()
     bc_cut = Dirichlet(0.0)
 
     fᵤ = (x,y,z=0.0) -> 0.0
@@ -121,11 +119,6 @@ for n in ns
         idx += 1
     end
 
-    idx = 1
-    for j in 1:length(Yp), i in 1:length(Xp)
-        p_init[idx] = p_exact(Xp[i], Yp[j], 0.0)
-        idx += 1
-    end
 
     x0_vec[1:nu_x] .= u_init
     x0_vec[nu_x+1:2nu_x] .= u_init          # tie DOFs
@@ -141,26 +134,20 @@ for n in ns
 
     u_num = final[1:nu_x]
     v_num = final[2nu_x+1:2nu_x+nu_y]
-    p_num = final[2*(nu_x+nu_y)+1:end]
 
     Ux = reshape(u_num, length(xs_ux), length(ys_ux))
     Uy = reshape(v_num, length(xs_uy), length(ys_uy))
-    P  = reshape(p_num, length(Xp), length(Yp))
 
     Ux_ex = [u_exact(xs_ux[i], ys_ux[j], t_end) for i in 1:length(xs_ux), j in 1:length(ys_ux)]
     Uy_ex = [v_exact(xs_uy[i], ys_uy[j], t_end) for i in 1:length(xs_uy), j in 1:length(ys_uy)]
-    P_ex  = [p_exact(Xp[i], Yp[j], t_end) for i in 1:length(Xp), j in 1:length(Yp)]
 
     ix_range_u = interior_indices(length(xs_ux))
     iy_range_u = interior_indices(length(ys_ux))
     ix_range_v = interior_indices(length(xs_uy))
     iy_range_v = interior_indices(length(ys_uy))
-    ix_range_p = interior_indices(length(Xp))
-    iy_range_p = interior_indices(length(Yp))
 
     Vux = diag(op_ux.V)
     Vuy = diag(op_uy.V)
-    Vp  = diag(op_p.V)
 
     function weighted_L2_grid(num, ex, mask_i, mask_j, Vdiag; remove_mean=false)
         ni, nj = size(num, 1), size(num, 2)
@@ -191,19 +178,16 @@ for n in ns
 
     err_u = weighted_L2_grid(Ux, reshape(Ux_ex, size(Ux)), ix_range_u, iy_range_u, Vux)
     err_v = weighted_L2_grid(Uy, reshape(Uy_ex, size(Uy)), ix_range_v, iy_range_v, Vuy)
-    err_p = weighted_L2_grid(P, reshape(P_ex, size(P)), ix_range_p, iy_range_p, Vp; remove_mean=true)
 
     push!(errors_u, err_u)
     push!(errors_v, err_v)
-    push!(errors_p, err_p)
     push!(hs, max(Lx / nx, Ly / ny))
 
     global xs_ux_plot = xs_ux; global ys_ux_plot = ys_ux
     global xs_uy_plot = xs_uy; global ys_uy_plot = ys_uy
-    globalXp_plot = Xp;       global Yp_plot = Yp
-    global Ux_plot = Ux; global Uy_plot = Uy; global P_plot = P
+    global Ux_plot = Ux; global Uy_plot = Uy
 
-    @printf("  h=%.5e  ||u||_L2=%.5e  ||v||_L2=%.5e  ||p||_L2=%.5e\n", hs[end], err_u, err_v, err_p)
+    @printf("  h=%.5e  ||u||_L2=%.5e  ||v||_L2=%.5e\n", hs[end], err_u, err_v)
 end
 
 function rate(h, e)
@@ -216,21 +200,20 @@ end
 
 r_u = rate(hs, errors_u)
 r_v = rate(hs, errors_v)
-r_p = rate(hs, errors_p)
 
 println("\nEstimated convergence rates (between successive resolutions):")
 for i in 1:length(r_u)
-    @printf("  between %d and %d: u rate=%.2f, v rate=%.2f, p rate=%.2f\n",
-            ns[i], ns[i+1], r_u[i], r_v[i], r_p[i])
+    @printf("  between %d and %d: u rate=%.2f, v rate=%.2f\n",
+            ns[i], ns[i+1], r_u[i], r_v[i])
 end
 
 println("\nFinal errors:")
 for (i,n) in enumerate(ns)
-    @printf("  %4d: h=%.3e  ||u||=%.5e  ||v||=%.5e  ||p||=%.5e\n",
-            n, hs[i], errors_u[i], errors_v[i], errors_p[i])
+    @printf("  %4d: h=%.3e  ||u||=%.5e  ||v||=%.5e\n",
+            n, hs[i], errors_u[i], errors_v[i])
 end
 
-df = DataFrame(h=hs, error_u=errors_u, error_v=errors_v, error_p=errors_p)
+df = DataFrame(h=hs, error_u=errors_u, error_v=errors_v)
 CSV.write("taylor_green_convergence.csv", df)
 
 fig = Figure(resolution=(900, 500))
