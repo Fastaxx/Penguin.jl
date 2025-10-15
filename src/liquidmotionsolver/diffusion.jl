@@ -699,7 +699,7 @@ function solve_MovingLiquidDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phas
 
     # Log residuals and interface positions for each time step:
     nt = Int(round(Tₑ/Δt))
-    residuals = [Float64[] for _ in 1:2nt]
+    residuals = Dict{Int, Vector{Float64}}()
     xf_log = Float64[]
 
     # Determine how many dimensions
@@ -772,6 +772,9 @@ function solve_MovingLiquidDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phas
         err = abs(res)
         println("Iteration $iter | xf = $new_xf | error = $err | res = $res | α = $(lr_state.last_lr)")
         # Store residuals
+        if !haskey(residuals, 1)
+            residuals[1] = Float64[]
+        end
         push!(residuals[1], err)
 
         # 3) Update geometry if not converged
@@ -891,6 +894,9 @@ function solve_MovingLiquidDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phas
             err = abs(step)
             println("Iteration $iter | xf = $new_xf | error = $err | res = $res | α = $(lr_state.last_lr)")
             # Store residuals
+            if !haskey(residuals, k)
+                residuals[k] = Float64[]
+            end
             push!(residuals[k], err)
 
             # 3) Update geometry if not converged
