@@ -102,7 +102,7 @@ T_end = 0.5
 
 println("Running Navier–Stokes unsteady simulation (Picard iterations each step)...")
 times, histories = solve_NavierStokesMono_unsteady_picard!(solver; Δt=Δt, T_end=T_end,
-                                                           scheme=:BE, inner_tol=1e-6,
+                                                           scheme=:CN, inner_tol=1e-6,
                                                            inner_maxiter=12, relaxation=1.0)
 
 println("Simulation finished. Stored states = ", length(histories))

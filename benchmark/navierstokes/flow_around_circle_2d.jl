@@ -11,14 +11,6 @@ This script runs an unsteady Navier–Stokes simulation for several Reynolds
 numbers and extracts wake properties (dominant shedding frequency → Strouhal
 number) from a point probe in the wake. It prints comparisons with a simple
 reference value (Strouhal ≈ 0.2 for Re in the range ~50–200).
-
-Notes / limitations:
-- Drag computation (force on the body) is not computed here because it
-  requires an accurate surface-force integration over the immersed boundary
-  (cut-cell) which is non-trivial; instead we compute wake frequency and
-  simple flow statistics as robust, easily-computable proxies.
-- Resolution and time windows are modest to keep runs fast. Increase nx/ny
-  and T_end if you want higher-fidelity benchmarks.
 """
 
 ###########

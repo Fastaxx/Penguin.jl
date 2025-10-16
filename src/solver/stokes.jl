@@ -599,11 +599,6 @@ function assemble_stokes1D_unsteady!(s::StokesMono, data, Δt::Float64,
     rhs_mom = mass_dt * u_prev_ω
     rhs_mom .-= θc * (data.visc_uω * u_prev_ω + data.visc_uγ * u_prev_γ)
 
-    grad_prev_coeff = θ == 1.0 ? 0.0 : (1.0 - θ) / θ
-    if grad_prev_coeff != 0.0
-        rhs_mom .+= grad_prev_coeff * (data.grad * p_half_prev)
-    end
-
     rhs_mom .+= load
     g_cut_next = safe_build_g(data.op_u, s.bc_cut, data.cap_u, t_next)
     b = vcat(rhs_mom, g_cut_next, zeros(np))
@@ -688,18 +683,10 @@ function assemble_stokes2D_unsteady!(s::StokesMono, data, Δt::Float64,
     rhs_mom_x = mass_x_dt * uωx_prev
     rhs_mom_x .-= θc * (data.visc_x_ω * uωx_prev + data.visc_x_γ * uγx_prev)
 
-    grad_prev_coeff = θ == 1.0 ? 0.0 : (1.0 - θ) / θ
-    if grad_prev_coeff != 0.0
-        rhs_mom_x .+= grad_prev_coeff * (data.grad_x * p_half_prev)
-    end
-
     rhs_mom_x .+= load_x
 
     rhs_mom_y = mass_y_dt * uωy_prev
     rhs_mom_y .-= θc * (data.visc_y_ω * uωy_prev + data.visc_y_γ * uγy_prev)
-    if grad_prev_coeff != 0.0
-        rhs_mom_y .+= grad_prev_coeff * (data.grad_y * p_half_prev)
-    end
     rhs_mom_y .+= load_y
 
     g_cut_x = safe_build_g(data.op_ux, s.bc_cut, data.cap_px, t_next)
@@ -819,13 +806,6 @@ function assemble_stokes3D_unsteady!(s::StokesMono, data, Δt::Float64,
 
     rhs_mom_z = mass_z_dt * uωz_prev
     rhs_mom_z .-= θc * (data.visc_z_ω * uωz_prev + data.visc_z_γ * uγz_prev)
-
-    grad_prev_coeff = θ == 1.0 ? 0.0 : (1.0 - θ) / θ
-    if grad_prev_coeff != 0.0
-        rhs_mom_x .+= grad_prev_coeff * (data.grad_x * p_half_prev)
-        rhs_mom_y .+= grad_prev_coeff * (data.grad_y * p_half_prev)
-        rhs_mom_z .+= grad_prev_coeff * (data.grad_z * p_half_prev)
-    end
 
     rhs_mom_x .+= load_x
     rhs_mom_y .+= load_y

@@ -404,11 +404,6 @@ function assemble_navierstokes1D_unsteady!(s::NavierStokesMono, data, Δt::Float
     rhs_mom = mass_dt * Vector{Float64}(uω_prev)
     rhs_mom .-= θc * (data.visc_u_ω * Vector{Float64}(uω_prev) + data.visc_u_γ * Vector{Float64}(uγ_prev))
 
-    grad_prev_coeff = θ == 1.0 ? 0.0 : (1.0 - θ) / θ
-    if grad_prev_coeff != 0.0
-        rhs_mom .+= grad_prev_coeff * (data.grad * p_half_prev)
-    end
-
     rhs_mom .+= load
 
     conv_curr = compute_convection_vectors!(s, data, x_prev)
@@ -504,12 +499,6 @@ function assemble_navierstokes2D_unsteady!(s::NavierStokesMono, data, Δt::Float
 
     rhs_mom_y = mass_y_dt * Vector{Float64}(uωy_prev)
     rhs_mom_y .-= θc * (data.visc_y_ω * Vector{Float64}(uωy_prev) + data.visc_y_γ * Vector{Float64}(uγy_prev))
-
-    grad_prev_coeff = θ == 1.0 ? 0.0 : (1.0 - θ) / θ
-    if grad_prev_coeff != 0.0
-        rhs_mom_x .+= grad_prev_coeff * (data.grad_x * p_half_prev)
-        rhs_mom_y .+= grad_prev_coeff * (data.grad_y * p_half_prev)
-    end
 
     rhs_mom_x .+= load_x
     rhs_mom_y .+= load_y
@@ -608,11 +597,6 @@ function assemble_navierstokes1D_unsteady_picard!(s::NavierStokesMono, data, Δt
     rhs_mom = mass_dt * Vector{Float64}(uω_prev)
     rhs_mom .-= θc * (data.visc_u_ω * Vector{Float64}(uω_prev) + data.visc_u_γ * Vector{Float64}(uγ_prev))
 
-    grad_prev_coeff = θ == 1.0 ? 0.0 : (1.0 - θ) / θ
-    if grad_prev_coeff != 0.0
-        rhs_mom .+= grad_prev_coeff * (data.grad * p_half_prev)
-    end
-
     rhs_mom .+= load
     rhs_mom .-= (1.0 - θ) * ρ_val .* conv_prev_vec
 
@@ -709,12 +693,6 @@ function assemble_navierstokes2D_unsteady_picard!(s::NavierStokesMono, data, Δt
 
     rhs_mom_y = mass_y_dt * Vector{Float64}(uωy_prev)
     rhs_mom_y .-= θc * (data.visc_y_ω * Vector{Float64}(uωy_prev) + data.visc_y_γ * Vector{Float64}(uγy_prev))
-
-    grad_prev_coeff = θ == 1.0 ? 0.0 : (1.0 - θ) / θ
-    if grad_prev_coeff != 0.0
-        rhs_mom_x .+= grad_prev_coeff * (data.grad_x * p_half_prev)
-        rhs_mom_y .+= grad_prev_coeff * (data.grad_y * p_half_prev)
-    end
 
     rhs_mom_x .+= load_x
     rhs_mom_y .+= load_y
