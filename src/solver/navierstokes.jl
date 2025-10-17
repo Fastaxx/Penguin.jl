@@ -2053,9 +2053,9 @@ function compute_navierstokes_force_diagnostics(s::NavierStokesMono)
         force_density[α] = force_vec
 
         V = Vmats[α]
-        integrated_pressure[α] = sum(Vector{Float64}(V * pressure_vec))
-        integrated_viscous[α] = sum(Vector{Float64}(V * visc_vec))
-        integrated_force[α] = sum(Vector{Float64}(V * force_vec))
+        integrated_pressure[α] = sum(Vector{Float64}(pressure_vec))
+        integrated_viscous[α] = sum(Vector{Float64}(visc_vec))
+        integrated_force[α] = sum(Vector{Float64}(force_vec))
     end
 
     return (; g_p=Tuple(g_p),

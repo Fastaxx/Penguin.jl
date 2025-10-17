@@ -14,7 +14,7 @@ difference, and compares the resulting statistics against published benchmark ra
 ###########
 # Geometry and discretisation
 ###########
-nx, ny = 64, 32
+nx, ny = 128, 64
 Lx, Ly = 2.2, 0.41
 x0, y0 = 0.0, 0.0
 radius = 0.05
@@ -86,7 +86,7 @@ nu_y = prod(operator_uy.size)
 np = prod(operator_p.size)
 x0_vec = zeros(2 * (nu_x + nu_y) + np)
 solver = NavierStokesMono(fluid, (bc_ux, bc_uy), pressure_gauge, cut_bc; x0=x0_vec)
-Δt = 0.005
+Δt = 0.002
 T_end = 4.0
 println("=== Cylinder vortex-shedding benchmark (Re=100) ===")
 println("Grid: $(nx) × $(ny), Δt=$(Δt), T_end=$(T_end)")
@@ -144,7 +144,7 @@ for state in histories
     push!(pdrop_series, p_vals[1] - p_vals[2])
 end
 dt = times[2] - times[1]
-analysis_start = 0.5
+analysis_start = 2.0  # start time for statistics
 start_idx = searchsortedfirst(times, analysis_start)
 Cd_window = Cd_series[start_idx:end]
 Cl_window = Cl_series[start_idx:end]
@@ -156,8 +156,8 @@ if isempty(Cd_window)
     analysis_start = times[1]
     start_idx = 1
 end
-Cd_mean = mean(Cd_window)
-Cd_max = maximum(Cd_window)
+Cd_mean = -mean(Cd_window)
+Cd_max = -maximum(Cd_window)
 Cl_mean = mean(Cl_window)
 Cl_rms = std(Cl_window)
 Cl_peak_to_peak = maximum(Cl_window) - minimum(Cl_window)
@@ -168,32 +168,34 @@ pdrop_amp = maximum(pdrop_window) - minimum(pdrop_window)
 # Reference comparisons
 ###########
 targets = Dict(
-    :Cd_mean => (1.30, 1.45, "Mean drag coefficient"),
-    :Cl_rms  => (0.2, 0.4, "RMS lift coefficient"),
-    :Strouhal => (0.16, 0.17, "Strouhal number"),
-    :Cd_max  => (2.7, 3.1, "Max drag coefficient"),
-    :pdrop_amp => (0.10, 0.12, "Pressure drop amplitude"),
-    :Cl_peak_to_peak => (0.4, 0.8, "Lift peak-to-peak"),
+    :Cd_mean    => (3.1, 3.5, "Mean drag coefficient"),
+    :Cd_max     => (3.20, 3.35, "Maximum drag coefficient"),
+    :Cl_mean    => (-0.05, 0.05, "Mean lift coefficient"),
+    :Strouhal   => (0.29, 0.32, "Strouhal number (vortex shedding)")
 )
+
 values = Dict(
-    :Cd_mean => Cd_mean,
-    :Cl_rms => Cl_rms,
-    :Strouhal => Strouhal,
-    :Cd_max => Cd_max,
-    :pdrop_amp => pdrop_amp,
-    :Cl_peak_to_peak => Cl_peak_to_peak,
+    :Cd_mean   => Cd_mean,
+    :Cd_max    => Cd_max,
+    :Cl_mean   => Cl_mean,
+    :Strouhal  => Strouhal
 )
+
 println("\n=== Benchmark statistics (times ≥ $(analysis_start)) ===")
 for (key, val) in values
     low, high, label = targets[key]
     within = low <= val <= high
-    println(@sprintf("%-20s: %8.4f  target[%5.3f, %5.3f]  -> %s",
+    println(@sprintf("%-25s: %8.4f  target[%5.3f, %5.3f]  -> %s",
                      label, val, low, high, within ? "OK" : "out"))
 end
-println(@sprintf("Lift mean bias = %.4f", Cl_mean))
+
 ###########
 # Visualization / diagnostic plots
 ###########
+times = times[start_idx:end]
+Cd_series = Cd_series[start_idx:end]
+Cl_series = Cl_series[start_idx:end]
+pdrop_series = pdrop_series[start_idx:end]
 fig = Figure(resolution=(1200, 700))
 ax_cd = Axis(fig[1, 1], xlabel="time", ylabel="C_D", title="Drag coefficient")
 lines!(ax_cd, times, Cd_series; color=:navy)

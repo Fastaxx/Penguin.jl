@@ -100,10 +100,9 @@ solver = NavierStokesMono(fluid, (bc_ux, bc_uy), pressure_gauge, interface_bc; x
 Δt = 0.005
 T_end = 0.5
 
-println("Running Navier–Stokes unsteady simulation (Picard iterations each step)...")
-times, histories = solve_NavierStokesMono_unsteady_picard!(solver; Δt=Δt, T_end=T_end,
-                                                           scheme=:CN, inner_tol=1e-6,
-                                                           inner_maxiter=12, relaxation=1.0)
+println("Running Navier–Stokes unsteady simulation ")
+times, histories =solve_NavierStokesMono_unsteady!(solver; Δt=Δt, T_end=T_end, scheme=:CN)
+
 
 println("Simulation finished. Stored states = ", length(histories))
 println("Final time step = ", times[end])
@@ -173,6 +172,7 @@ if !isempty(pressure_trace.θ)
     lines!(ax_pressure_trace, pressure_trace.θ, pressure_trace.p; color=:royalblue)
     scatter!(ax_pressure_trace, pressure_trace.θ, pressure_trace.p; color=:orange, markersize=6)
     display(fig_pressure)
+    save("navierstokes2d_circle_pressure_trace_.png", fig_pressure)
 end
 
 ###########

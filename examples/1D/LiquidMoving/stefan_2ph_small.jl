@@ -18,7 +18,7 @@ body = (x,t, _=0)->(x - xf)
 body_c = (x,t, _=0)->-(x - xf)
 
 # Define the Space-Time mesh
-Δt = 0.001
+Δt = 0.00001
 Tend = 0.1
 Tinit = 0.0
 STmesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt], tag=mesh.tag)
