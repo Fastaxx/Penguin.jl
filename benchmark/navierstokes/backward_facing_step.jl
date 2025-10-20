@@ -24,6 +24,13 @@ Diagnostics:
   * Velocity profiles at x/h₁ = 2, 4, 6, 8, 10.
   * Pressure distribution along the bottom wall.
   * Mass flux balance between inlet and outlet.
+
+References :
+- J. Kim P. Moin, "Application of a fractional-step method to incompressible Navier–Stokes equations",
+  J. Comput. Phys., 59(2), 308-323 (1985).
+- B. F. Armaly, F. Durst, J. C. F. Pereira, B. Schönung,
+  "Experimental and theoretical investigation of backward-facing step flow",
+  J. Fluid Mech., 127, 473-496 (1983).
 """
 
 ###########
@@ -199,7 +206,7 @@ reattach_x = NaN
 for k in 2:length(shear_samples)
     if shear_samples[k-1] < 0 && shear_samples[k] ≥ 0
         t = shear_samples[k-1] / (shear_samples[k-1] - shear_samples[k] + eps())
-        reattach_x = shear_x[k-1] + t * (shear_x[k] - shear_x[k-1])
+        global reattach_x = shear_x[k-1] + t * (shear_x[k] - shear_x[k-1])
         break
     end
 end
@@ -373,3 +380,69 @@ save("navierstokes_step_streamlines.png", fig_stream)
 display(fig_stream)
 
 println("Diagnostics saved: reattachment shear plot, pressure curve, velocity profiles, streamlines, CSV data.")
+
+###########
+# Multi-Reynolds reattachment sweep
+###########
+reference_ranges = Dict(
+    100.0 => (3.5, 5.0),
+    200.0 => (4.0, 6.0),
+    300.0 => (5.5, 8.0),
+)
+
+function run_step_case(Re_case)
+    ν_case = U_mean * h1 / Re_case
+    μ_case = ρ * ν_case
+
+    fluid_case = Fluid((mesh_ux, mesh_uy),
+                       (capacity_ux, capacity_uy),
+                       (operator_ux, operator_uy),
+                       mesh_p,
+                       capacity_p,
+                       operator_p,
+                       μ_case, ρ, fᵤ, fₚ)
+
+    solver_case = NavierStokesMono(fluid_case, (bc_ux, bc_uy), pressure_gauge, interface_bc)
+    solve_NavierStokesMono_steady!(solver_case; tol=1e-6, maxiter=5, relaxation=0.8, nlsolve_method=:picard)
+    solve_NavierStokesMono_steady!(solver_case; tol=5e-9, maxiter=8, nlsolve_method=:newton)
+
+    uωx_case = solver_case.x[1:nu_x]
+    Ux_case = reshape(uωx_case, Tuple(operator_ux.size))
+    shear = Float64[]
+    xvals = Float64[]
+    μ_inv = μ_case / dy
+    for (i, x) in enumerate(xs_ux_trim)
+        x < 0 && continue
+        by = bottom_y(x)
+        j = nearest_index(ys_ux_trim, by + dy)
+        u_wall = Ux_case[i, j]
+        isfinite(u_wall) || continue
+        push!(xvals, x)
+        push!(shear, μ_inv * u_wall)
+    end
+    return xvals, shear
+end
+
+results_table = IOBuffer()
+println(results_table, "Re,L_r/h1,Reference_min,Reference_max,Status")
+
+for Re_case in sort(collect(keys(reference_ranges)))
+    xvals, shear = run_step_case(Re_case)
+    reattach = NaN
+    for k in 2:length(shear)
+        if shear[k-1] < 0 && shear[k] ≥ 0
+            t = shear[k-1] / (shear[k-1] - shear[k] + eps())
+            reattach = xvals[k-1] + t * (xvals[k] - xvals[k-1])
+            break
+        end
+    end
+    (ref_min, ref_max) = reference_ranges[Re_case]
+    status = isnan(reattach) ? "not-detected" :
+             (ref_min <= reattach/h1 <= ref_max ? "within-range" : "outside-range")
+    println(results_table, @sprintf("%.0f,%.3f,%.2f,%.2f,%s",
+                                    Re_case, isnan(reattach) ? NaN : reattach / h1,
+                                    ref_min, ref_max, status))
+end
+
+write("navierstokes_step_reattachment_sweep.csv", String(take!(results_table)))
+println("Saved multi-Re reattachment sweep to navierstokes_step_reattachment_sweep.csv")
