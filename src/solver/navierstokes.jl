@@ -2100,12 +2100,131 @@ function pressure_trace_on_cut(s::NavierStokesMono; center::NTuple{2,Float64}, t
     total_velocity_dofs = 2 * sum(nu_components)
     pω = Vector{Float64}(view(s.x, total_velocity_dofs + 1:total_velocity_dofs + np))
 
+    ops_u = s.fluid.operator_u
+    caps_u = s.fluid.capacity_u
+
+    nu_x, nu_y = nu_components
+    uωx = Vector{Float64}(view(s.x, 1:nu_x))
+    uωy = Vector{Float64}(view(s.x, 2nu_x + 1:2nu_x + nu_y))
+
+    mesh_ux = caps_u[1].mesh
+    mesh_uy = caps_u[2].mesh
+    xs_ux, ys_ux = mesh_ux.nodes
+    xs_uy, ys_uy = mesh_uy.nodes
+
+    Ux = reshape(uωx, (length(xs_ux), length(ys_ux)))
+    Uy = reshape(uωy, (length(xs_uy), length(ys_uy)))
+
+    dx_ux = length(xs_ux) > 1 ? minimum(diff(xs_ux)) : 1.0
+    dy_ux = length(ys_ux) > 1 ? minimum(diff(ys_ux)) : 1.0
+    dx_uy = length(xs_uy) > 1 ? minimum(diff(xs_uy)) : 1.0
+    dy_uy = length(ys_uy) > 1 ? minimum(diff(ys_uy)) : 1.0
+    δx = max(eps(), minimum((dx_ux, dx_uy)))
+    δy = max(eps(), minimum((dy_ux, dy_uy)))
+
+    μ = s.fluid.μ
+    body = cap.body
+    body_eval = if applicable(body, 0.0, 0.0)
+        (x::Float64, y::Float64) -> body(x, y)
+    elseif applicable(body, 0.0, 0.0, 0.0)
+        (x::Float64, y::Float64) -> body(x, y, 0.0)
+    else
+        error("capacity body does not provide a 2D evaluation signature.")
+    end
+    identity2 = SMatrix{2,2,Float64}(1.0, 0.0,
+                                     0.0, 1.0)
+
+    function bilinear_interpolate(xs::Vector{Float64}, ys::Vector{Float64}, field::AbstractMatrix, x::Float64, y::Float64)
+        x_clamped = clamp(x, xs[1], xs[end])
+        y_clamped = clamp(y, ys[1], ys[end])
+
+        ix_hi = searchsortedfirst(xs, x_clamped)
+        if ix_hi <= 1
+            ix_low, ix_hi = 1, min(length(xs), 2)
+        elseif ix_hi > length(xs)
+            ix_low, ix_hi = length(xs)-1, length(xs)
+        elseif xs[ix_hi] == x_clamped
+            ix_low = max(ix_hi - 1, 1)
+        else
+            ix_low = max(ix_hi - 1, 1)
+        end
+        iy_hi = searchsortedfirst(ys, y_clamped)
+        if iy_hi <= 1
+            iy_low, iy_hi = 1, min(length(ys), 2)
+        elseif iy_hi > length(ys)
+            iy_low, iy_hi = length(ys)-1, length(ys)
+        elseif ys[iy_hi] == y_clamped
+            iy_low = max(iy_hi - 1, 1)
+        else
+            iy_low = max(iy_hi - 1, 1)
+        end
+
+        x1, x2 = xs[ix_low], xs[ix_hi]
+        y1, y2 = ys[iy_low], ys[iy_hi]
+        tx = x2 ≈ x1 ? 0.0 : (x_clamped - x1) / (x2 - x1)
+        ty = y2 ≈ y1 ? 0.0 : (y_clamped - y1) / (y2 - y1)
+
+        f11 = field[ix_low, iy_low]
+        f21 = field[ix_hi, iy_low]
+        f12 = field[ix_low, iy_hi]
+        f22 = field[ix_hi, iy_hi]
+
+        return (1 - tx) * (1 - ty) * f11 +
+               tx * (1 - ty) * f21 +
+               (1 - tx) * ty * f12 +
+               tx * ty * f22
+    end
+
+    function velocity_gradient(x::Float64, y::Float64)
+        ux_x_plus = bilinear_interpolate(xs_ux, ys_ux, Ux, x + δx, y)
+        ux_x_minus = bilinear_interpolate(xs_ux, ys_ux, Ux, x - δx, y)
+        dux_dx = (ux_x_plus - ux_x_minus) / (2δx)
+
+        ux_y_plus = bilinear_interpolate(xs_ux, ys_ux, Ux, x, y + δy)
+        ux_y_minus = bilinear_interpolate(xs_ux, ys_ux, Ux, x, y - δy)
+        dux_dy = (ux_y_plus - ux_y_minus) / (2δy)
+
+        uy_x_plus = bilinear_interpolate(xs_uy, ys_uy, Uy, x + δx, y)
+        uy_x_minus = bilinear_interpolate(xs_uy, ys_uy, Uy, x - δx, y)
+        duy_dx = (uy_x_plus - uy_x_minus) / (2δx)
+
+        uy_y_plus = bilinear_interpolate(xs_uy, ys_uy, Uy, x, y + δy)
+        uy_y_minus = bilinear_interpolate(xs_uy, ys_uy, Uy, x, y - δy)
+        duy_dy = (uy_y_plus - uy_y_minus) / (2δy)
+
+        return SMatrix{2,2,Float64}(dux_dx, duy_dx,
+                                     dux_dy, duy_dy)
+    end
+
+    function interface_normal(x::Float64, y::Float64)
+        δn = 0.5 * min(δx, δy)
+        δn = max(δn, sqrt(eps()))
+        fx_plus = body_eval(x + δn, y)
+        fx_minus = body_eval(x - δn, y)
+        fy_plus = body_eval(x, y + δn)
+        fy_minus = body_eval(x, y - δn)
+        grad = SVector((fx_plus - fx_minus) / (2δn),
+                       (fy_plus - fy_minus) / (2δn))
+        norm_grad = norm(grad)
+        norm_grad == 0.0 && return nothing
+        n_candidate = grad / norm_grad
+        probe = body_eval(x + 1e-4 * n_candidate[1], y + 1e-4 * n_candidate[2])
+        if probe > 0
+            n_candidate = -n_candidate
+        end
+        return n_candidate
+    end
+
     Γ_diag = diag(cap.Γ)
     Cγ = cap.C_γ
     θ = Float64[]
     p_vals = Float64[]
     weights = Float64[]
     coords = Vector{Tuple{Float64,Float64}}()
+    normals = Vector{SVector{2,Float64}}()
+    traction_vectors = Vector{SVector{2,Float64}}()
+    integrated_forces = Vector{SVector{2,Float64}}()
+    pressure_from_stress = Float64[]
 
     for (i, γ) in enumerate(Γ_diag)
         if γ ≤ tol || i > length(pω)
@@ -2120,6 +2239,25 @@ function pressure_trace_on_cut(s::NavierStokesMono; center::NTuple{2,Float64}, t
         push!(p_vals, pω[i])
         push!(weights, γ)
         push!(coords, (centroid[1], centroid[2]))
+
+        normal_vec = interface_normal(centroid[1], centroid[2])
+        if normal_vec === nothing
+            push!(normals, SVector(0.0, 0.0))
+            push!(traction_vectors, SVector(0.0, 0.0))
+            push!(integrated_forces, SVector(0.0, 0.0))
+            push!(pressure_from_stress, pω[i])
+            continue
+        end
+
+        grad_u = velocity_gradient(centroid[1], centroid[2])
+        sym_grad = grad_u + grad_u'
+        σ = μ * sym_grad - pω[i] * identity2
+        traction = σ * normal_vec
+        force_vec = traction * γ
+        push!(normals, normal_vec)
+        push!(traction_vectors, traction)
+        push!(integrated_forces, force_vec)
+        push!(pressure_from_stress, -dot(traction, normal_vec))
     end
 
     if sort_by_angle
@@ -2128,7 +2266,24 @@ function pressure_trace_on_cut(s::NavierStokesMono; center::NTuple{2,Float64}, t
         p_vals = p_vals[order]
         weights = weights[order]
         coords = coords[order]
+        normals = normals[order]
+        traction_vectors = traction_vectors[order]
+        integrated_forces = integrated_forces[order]
+        pressure_from_stress = pressure_from_stress[order]
     end
 
-    return (; θ=θ, p=p_vals, weights=weights, coords=coords)
+    total_force = SVector(0.0, 0.0)
+    for f in integrated_forces
+        total_force = total_force + f
+    end
+
+    return (; θ=θ,
+            p=p_vals,
+            weights=weights,
+            coords=coords,
+            normals=normals,
+            traction=traction_vectors,
+            integrated_force=integrated_forces,
+            p_from_stress=pressure_from_stress,
+            total_force=total_force)
 end

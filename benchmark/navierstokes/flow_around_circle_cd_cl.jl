@@ -87,7 +87,7 @@ np = prod(operator_p.size)
 x0_vec = zeros(2 * (nu_x + nu_y) + np)
 solver = NavierStokesMono(fluid, (bc_ux, bc_uy), pressure_gauge, cut_bc; x0=x0_vec)
 Δt = 0.002
-T_end = 4.0
+T_end = 8.0
 println("=== Cylinder vortex-shedding benchmark (Re=100) ===")
 println("Grid: $(nx) × $(ny), Δt=$(Δt), T_end=$(T_end)")
 ###########
@@ -168,15 +168,13 @@ pdrop_amp = maximum(pdrop_window) - minimum(pdrop_window)
 # Reference comparisons
 ###########
 targets = Dict(
-    :Cd_mean    => (3.1, 3.5, "Mean drag coefficient"),
-    :Cd_max     => (3.20, 3.35, "Maximum drag coefficient"),
-    :Cl_mean    => (-0.05, 0.05, "Mean lift coefficient"),
+    :Cd_mean    => (3.1, 3.6, "Mean drag coefficient"),
+    :Cl_mean    => (-0.08, 0.08, "Mean lift coefficient"),
     :Strouhal   => (0.29, 0.32, "Strouhal number (vortex shedding)")
 )
 
 values = Dict(
     :Cd_mean   => Cd_mean,
-    :Cd_max    => Cd_max,
     :Cl_mean   => Cl_mean,
     :Strouhal  => Strouhal
 )

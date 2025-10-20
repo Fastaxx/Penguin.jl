@@ -173,6 +173,29 @@ if !isempty(pressure_trace.θ)
     scatter!(ax_pressure_trace, pressure_trace.θ, pressure_trace.p; color=:orange, markersize=6)
     display(fig_pressure)
     save("navierstokes2d_circle_pressure_trace_.png", fig_pressure)
+
+    order = sortperm(pressure_trace.θ)
+    θ_sorted = pressure_trace.θ[order]
+    p_surface = pressure_trace.p_from_stress[order]
+    θ_deg = rad2deg.(θ_sorted)
+    p_ref = mean(@view P[:, 1])
+    dynamic_pressure = 0.5 * ρ * Umax^2
+    cp_surface = (p_surface .- p_ref) ./ dynamic_pressure
+    pressure_coefficient = hcat(θ_deg, cp_surface)
+    println("Stored $(size(pressure_coefficient, 1)) pressure coefficient samples around the cylinder.")
+
+    fig_cp = Figure(resolution=(700, 400))
+    ax_cp = Axis(fig_cp[1,1], xlabel="θ [deg]", ylabel="Cp", title="Pressure coefficient around the cylinder")
+    lines!(ax_cp, θ_deg, cp_surface; color=:forestgreen)
+    scatter!(ax_cp, θ_deg, cp_surface; color=:firebrick, markersize=6)
+    display(fig_cp)
+    save("navierstokes2d_circle_pressure_coefficient_.png", fig_cp)
+
+    # save pressure coefficient data to CSV
+    using CSV, DataFrames
+    df_cp = DataFrame(θ_deg=θ_deg, Cp=cp_surface)
+    CSV.write("navierstokes2d_circle_pressure_coefficient_.csv", df_cp)
+    
 end
 
 ###########
@@ -281,45 +304,3 @@ record(fig_stream, "navierstokes2d_streamlines_.gif", 1:n_frames; framerate=8) d
 end
 
 println("Streamline animation saved as navierstokes2d_streamlines.gif")
-
-
-###########
-# Strouhal number estimate
-###########
-println("Estimating Strouhal number...")
-probe_x, probe_y = 1.0, 0.0
-ix_probe = nearest_index(xs, probe_x)
-iy_probe = nearest_index(ys, probe_y)
-
-uy_series = map(histories) do hist
-    uy_hist = hist[2nu_x+1:2nu_x+nu_y]
-    Uy_hist = reshape(uy_hist, (length(xs), length(ys)))
-    Uy_hist[ix_probe, iy_probe]
-end
-
-if length(uy_series) >= 32
-    trim_len = max(32, length(uy_series) ÷ 2)
-    signal = uy_series[end - trim_len + 1:end]
-    signal .-= mean(signal)
-
-    N = length(signal)
-    dt = Δt
-    spectrum = abs.(fft(signal))
-    freqs = (0:N-1) .* (1.0 / (dt * N))
-
-    pos_range = 2:clamp(div(N, 2), 2, N)
-    idx = pos_range[argmax(spectrum[pos_range])]
-    f_dom = freqs[idx]
-    diameter = 2 * circle_radius
-    strouhal = f_dom * diameter / Umax
-
-    println("Estimated Strouhal number = $(round(strouhal, digits=4))")
-    reference_Str = 0.2
-    if abs(strouhal - reference_Str) / reference_Str < 0.2
-        println("Strouhal number within expected range.")
-    else
-        @warn "Strouhal number deviates from expected value" strouhal reference_Str
-    end
-else
-    @warn "Insufficient samples to estimate Strouhal number" sample_count=length(uy_series)
-end
