@@ -15,7 +15,7 @@ radius = lx/4
 Tend = 0.1
 Dg, Dl = 1.0, 1.0
 cg0, cl0 = 1.0, 0.0
-He = 1.0    
+He = 0.5    
 D = sqrt(Dg/Dl)
 
 """
@@ -83,7 +83,7 @@ function run_diphasic_mesh_convergence_2D(
         bc_b = BorderConditions(Dict{Symbol, AbstractBoundary}())
         
         # Interface conditions
-        ic = InterfaceConditions(ScalarJump(1.0, He, 0.0), FluxJump(1.0, 1.0, 0.0))
+        ic = InterfaceConditions(ScalarJump(He, 1.0, 0.0), FluxJump(1.0, 1.0, 0.0))
         
         # Define source terms
         f1 = (x,y,z,t)->0.0
@@ -758,7 +758,7 @@ cl_analytical(x, y) = compute_cl_analytical(x, y, final_time)
 # Define mesh sizes to test
 nx_list = [16, 32, 64, 128, 256]
 
-"""
+
 # Run the convergence study
 results = run_diphasic_mesh_convergence_2D(
     nx_list,
@@ -776,7 +776,7 @@ results = run_diphasic_mesh_convergence_2D(
     D2=Dl,
     norm=2
 )
-"""
+
 
 using CairoMakie, CSV, DataFrames, Dates, Statistics
 
@@ -1150,7 +1150,7 @@ function plot_diphasic_convergence(
     
     return fig
 end
-"""
+
 # Example usage:
 # Load the results from the CSV files
 results = load_diphasic_convergence_results("diphasic_heat_results")
@@ -1183,7 +1183,7 @@ fig_by_phase = plot_diphasic_convergence(
 # Display the plots
 display(fig_by_error)
 display(fig_by_phase)
-"""
+
 
 
 using CairoMakie, DelimitedFiles
