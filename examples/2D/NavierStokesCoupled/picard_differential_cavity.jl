@@ -77,8 +77,8 @@ ns_solver = NavierStokesMono(fluid, (bc_ux, bc_uy), pressure_gauge, bc_cut; x0=i
 T_hot = 0.5
 T_cold = -0.5
 bc_T = BorderConditions(Dict(
-    :top    => Dirichlet(T_hot),
-    :bottom => Dirichlet(T_cold)
+    :right    => Dirichlet(T_hot),
+    :left => Dirichlet(T_cold)
 ))
 bc_T_cut = Dirichlet(0.0)
 
@@ -115,7 +115,7 @@ coupler = NavierStokesScalarCoupler(ns_solver,
                                     bc_T_cut;
                                     strategy=PicardCoupling(tol_T=1e-6, tol_U=1e-6, maxiter=4, relaxation=0.9),
                                     β=1.0,
-                                    gravity=(0.0, -1.0),
+                                    gravity=(-1.0, 0.0),
                                     T_ref=0.0,
                                     T0=T0,
                                     store_states=true)

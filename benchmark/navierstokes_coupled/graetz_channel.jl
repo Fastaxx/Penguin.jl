@@ -13,6 +13,7 @@ Forced-convection (Graetz) benchmark in a 2-D channel.
 - Laminar Poiseuille inflow with prescribed parabolic profile.
 - Cold fluid enters a hot-wall channel; buoyancy disabled.
 - Compares near-outlet Nusselt number against fully-developed theory (Nu ≈ 7.54).
+NOT COMPLETED YET
 """
 
 # Geometry and mesh ---------------------------------------------------------

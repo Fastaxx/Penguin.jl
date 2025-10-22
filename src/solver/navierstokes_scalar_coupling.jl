@@ -557,7 +557,7 @@ function _advance_picard!(c::NavierStokesScalarCoupler,
         T_iter .= T_new
         U_iter .= U_new
 
-        if ok_T && ok_U
+        if ok_T
             converged = true
             break
         end
@@ -641,8 +641,11 @@ function _advance_monolithic!(c::NavierStokesScalarCoupler,
         J_bottom = hcat(J_Tu, A_T)
         J = vcat(J_top, J_bottom)
 
-        δ = _solve_block_system(J, -residual; method=method, algorithm=algorithm, solve_kwargs...)
-        state .= state .+ strategy.damping .* δ
+        J_reduced, residual_reduced, row_idx, col_idx = remove_zero_rows_cols_separate!(J, residual)
+        δ_reduced = _solve_block_system(J_reduced, -residual_reduced; method=method, algorithm=algorithm, solve_kwargs...)
+        δ_full = zeros(size(J, 2))
+        δ_full[col_idx] = δ_reduced
+        state .= state .+ strategy.damping .* δ_full
     end
 
     converged || @warn "Monolithic coupling did not converge: residual $(res_norm)"
@@ -699,4 +702,3 @@ function solve_NavierStokesScalarCoupling!(c::NavierStokesScalarCoupler;
     end
     return c.times, c.velocity_states, c.scalar_states
 end
-
