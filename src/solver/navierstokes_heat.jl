@@ -82,15 +82,7 @@ end
     end
 end
 
-@inline function _split_velocity_components(data, state::AbstractVector{<:Real})
-    nu_x = data.nu_x
-    nu_y = data.nu_y
-    uωx = @view state[1:nu_x]
-    uγx = @view state[nu_x+1:2nu_x]
-    uωy = @view state[2nu_x+1:2nu_x+nu_y]
-    uγy = @view state[2nu_x+nu_y+1:2*(nu_x+nu_y)]
-    return uωx, uγx, uωy, uγy
-end
+
 
 function project_field_between_nodes(values::AbstractVector{<:Real},
                                      src_nodes::NTuple{2,Vector{Float64}},
@@ -116,34 +108,6 @@ function project_field_between_nodes(values::AbstractVector{<:Real},
     return projected
 end
 
-function build_temperature_interpolation(temp_cap::Capacity{2},
-                                         vel_cap::Capacity{2})
-    coords_temp = temp_cap.C_ω
-    coords_vel = vel_cap.C_ω
-
-    rows = Int[]
-    cols = Int[]
-    vals = Float64[]
-
-    for (i, pos) in enumerate(coords_vel)
-        best_idx = 1
-        best_dist = Inf
-        for (j, center) in enumerate(coords_temp)
-            dx = pos[1] - center[1]
-            dy = pos[2] - center[2]
-            dist = dx * dx + dy * dy
-            if dist < best_dist
-                best_dist = dist
-                best_idx = j
-            end
-        end
-        push!(rows, i)
-        push!(cols, best_idx)
-        push!(vals, 1.0)
-    end
-
-    return sparse(rows, cols, vals, length(coords_vel), length(coords_temp))
-end
 
 function _scheme_string(scheme::Symbol)
     s = lowercase(String(scheme))
@@ -156,44 +120,6 @@ function _scheme_string(scheme::Symbol)
     end
 end
 
-function solve_linear_system(A::SparseMatrixCSC{Float64,Int}, b::Vector{Float64};
-                             method=Base.:\, algorithm=nothing, kwargs...)
-    Ared, bred, keep_idx_rows, keep_idx_cols = remove_zero_rows_cols!(A, b)
-
-    # If reduced system empty, return zero vector of appropriate size
-    nfull = size(A, 2)
-    if isempty(bred)
-        return zeros(Float64, nfull)
-    end
-
-    # Solve reduced system
-    sol_red = nothing
-    if algorithm !== nothing
-        prob = LinearSolve.LinearProblem(Ared, bred)
-        sol = LinearSolve.solve(prob, algorithm; kwargs...)
-        sol_red = Vector{Float64}(sol.u)
-    elseif method === Base.:\
-        try
-            sol_red = Ared \ bred
-        catch err
-            if err isa SingularException
-                @warn "Direct solve failed with SingularException on reduced system; falling back to bicgstabl" sizeA=size(Ared)
-                sol_red = IterativeSolvers.bicgstabl(Ared, bred)
-            else
-                rethrow(err)
-            end
-        end
-    else
-        sol_red = method(Ared, bred; kwargs...)
-    end
-
-    # Expand reduced solution back to full size (zeros at removed columns)
-    N = size(A, 2)
-    x_full = zeros(N)
-    x_full[keep_idx_cols] = sol_red
-
-    return x_full
-end
 
 function build_temperature_system(s::NavierStokesHeat2D,
                                   data,

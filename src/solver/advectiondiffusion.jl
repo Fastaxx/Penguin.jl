@@ -172,7 +172,7 @@ function AdvectionDiffusionUnsteadyMono(phase::Phase, bc_b::BorderConditions, bc
     s = Solver(Unsteady, Monophasic, DiffusionAdvection, nothing, nothing, nothing, [], [])
     
     s.A = A_mono_unstead_advdiff(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, Δt, scheme)
-    s.b = b_mono_unstead_advdiff(phase.operator, phase.source, phase.capacity, bc_i, Tᵢ, Δt, 0.0, scheme)
+    s.b = b_mono_unstead_advdiff(phase.operator, phase.source, phase.capacity, phase.Diffusion_coeff, bc_i, Tᵢ, Δt, 0.0, scheme)
 
     return s
 end
@@ -186,16 +186,24 @@ function A_mono_unstead_advdiff(operator::ConvectionOps, capacite::Capacity, D, 
     C = operator.C # NTuple{N, SparseMatrixCSC{Float64, Int}}
     K = operator.K # NTuple{N, SparseMatrixCSC{Float64, Int}}
 
+    conv_bulk = sum(C)
+    conv_iface = 0.5 * sum(K)
+    diff_ωω = Id * operator.G' * operator.Wꜝ * operator.G
+    diff_ωγ = Id * operator.G' * operator.Wꜝ * operator.H
+    diff_γω = Iᵦ * operator.H' * operator.Wꜝ * operator.G
+    diff_γγ = Iᵦ * operator.H' * operator.Wꜝ * operator.H
+    tie_block = diff_γγ + Iₐ * Iᵧ
+
     if scheme == "CN"
-        A11 = operator.V + Δt/2 * Id * operator.G' * operator.Wꜝ * operator.G
-        A12 = Δt/2 * Id * operator.G' * operator.Wꜝ * operator.H
-        A21 = Δt/2 * Iᵦ * operator.H' * operator.Wꜝ * operator.G
-        A22 = Δt/2 * Iᵦ * operator.H' * operator.Wꜝ * operator.H + Δt/2 * Iₐ * Iᵧ
+        A11 = operator.V + Δt/2 * (conv_bulk + conv_iface + diff_ωω)
+        A12 = Δt/2 * (conv_iface + diff_ωγ)
+        A21 = Δt/2 * diff_γω
+        A22 = Δt/2 * tie_block
     elseif scheme == "BE"
-        A11 = operator.V + Δt * (sum(C) + 0.5 * sum(K)) + Δt * Id * operator.G' * operator.Wꜝ * operator.G
-        A12 = Δt * 0.5 * sum(K) + Δt * Id * operator.G' * operator.Wꜝ * operator.H
-        A21 = Iᵦ * operator.H' * operator.Wꜝ * operator.G
-        A22 = Iᵦ * operator.H' * operator.Wꜝ * operator.H + Iₐ * Iᵧ
+        A11 = operator.V + Δt * (conv_bulk + conv_iface + diff_ωω)
+        A12 = Δt * (conv_iface + diff_ωγ)
+        A21 = diff_γω
+        A22 = tie_block
     else
         error("Unknown scheme.")
     end
@@ -204,7 +212,7 @@ function A_mono_unstead_advdiff(operator::ConvectionOps, capacite::Capacity, D, 
     return A
 end
 
-function b_mono_unstead_advdiff(operator::ConvectionOps, f, capacite::Capacity, bc::AbstractBoundary, Tᵢ, Δt::Float64, t::Float64, scheme::String)
+function b_mono_unstead_advdiff(operator::ConvectionOps, f, capacite::Capacity, D, bc::AbstractBoundary, Tᵢ, Δt::Float64, t::Float64, scheme::String)
     N = prod(operator.size)
     b = zeros(2N)
 
@@ -218,38 +226,21 @@ function b_mono_unstead_advdiff(operator::ConvectionOps, f, capacite::Capacity, 
 
     Tₒ, Tᵧ = Tᵢ[1:N], Tᵢ[N+1:end]
 
-    """
-    lx, ly = 16., 16.
-    nx, ny = 160, 160
-    radius, center = ly/4, (lx/2, ly/2) .+ (0.01, 0.01)
-
-    # Coordinates of the grid centers
-    x_coords = capacite.mesh.centers[1]
-    y_coords = capacite.mesh.centers[2]
-
-    # Define the radius of the circle (in physical units)
-    circle_radius = lx / 30  # Adjust this value to control the size of the circle
-
-    # Loop over all grid points
-    for j in 1:(ny )
-        for i in 1:(nx )
-            idx = i + (j - 1) * (nx + 1)
-            x_i = x_coords[i]
-            y_j = y_coords[j]
-            # Compute the distance from the center
-            distance = sqrt((x_i - center[1])^2 + (y_j - center[2])^2)
-            # If the point is inside the circle, set T=1
-            if distance <= circle_radius
-                Tₒ[idx] = 1.0
-                Tᵧ[idx] = 1.0
-            end
-        end
-    end
-    """
+    conv_bulk = sum(C)
+    conv_iface = 0.5 * sum(K)
+    diff_ωω = build_I_D(operator, D, capacite) * operator.G' * operator.Wꜝ * operator.G
+    diff_ωγ = build_I_D(operator, D, capacite) * operator.G' * operator.Wꜝ * operator.H    
+    diff_γω = Iᵦ * operator.H' * operator.Wꜝ * operator.G  
+    tie_block = Iᵦ * operator.H' * operator.Wꜝ * operator.H + Iₐ * Iᵧ
 
     if scheme == "CN"
-        b1 = operator.V * Tₒ  - Δt * sum(C) * Tₒ - 0.5 * Δt * sum(K) * Tₒ - Δt * 0.5 * sum(K) * Tᵧ - Δt/2 * operator.G' * operator.Wꜝ * operator.G * Tₒ - Δt/2 * operator.G' * operator.Wꜝ * operator.H * Tᵧ + Δt/2 * operator.V * (fₒn + fₒn1)
-        b2 = Δt/2 * Iᵧ * (gᵧn+gᵧn1) - Δt/2 * Iᵦ * operator.H' * operator.Wꜝ * operator.G * Tₒ - Δt/2 * Iᵦ * operator.H' * operator.Wꜝ * operator.H * Tᵧ - Δt/2 * Iₐ * Iᵧ * Tᵧ
+        b1 = (operator.V - Δt/2 * (conv_bulk + conv_iface + diff_ωω)) * Tₒ
+        b1 .-= Δt/2 * (conv_iface + diff_ωγ) * Tᵧ
+        b1 .+= Δt/2 * operator.V * (fₒn + fₒn1)
+
+        b2 = Δt/2 * Iᵧ * (gᵧn + gᵧn1)
+        b2 .-= Δt/2 * diff_γω * Tₒ
+        b2 .-= Δt/2 * tie_block * Tᵧ
     elseif scheme == "BE"
         b1 = operator.V * Tₒ + Δt * operator.V * fₒn1
         b2 = Iᵧ * gᵧn1

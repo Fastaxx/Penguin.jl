@@ -33,6 +33,7 @@ end
     include("solver/diffusion_test.jl")
     include("solver/stokes_test.jl")
     include("solver/stream_vorticity_test.jl")
+    include("solver/navierstokes_scalar_coupling_test.jl")
     #include("solver/stokes_diph.jl")
     #include("solver/stefan_test.jl")
 end
