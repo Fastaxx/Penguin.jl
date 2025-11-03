@@ -16,7 +16,7 @@ end
 # ---------------------------------------------------------------------------
 
 # Geometry and mesh ---------------------------------------------------------
-nx, ny = 48, 48
+nx, ny = 64, 64
 L = 1.0
 origin = (0.0, 0.0)
 
@@ -39,7 +39,7 @@ operator_uy = DiffusionOps(capacity_uy)
 operator_p  = DiffusionOps(capacity_p)
 
 # Physical parameters -------------------------------------------------------
-Ra = 1.0e5
+Ra = 1.0e4
 Pr = 0.71
 ΔT = 1.0
 T_hot = 0.5
@@ -48,7 +48,7 @@ T_cold = -0.5
 ν = sqrt(Pr / Ra)
 α = ν / Pr
 β = 1.0
-gravity = (0.0, -1.0)
+gravity = (-1.0, 0.0)
 
 # Velocity boundary conditions ----------------------------------------------
 zero = Dirichlet((x, y, t=0.0) -> 0.0)
@@ -102,6 +102,7 @@ for j in 1:Ny_T
 end
 T_init_interface = copy(T_init_center)
 T_init = vcat(T_init_center, T_init_interface)
+T_init .= 0.0
 
 # Coupler with monolithic strategy ------------------------------------------
 coupler = NavierStokesScalarCoupler(ns_solver,
@@ -110,7 +111,7 @@ coupler = NavierStokesScalarCoupler(ns_solver,
                                     (x, y, z=0.0, t=0.0) -> 0.0,
                                     bc_T,
                                     bc_T_cut;
-                                    strategy=MonolithicCoupling(tol=1e-6, maxiter=12, damping=0.8, verbose=false),
+                                    strategy=MonolithicCoupling(tol=1e-6, maxiter=20, damping=0.8, verbose=true),
                                     β=β,
                                     gravity=gravity,
                                     T_ref=0.0,
@@ -141,13 +142,13 @@ println("Final max velocity magnitude ≈ ", maximum(speed))
 Δx = nodes_Tx[2] - nodes_Tx[1]
 Nu_profile = zeros(Float64, Ny_T)
 for j in 1:Ny_T
-    T1 = T_field[1, j]
-    T2 = T_field[2, j]
-    T3 = T_field[3, j]
+    T1 = T_field[j, 1]
+    T2 = T_field[j, 2]
+    T3 = T_field[j, 3]
     grad = (-3 * T1 + 4 * T2 - T3) / (2Δx)
     Nu_profile[j] = -(L) * grad / (T_hot - T_cold)
 end
-Nu_mean = mean(Nu_profile[2:end-1])
+Nu_mean = mean(Nu_profile)
 println("Mean hot-wall Nusselt ≈ ", Nu_mean)
 
 # Visualization --------------------------------------------------------------
