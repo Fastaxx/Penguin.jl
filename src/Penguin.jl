@@ -150,7 +150,8 @@ export drag_lift_coefficients, pressure_trace_on_cut
 
 include("solver/navierstokes_scalar_coupling.jl")
 export CouplingStrategy, PassiveCoupling, PicardCoupling, MonolithicCoupling
-export NavierStokesScalarCoupler, step!, solve_NavierStokesScalarCoupling!
+export NavierStokesScalarCoupler, step!, solve_NavierStokesScalarCoupling!, solve_NavierStokesScalarCoupling_steady!,
+       solve_NavierStokesScalarCoupling_steady_monolithic!
 
 include("solver/navierstokes_levelset.jl")
 export NavierStokesVelocitySampler, update_velocity_sampler!

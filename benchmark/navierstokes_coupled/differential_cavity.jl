@@ -1,6 +1,7 @@
 using Penguin
 using LinearAlgebra
 using Statistics
+using Printf
 try
     using CairoMakie
 catch
@@ -16,7 +17,7 @@ Differentially heated cavity benchmark (Pr = 0.71, Ra = 1e3).
 """
 
 # Problem parameters ---------------------------------------------------------
-Ra = 1.0e4
+Ra = 1.0e3
 Pr = 0.71
 ΔT = 1.0
 T_hot = 0.5
@@ -32,7 +33,7 @@ L = 1.0
 gravity = (-1.0, 0.0)  # g magnitude = 1 with our scaling
 
 # Discretisation -------------------------------------------------------------
-nx, ny = 64, 64
+nx, ny = 128, 128
 origin = (0.0, 0.0)
 
 mesh_p = Penguin.Mesh((nx, ny), (L, L), origin)
@@ -85,8 +86,6 @@ ns_solver = NavierStokesMono(fluid, (bc_ux, bc_uy), pressure_gauge, bc_cut)
 bc_T = BorderConditions(Dict(
     :left=>Dirichlet(T_hot),
     :right=>Dirichlet(T_cold),
-    :top=>Neumann(0.0),
-    :bottom=>Neumann(0.0)
 ))
 bc_T_cut = Dirichlet(0.0)
 
@@ -117,24 +116,17 @@ coupler = NavierStokesScalarCoupler(ns_solver,
                                     (x, y, z=0.0, t=0.0) -> 0.0,
                                     bc_T,
                                     bc_T_cut;
-                                    strategy=PicardCoupling(tol_T=1e-6, tol_U=1e-6, maxiter=6, relaxation=1.0),
+                                    strategy=PicardCoupling(tol_T=1e-6, tol_U=1e-6, maxiter=12, relaxation=0.8),
                                     β=β,
                                     gravity=gravity,
                                     T_ref=0.0,
                                     T0=T_init,
-                                    store_states=true)
-
-# Time integration -----------------------------------------------------------
-Δt = 2.5e-2
-T_end = 1.0
+                                    store_states=false)
 
 println("=== Differentially heated cavity benchmark ===")
-println("Grid: $nx × $ny, Ra=$Ra, Pr=$Pr, Δt=$Δt, T_end=$T_end")
+println("Grid: $nx × $ny, Ra=$Ra, Pr=$Pr")
 
-times, velocity_hist, scalar_hist = solve_NavierStokesScalarCoupling!(coupler;
-                                                                      Δt=Δt,
-                                                                      T_end=T_end,
-                                                                      scheme=:CN)
+solve_NavierStokesScalarCoupling_steady!(coupler; tol=1e-6, maxiter=25, method=Base.:\)
 
 u_state = coupler.velocity_state
 T_state = coupler.scalar_state
@@ -156,11 +148,11 @@ T_grid = reshape(view(T_state, 1:N_scalar), Nx_T, Ny_T)
 Δx = nodes_Tx[2] - nodes_Tx[1]
 Nu_hot = zeros(Float64, Ny_T)
 for j in 1:Ny_T
-    T1 = T_grid[1, j]
-    T2 = T_grid[2, j]
+    T1 = T_grid[j, 1]
+    T2 = T_grid[j, 2]
     Nu_hot[j] = -(L / ΔT) * (T2 - T1) / Δx
 end
-Nu_mean = mean(Nu_hot[2:end-1])
+Nu_mean = mean(Nu_hot[1:end])
 
 # Velocity metrics (dimensionless velocities scaled by α / H) ---------------
 idx_mid_x = findmin(abs.(mesh_ux.nodes[1] .- 0.5))[2]
@@ -169,29 +161,30 @@ idx_mid_y = findmin(abs.(mesh_uy.nodes[2] .- 0.5))[2]
 u_line = abs.(Ux_grid[idx_mid_x, :])
 v_line = abs.(Uy_grid[:, idx_mid_y])
 
-u_mid_dimless = maximum(u_line[2:end-1]) / (α / L)
-v_mid_dimless = maximum(v_line[2:end-1]) / (α / L)
-
-println("Mean hot-wall Nusselt ≈ ", Nu_mean)
-println("Max |u| (scaled by α/H) ≈ ", u_mid_dimless, "   Max |v| (scaled) ≈ ", v_mid_dimless)
+v_mid_dimless = maximum(u_line[2:end-1]) / (α / L)
+u_mid_dimless = maximum(v_line[2:end-1]) / (α / L)
 
 # Reference comparisons (de Vahl Davis 1983, Ra=1e3, Pr=0.71)
 Nu_ref = 1.116
 u_ref = 3.634  # scaled by α / H
 v_ref = 3.7
 
-#@assert abs(Nu_mean - Nu_ref) / Nu_ref ≤ 0.05 "Mean Nusselt deviates from reference."
-#@assert abs(u_mid_dimless - u_ref) / u_ref ≤ 0.1 "Max horizontal velocity deviates from reference."
-#@assert abs(v_mid_dimless - v_ref) / v_ref ≤ 0.1 "Max vertical velocity deviates from reference."
+@assert abs(Nu_mean - Nu_ref) / Nu_ref ≤ 0.05 "Mean Nusselt deviates from reference."
+@assert abs(u_mid_dimless - u_ref) / u_ref ≤ 0.1 "Max horizontal velocity deviates from reference."
+@assert abs(v_mid_dimless - v_ref) / v_ref ≤ 0.1 "Max vertical velocity deviates from reference."
 
 println("Benchmark passed against reference tolerances.")
+
+@printf("Reference Nu = %.3f, computed Nu = %.3f\n", Nu_ref, Nu_mean)
+@printf("Reference max |u| = %.3f, computed max |u| = %.3f\n", u_ref, u_mid_dimless)
+@printf("Reference max |v| = %.3f, computed max |v| = %.3f\n", v_ref, v_mid_dimless)
 
 if @isdefined CairoMakie
     xs = nodes_Tx
     ys = nodes_Ty
     fig = Figure(resolution=(900, 450))
     ax = Axis(fig[1, 1], xlabel="x", ylabel="y",
-              title="Temperature field (t = $(round(times[end]; digits=3)))",
+              title="Temperature field ",
               aspect=DataAspect())
     hm = heatmap!(ax, xs, ys, T_grid'; colormap=:thermal)
     Colorbar(fig[1, 2], hm; label="T")
@@ -203,24 +196,4 @@ if @isdefined CairoMakie
     Colorbar(fig[2, 2], hm2; label="|u|")
 
     display(fig)
-
-    # Animation --------------------------------------------------------------
-    temp_snapshots = map(state -> reshape(view(state, 1:N_scalar), Nx_T, Ny_T), scalar_hist)
-    tmin = minimum(minimum.(temp_snapshots))
-    tmax = maximum(maximum.(temp_snapshots))
-
-    anim_fig = Figure(resolution=(600, 400))
-    anim_ax = Axis(anim_fig[1, 1], xlabel="x", ylabel="y",
-                   title="Temperature evolution",
-                   aspect=DataAspect())
-    temp_obs = Observable(temp_snapshots[1]')
-    anim_hm = heatmap!(anim_ax, xs, ys, temp_obs; colormap=:thermal, colorrange=(tmin, tmax))
-
-    output_path = joinpath(@__DIR__, "differential_cavity.mp4")
-    println("Recording cavity animation → $(output_path)")
-    record(anim_fig, output_path, eachindex(times)) do idx
-        temp_obs[] = temp_snapshots[idx]'
-        anim_ax.title = "Temperature (t = $(round(times[idx]; digits=3)))"
-    end
-    println("Animation saved to $(output_path)")
 end

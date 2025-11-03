@@ -79,8 +79,6 @@ ns_solver = NavierStokesMono(fluid, (bc_ux, bc_uy), pressure_gauge, bc_cut)
 bc_T = BorderConditions(Dict(
     :left=>Dirichlet(T_hot),
     :right=>Dirichlet(T_cold),
-    :top=>Neumann(0.0),
-    :bottom=>Neumann(0.0)
 ))
 bc_T_cut = Dirichlet(0.0)
 
@@ -112,24 +110,17 @@ coupler = NavierStokesScalarCoupler(ns_solver,
                                     (x, y, z=0.0, t=0.0) -> 0.0,
                                     bc_T,
                                     bc_T_cut;
-                                    strategy=MonolithicCoupling(tol=1e-6, maxiter=12, damping=1.0, verbose=false),
+                                    strategy=MonolithicCoupling(tol=1e-6, maxiter=12, damping=0.8, verbose=false),
                                     β=β,
                                     gravity=gravity,
                                     T_ref=0.0,
                                     T0=T_init,
-                                    store_states=true)
-
-# Time stepping --------------------------------------------------------------
-Δt = 2.5e-3
-T_end = 0.25
+                                    store_states=false)
 
 println("=== Monolithic coupling: differentially heated cavity ===")
-println("Grid: $nx × $ny, Ra = $Ra, Pr = $Pr, Δt = $Δt, T_end = $T_end")
+println("Grid: $nx × $ny, Ra = $Ra, Pr = $Pr")
 
-times, velocity_hist, scalar_hist = solve_NavierStokesScalarCoupling!(coupler;
-                                                                      Δt=Δt,
-                                                                      T_end=T_end,
-                                                                      scheme=:CN)
+solve_NavierStokesScalarCoupling_steady!(coupler; tol=1e-6, maxiter=25, method=Base.:\)
 
 # Extract final fields -------------------------------------------------------
 u_state = coupler.velocity_state
@@ -149,14 +140,14 @@ println("Final max velocity magnitude ≈ ", maximum(speed))
 # Hot-wall Nusselt number ----------------------------------------------------
 Δx = nodes_Tx[2] - nodes_Tx[1]
 Nu_profile = zeros(Float64, Ny_T)
-for i in 1:Nx_T
-    T1 = T_field[i, 1]
-    T2 = T_field[i, 2]
-    grad = (T2 - T1) / Δx
-    Nu_profile[i] = -(L) * grad / (T_hot - T_cold)
+for j in 1:Ny_T
+    T1 = T_field[1, j]
+    T2 = T_field[2, j]
+    T3 = T_field[3, j]
+    grad = (-3 * T1 + 4 * T2 - T3) / (2Δx)
+    Nu_profile[j] = -(L) * grad / (T_hot - T_cold)
 end
-println(Nu_profile)
-Nu_mean = mean(Nu_profile[1:end-1])
+Nu_mean = mean(Nu_profile[2:end-1])
 println("Mean hot-wall Nusselt ≈ ", Nu_mean)
 
 # Visualization --------------------------------------------------------------
@@ -166,7 +157,7 @@ if @isdefined CairoMakie
 
     fig = Figure(resolution=(960, 480))
     ax_T = Axis(fig[1, 1], xlabel="x", ylabel="y",
-                title="Temperature (t = $(round(times[end]; digits=3)))",
+                title="Temperature ",
                 aspect=DataAspect())
     hm = heatmap!(ax_T, xs, ys, T_field'; colormap=:thermal)
     Colorbar(fig[1, 2], hm; label="T")
@@ -178,24 +169,6 @@ if @isdefined CairoMakie
     Colorbar(fig[2, 2], hm_u; label="|u|")
 
     display(fig)
+    save("differential_cavity_monolithic.png", fig)
 
-    # Animation --------------------------------------------------------------
-    temp_snapshots = map(state -> reshape(view(state, 1:N_scalar), Nx_T, Ny_T), scalar_hist)
-    tmin = minimum(minimum.(temp_snapshots))
-    tmax = maximum(maximum.(temp_snapshots))
-
-    anim_fig = Figure(resolution=(640, 360))
-    anim_ax = Axis(anim_fig[1, 1], xlabel="x", ylabel="y",
-                   title="Temperature evolution",
-                   aspect=DataAspect())
-    temp_obs = Observable(temp_snapshots[1]')
-    heatmap!(anim_ax, xs, ys, temp_obs; colormap=:thermal, colorrange=(tmin, tmax))
-
-    output_path = joinpath(@__DIR__, "monolithic_differential_cavity.mp4")
-    println("Recording monolithic coupling animation → $(output_path)")
-    record(anim_fig, output_path, eachindex(times)) do idx
-        temp_obs[] = temp_snapshots[idx]'
-        anim_ax.title = "Temperature (t = $(round(times[idx]; digits=3)))"
-    end
-    println("Animation saved to $(output_path)")
 end

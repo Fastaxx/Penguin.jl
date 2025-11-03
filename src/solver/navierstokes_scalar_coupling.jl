@@ -333,6 +333,24 @@ function _build_scalar_system(c::NavierStokesScalarCoupler,
     return A_T, b_T, operator
 end
 
+function _build_scalar_steady_system(c::NavierStokesScalarCoupler,
+                                     velocity_state::AbstractVector{<:Real})
+    data = c.navier_data
+    uωx, _, uωy, _ = _split_velocity_components(data, velocity_state)
+
+    u_bulk_x = c.proj_uω_to_scalar[1] * Vector{Float64}(uωx)
+    u_bulk_y = c.proj_uω_to_scalar[2] * Vector{Float64}(uωy)
+
+    N_scalar = length(c.scalar_nodes[1]) * length(c.scalar_nodes[2])
+    operator = ConvectionOps(c.scalar_capacity, (u_bulk_x, u_bulk_y), zeros(2 * N_scalar))
+
+    A_T = A_mono_stead_advdiff(operator, c.scalar_capacity, c.diffusivity, c.bc_scalar_cut)
+    b_T = b_mono_stead_advdiff(operator, c.scalar_source, c.scalar_capacity, c.bc_scalar_cut)
+
+    BC_border_mono!(A_T, b_T, c.bc_scalar, c.scalar_capacity.mesh)
+    return A_T, b_T
+end
+
 @inline function _apply_dirichlet_filter!(C::SparseMatrixCSC{Float64,Int}, rows::Vector{Int})
     isempty(rows) && return C
     for r in rows
@@ -386,6 +404,138 @@ function _temperature_velocity_jacobian(c::NavierStokesScalarCoupler,
 
     Cmat = sparse(rows, cols, vals, 2 * N_scalar, total_ns)
     return _apply_dirichlet_filter!(Cmat, c.dirichlet_rows)
+end
+
+function _temperature_velocity_jacobian_steady(c::NavierStokesScalarCoupler,
+                                               T_state::Vector{Float64})
+    data = c.navier_data
+    nu_x, nu_y = data.nu_x, data.nu_y
+    total_ns = 2 * (nu_x + nu_y) + data.np
+    N_scalar = length(c.scalar_nodes[1]) * length(c.scalar_nodes[2])
+
+    rows = Int[]
+    cols = Int[]
+    vals = Float64[]
+
+    if nu_x > 0
+        diag_vec = c.scalar_S_m[1] * T_state
+        block = c.scalar_D_p[1] * spdiagm(0 => Vector{Float64}(diag_vec)) * c.scalar_SmA[1] * c.proj_uω_to_scalar[1]
+        rx, cx, vx = findnz(block)
+        for k in eachindex(rx)
+            push!(rows, rx[k])
+            push!(cols, cx[k])
+            push!(vals, vx[k])
+        end
+    end
+
+    if nu_y > 0
+        diag_vec = c.scalar_S_m[2] * T_state
+        block = c.scalar_D_p[2] * spdiagm(0 => Vector{Float64}(diag_vec)) * c.scalar_SmA[2] * c.proj_uω_to_scalar[2]
+        ry, cy, vy = findnz(block)
+        col_offset = 2 * nu_x
+        for k in eachindex(ry)
+            push!(rows, ry[k])
+            push!(cols, cy[k] + col_offset)
+            push!(vals, vy[k])
+        end
+    end
+
+    Cmat = sparse(rows, cols, vals, 2 * N_scalar, total_ns)
+    return _apply_dirichlet_filter!(Cmat, c.dirichlet_rows)
+end
+
+function _buoyancy_forces(c::NavierStokesScalarCoupler, data, T_state::Vector{Float64})
+    T_bulk = c.select_Tω * T_state
+    ΔT_bulk = T_bulk .- float(c.T_ref)
+
+    T_on_ux = c.interp_T_to_velocity[1] * ΔT_bulk
+    T_on_uy = c.interp_T_to_velocity[2] * ΔT_bulk
+
+    ρ = c.momentum.fluid.ρ
+    ρ isa Function && error("Spatially varying density not supported for buoyancy.")
+    ρ_val = float(ρ)
+
+    β = c.β
+   g = c.gravity
+
+    buoyancy_x = -ρ_val * β * g[1] .* T_on_ux
+    buoyancy_y = -ρ_val * β * g[2] .* T_on_uy
+
+    return data.Vx * buoyancy_x, data.Vy * buoyancy_y
+end
+
+function _apply_buoyancy_rhs!(c::NavierStokesScalarCoupler, data, T_state::Vector{Float64})
+    nu_x = data.nu_x
+    nu_y = data.nu_y
+
+    row_uωx = 0
+    row_uωy = 2 * nu_x
+
+    force_x, force_y = _buoyancy_forces(c, data, T_state)
+
+    c.momentum.b[row_uωx+1:row_uωx+nu_x] .+= force_x
+    c.momentum.b[row_uωy+1:row_uωy+nu_y] .+= force_y
+end
+
+
+@inline function nearest_index(vec::AbstractVector{<:Real}, val::Real)
+    idx = searchsortedfirst(vec, val)
+    if idx <= 1
+        return 1
+    elseif idx > length(vec)
+        return length(vec)
+    else
+        prev_val = vec[idx - 1]
+        curr_val = vec[idx]
+        return abs(val - prev_val) <= abs(curr_val - val) ? idx - 1 : idx
+    end
+end
+
+function project_field_between_nodes(values::AbstractVector{<:Real},
+                                     src_nodes::NTuple{2,Vector{Float64}},
+                                     dst_nodes::NTuple{2,Vector{Float64}})
+    Nx_src = length(src_nodes[1])
+    Ny_src = length(src_nodes[2])
+    field = reshape(Vector{Float64}(values), (Nx_src, Ny_src))
+
+    Nx_dst = length(dst_nodes[1])
+    Ny_dst = length(dst_nodes[2])
+    projected = Vector{Float64}(undef, Nx_dst * Ny_dst)
+
+    for j in 1:Ny_dst
+        y = dst_nodes[2][j]
+        iy = nearest_index(src_nodes[2], y)
+        for i in 1:Nx_dst
+            x = dst_nodes[1][i]
+            ix = nearest_index(src_nodes[1], x)
+            projected[i + (j - 1) * Nx_dst] = field[ix, iy]
+        end
+    end
+
+    return projected
+end
+
+
+function _build_scalar_steady_system(c::NavierStokesScalarCoupler,
+                                     data,
+                                     velocity_state::AbstractVector{<:Real})
+    nodes_scalar = c.scalar_nodes
+    mesh_ux = c.momentum.fluid.mesh_u[1]
+    mesh_uy = c.momentum.fluid.mesh_u[2]
+
+    uωx, _, uωy, _ = _split_velocity_components(data, velocity_state)
+    u_bulk_x = project_field_between_nodes(uωx, (mesh_ux.nodes[1], mesh_ux.nodes[2]), nodes_scalar)
+    u_bulk_y = project_field_between_nodes(uωy, (mesh_uy.nodes[1], mesh_uy.nodes[2]), nodes_scalar)
+
+    N = length(nodes_scalar[1]) * length(nodes_scalar[2])
+    operator = ConvectionOps(c.scalar_capacity, (u_bulk_x, u_bulk_y), zeros(2N))
+
+    A_T = A_mono_stead_advdiff(operator, c.scalar_capacity, c.diffusivity, c.bc_scalar_cut)
+    b_T = b_mono_stead_advdiff(operator, c.scalar_source, c.scalar_capacity, c.bc_scalar_cut)
+
+    BC_border_mono!(A_T, b_T, c.bc_scalar, c.scalar_capacity.mesh)
+
+    return A_T, b_T
 end
 
 @inline function _momentum_residual(c::NavierStokesScalarCoupler,
@@ -661,6 +811,78 @@ function _advance_monolithic!(c::NavierStokesScalarCoupler,
         copy(conv_curr[Int(i)])
     end
     c.momentum.prev_conv = c.conv_prev
+end
+
+function solve_NavierStokesScalarCoupling_steady!(c::NavierStokesScalarCoupler;
+                                                  tol::Float64=1e-6,
+                                                  maxiter::Int=25,
+                                                  method=Base.:\,
+                                                  algorithm=nothing,
+                                                  kwargs...)
+    data = navierstokes2D_blocks(c.momentum)
+    U_prev = copy(c.velocity_state)
+    T_prev = copy(c.scalar_state)
+
+    relaxation = 1.0
+    outer_max = maxiter
+    verbose = false
+
+    if c.strategy isa PicardCoupling
+        relaxation = clamp(c.strategy.relaxation, 0.0, 1.0)
+        outer_max = c.strategy.maxiter
+    elseif c.strategy isa MonolithicCoupling
+        relaxation = clamp(c.strategy.damping, 0.0, 1.0)
+        outer_max = c.strategy.maxiter
+        verbose = c.strategy.verbose
+    end
+
+    residual = Inf
+    iter = 0
+
+    while iter < outer_max && residual > tol
+        assemble_navierstokes2D_steady_picard!(c.momentum, data, U_prev)
+        _apply_buoyancy_rhs!(c, data, T_prev)
+        solve_navierstokes_linear_system!(c.momentum; method=method, algorithm=algorithm, kwargs...)
+        U_new = copy(c.momentum.x)
+
+        A_T, b_T = _build_scalar_steady_system(c, data, U_new)
+        T_new = solve_linear_system(A_T, b_T; method=method, algorithm=algorithm, kwargs...)
+
+        U_relaxed = relaxation .* U_new .+ (1.0 - relaxation) .* U_prev
+        T_relaxed = relaxation .* T_new .+ (1.0 - relaxation) .* T_prev
+
+        res_u = maximum(abs, U_relaxed .- U_prev)
+        res_t = maximum(abs, T_relaxed .- T_prev)
+        residual = max(res_u, res_t)
+
+        iter += 1
+        verbose && println("[Coupled steady] iter=$(iter) maxΔu=$(res_u) maxΔT=$(res_t)")
+
+        U_prev .= U_relaxed
+        T_prev .= T_relaxed
+    end
+
+    if residual > tol
+        @warn "Coupled steady solver did not converge" final_residual=residual iterations=iter tol=tol
+    end
+
+    c.velocity_state .= U_prev
+    c.scalar_state .= T_prev
+    c.prev_velocity_state .= U_prev
+    c.prev_scalar_state .= T_prev
+    c.momentum.x .= U_prev
+    c.momentum.prev_conv = nothing
+
+    c.times = Float64[]
+    if c.store_states
+        c.velocity_states = [copy(U_prev)]
+        c.scalar_states = [copy(T_prev)]
+    else
+        c.velocity_states = Vector{Vector{Float64}}()
+        c.scalar_states = Vector{Vector{Float64}}()
+    end
+
+    return U_prev, T_prev, residual
 end
 
 function step!(c::NavierStokesScalarCoupler;
