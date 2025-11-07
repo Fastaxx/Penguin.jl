@@ -16,7 +16,7 @@ end
 # ---------------------------------------------------------------------------
 
 # Geometry and mesh ---------------------------------------------------------
-nx, ny = 64, 64
+nx, ny = 128, 128
 L = 1.0
 origin = (0.0, 0.0)
 
@@ -39,7 +39,7 @@ operator_uy = DiffusionOps(capacity_uy)
 operator_p  = DiffusionOps(capacity_p)
 
 # Physical parameters -------------------------------------------------------
-Ra = 1.0e4
+Ra = 1.0e5
 Pr = 0.71
 ΔT = 1.0
 T_hot = 0.5
@@ -111,7 +111,7 @@ coupler = NavierStokesScalarCoupler(ns_solver,
                                     (x, y, z=0.0, t=0.0) -> 0.0,
                                     bc_T,
                                     bc_T_cut;
-                                    strategy=MonolithicCoupling(tol=1e-6, maxiter=20, damping=0.8, verbose=true),
+                                    strategy=MonolithicCoupling(tol=1e-6, maxiter=100, damping=0.2, verbose=true),
                                     β=β,
                                     gravity=gravity,
                                     T_ref=0.0,
@@ -150,6 +150,21 @@ for j in 1:Ny_T
 end
 Nu_mean = mean(Nu_profile)
 println("Mean hot-wall Nusselt ≈ ", Nu_mean)
+
+
+# Mid-column velocity profile ------------------------------------------------
+idx_mid_x = findmin(abs.(mesh_ux.nodes[1] .- 0.5))[2]
+idx_mid_y = findmin(abs.(mesh_uy.nodes[2] .- 0.5))[2]
+
+u_line = abs.(Ux_grid[idx_mid_x, :])
+v_line = abs.(Uy_grid[:, idx_mid_y])
+println(u_line)
+println(v_line)
+
+v_mid_dimless = maximum(u_line[2:end-1]) / (α / L)
+u_mid_dimless = maximum(v_line[2:end-1]) / (α / L)
+println("Max vertical mid-column velocity (dimensionless) ≈ ", v_mid_dimless)
+println("Max horizontal mid-row velocity (dimensionless) ≈ ", u_mid_dimless)
 
 # Visualization --------------------------------------------------------------
 if @isdefined CairoMakie
