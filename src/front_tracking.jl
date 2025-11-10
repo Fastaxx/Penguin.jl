@@ -1361,13 +1361,26 @@ function compute_interface_info(mesh::Mesh{2}, front::FrontTracker)
                 total_length = 0.0
                 weighted_x = 0.0
                 weighted_y = 0.0
-                for line in LibGEOS.getGeometries(intersection)
-                    length = LibGEOS.geomLength(line)
+                fallback_point = nothing
+
+                for geom in LibGEOS.getGeometries(intersection)
+                    geom_type = LibGEOS.geomType(geom)
+
+                    if geom_type == "Point"
+                        fallback_point = (GeoInterface.x(geom), GeoInterface.y(geom))
+                        continue
+                    end
+
+                    length = LibGEOS.geomLength(geom)
+                    if length <= eps()
+                        continue
+                    end
+
                     total_length += length
-                    
+
                     # Point milieu de ce segment
-                    mid_point = LibGEOS.interpolate(line, 0.5)
-                    
+                    mid_point = LibGEOS.interpolate(geom, 0.5)
+
                     # Ajout au barycentre pondéré
                     weighted_x += GeoInterface.x(mid_point) * length
                     weighted_y += GeoInterface.y(mid_point) * length
@@ -1378,6 +1391,8 @@ function compute_interface_info(mesh::Mesh{2}, front::FrontTracker)
                 if total_length > 0
                     interface_points[(i, j)] = (weighted_x / total_length, 
                                                weighted_y / total_length)
+                elseif fallback_point !== nothing
+                    interface_points[(i, j)] = fallback_point
                 else
                     interface_points[(i, j)] = (0.0, 0.0)  # Cas où il n'y a pas d'interface
                 end
