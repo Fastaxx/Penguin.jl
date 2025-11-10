@@ -67,13 +67,17 @@ function run_mesh_convergence_ft(
         _, _, all_err, full_err, cut_err, empty_err =
             check_convergence(u_analytical, solver, capacity, norm, relative)
 
-        push!(h_vals, 1.0 / min(nx, ny))
+        push!(h_vals, min(lx / nx, ly / ny))
         push!(err_vals,       all_err)
         push!(err_full_vals,  full_err)
         push!(err_cut_vals,   cut_err)
         push!(err_empty_vals, empty_err)
         push!(inside_cells, count_inside_cells(capacity))
-        push!(inside_cells_by_dim, count_cells_by_dim_inside_body(capacity))
+        Δx = lx / nx
+        Δy = ly / ny
+        coverage_x = ceil(Int, 2 * radius / Δx)
+        coverage_y = ceil(Int, 2 * radius / Δy)
+        push!(inside_cells_by_dim, [coverage_x, coverage_y])
     end
 
     return (
@@ -135,13 +139,17 @@ function run_mesh_convergence(
         _, _, all_err, full_err, cut_err, empty_err =
             check_convergence(u_analytical, solver, capacity, norm, relative)
 
-        push!(h_vals, 1.0 / min(nx, ny))
+        push!(h_vals, min(lx / nx, ly / ny))
         push!(err_vals,       all_err)
         push!(err_full_vals,  full_err)
         push!(err_cut_vals,   cut_err)
         push!(err_empty_vals, empty_err)
         push!(inside_cells, count_inside_cells(capacity))
-        push!(inside_cells_by_dim, count_cells_by_dim_inside_body(capacity))
+        Δx = lx / nx
+        Δy = ly / ny
+        coverage_x = ceil(Int, 2 * radius / Δx)
+        coverage_y = ceil(Int, 2 * radius / Δy)
+        push!(inside_cells_by_dim, [coverage_x, coverage_y])
     end
 
     return (

@@ -1,0 +1,36 @@
+name: BenchPhaseFlow
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  benches:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Julia
+        uses: julia-actions/setup-julia@v1
+        with:
+          version: '1'
+
+      - name: Cache Julia artifacts
+        uses: julia-actions/cache@v1
+
+      - name: Instantiate project
+        run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
+
+      - name: Run BenchPhaseFlow problem scripts
+        run: |
+          set -euo pipefail
+          scripts=$(find BenchPhaseFlow/problems -name '*.jl' | sort)
+          for script in $scripts; do
+              echo "Running $script"
+              julia --project=. "$script"
+          done

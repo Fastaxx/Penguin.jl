@@ -2,6 +2,13 @@ using LsqFit
 using DataFrames
 
 """
+    count_inside_cells(capacity)
+
+Return the number of fully inside cells (cell type == 1).
+"""
+count_inside_cells(capacity) = count(x -> x == 1, capacity.cell_types)
+
+"""
     compute_orders(h_vals, err_vals, err_full_vals, err_cut_vals; use_last=3)
 
 Return rounded convergence-rate estimates for the global, full-cell, and cut-cell
@@ -64,50 +71,17 @@ function make_convergence_dataframe(method_name, data)
         fill!(lp_label, "L^$(norm_value)")
     end
 
-    inside_cells = haskey(data, :inside_cells) ? data.inside_cells : fill(missing, n)
-
-    return DataFrame(
-        method = fill(method_name, length(data.h_vals)),
+    df = DataFrame(
+        method = fill(method_name, n),
         h = data.h_vals,
         lp_norm = lp_label,
-        inside_cells = inside_cells,
+        inside_cells = data.inside_cells,
+        inside_cells_by_dim = data.inside_cells_by_dim,
         all_err = data.err_vals,
         full_err = data.err_full_vals,
         cut_err = data.err_cut_vals,
         empty_err = data.err_empty_vals
     )
-end
 
-
-"""
-    count_inside_cells(capacity)
-
-Return the number of fully inside cells (cell type == 1).
-"""
-count_inside_cells(capacity) = count(x -> x == 1, capacity.cell_types)
-
-"""
-    count_cells_by_dim_inside_body(capacity)
-
-Return the number of indices per dimension that contain at least one
-fully inside cell.
-"""
-function count_cells_by_dim_inside_body(capacity)
-    dims = capacity.mesh.dims .+1
-    reshaped = reshape(capacity.cell_types, dims...)
-    inside_mask = reshaped .== 1
-    nd = length(dims)
-    counts = Vector{Int}(undef, nd)
-
-    for d in 1:nd
-        c = 0
-        for idx in 1:dims[d]
-            slicer = ntuple(i -> i == d ? idx : Colon(), nd)
-            if any(view(inside_mask, slicer...))
-                c += 1
-            end
-        end
-        counts[d] = c
-    end
-    return counts
+    return df
 end

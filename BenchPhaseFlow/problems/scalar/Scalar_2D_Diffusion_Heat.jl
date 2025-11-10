@@ -70,8 +70,8 @@ function run_mesh_convergence_heat(
     err_full_vals = Float64[]
     err_cut_vals = Float64[]
     err_empty_vals = Float64[]
-    body_cells = Int[]
-    body_cells_by_dim = Vector{Vector{Int}}()
+    inside_cells = Int[]
+    inside_cells_by_dim = Vector{Vector{Int}}()
 
     for (nx, ny) in zip(nx_list, ny_list)
         mesh = Penguin.Mesh((nx, ny), (lx, ly), (0.0, 0.0))
@@ -102,13 +102,17 @@ function run_mesh_convergence_heat(
         _, _, global_err, full_err, cut_err, empty_err =
             check_convergence(u_analytical, solver, capacity, norm)
 
-        push!(h_vals, 1.0 / min(nx, ny))
+        push!(h_vals, min(lx / nx, ly / ny))
         push!(err_vals, global_err)
         push!(err_full_vals, full_err)
         push!(err_cut_vals, cut_err)
         push!(err_empty_vals, empty_err)
-        push!(body_cells, count_inside_cells(capacity))
-        push!(body_cells_by_dim, count_cells_by_dim_inside_body(capacity))
+        push!(inside_cells, count_inside_cells(capacity))
+        Δx = lx / nx
+        Δy = ly / ny
+        coverage_x = ceil(Int, 2 * radius / Δx)
+        coverage_y = ceil(Int, 2 * radius / Δy)
+        push!(inside_cells_by_dim, [coverage_x, coverage_y])
     end
 
     return (
@@ -117,8 +121,8 @@ function run_mesh_convergence_heat(
         err_full_vals = err_full_vals,
         err_cut_vals = err_cut_vals,
         err_empty_vals = err_empty_vals,
-        inside_cells = body_cells,
-        inside_cells_by_dim = body_cells_by_dim,
+        inside_cells = inside_cells,
+        inside_cells_by_dim = inside_cells_by_dim,
         orders = compute_orders(h_vals, err_vals, err_full_vals, err_cut_vals),
         norm = norm
     )
@@ -133,14 +137,12 @@ function write_convergence_csv(method_name, data; csv_path=nothing)
     return (csv_path = csv_out, table = df)
 end
 
-
 function main(; csv_path=nothing, nx_list=nothing)
-    nx_vals = isnothing(nx_list) ? [4, 8, 16, 32, 64] : nx_list    
+    nx_vals = isnothing(nx_list) ? [4, 8, 16, 32, 64] : nx_list
     ny_vals = nx_vals
     radius = 1.0
     center = (2.01, 2.01)
     u_analytical = radial_heat_solution(center, radius)
-
 
     data = run_mesh_convergence_heat(
         nx_vals, ny_vals, radius, center, u_analytical;

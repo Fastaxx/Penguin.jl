@@ -53,13 +53,15 @@ function run_mesh_convergence_1d(
         _, _, global_err, full_err, cut_err, empty_err =
             check_convergence(u_analytical, solver, capacity, norm, relative)
 
-        push!(h_vals, 1.0 / nx)
+        push!(h_vals, lx / nx)
         push!(err_vals,       global_err)
         push!(err_full_vals,  full_err)
         push!(err_cut_vals,   cut_err)
         push!(err_empty_vals, empty_err)
         push!(inside_cells, count_inside_cells(capacity))
-        push!(inside_cells_by_dim, count_cells_by_dim_inside_body(capacity))
+        Δx = lx / nx
+        coverage_x = ceil(Int, 2 * radius / Δx)
+        push!(inside_cells_by_dim, [coverage_x])
     end
 
     return (
