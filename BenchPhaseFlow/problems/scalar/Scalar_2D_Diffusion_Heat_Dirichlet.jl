@@ -132,7 +132,7 @@ function write_convergence_csv(method_name, data; csv_path=nothing)
     df = make_convergence_dataframe(method_name, data)
     results_dir = isnothing(csv_path) ? joinpath(BENCH_ROOT, "results", "scalar") : dirname(csv_path)
     mkpath(results_dir)
-    csv_out = isnothing(csv_path) ? joinpath(results_dir, "Scalar_2D_Diffusion_Heat_Convergence.csv") : csv_path
+    csv_out = isnothing(csv_path) ? joinpath(results_dir, "Scalar_2D_Diffusion_Heat_Dirichlet_Convergence.csv") : csv_path
     CSV.write(csv_out, df)
     return (csv_path = csv_out, table = df)
 end
@@ -149,7 +149,7 @@ function main(; csv_path=nothing, nx_list=nothing)
         lx = 4.0, ly = 4.0, norm = 2, Tend = 0.1
     )
 
-    csv_info = write_convergence_csv("Scalar_2D_Diffusion_Heat", data; csv_path=csv_path)
+    csv_info = write_convergence_csv("Scalar_2D_Diffusion_Heat_Dirichlet", data; csv_path=csv_path)
     return (data = data, csv_path = csv_info.csv_path, table = csv_info.table)
 end
 
