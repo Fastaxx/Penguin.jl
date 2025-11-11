@@ -2,8 +2,8 @@ name: BenchPhaseFlow
 
 on:
   push:
-    branches:
-      - main
+    branches-ignore:
+      - '**'  # Ignore tous les push sur toutes les branches
   pull_request:
   workflow_dispatch:
 
