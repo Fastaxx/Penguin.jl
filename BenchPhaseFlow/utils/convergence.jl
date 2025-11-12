@@ -56,6 +56,28 @@ function compute_orders(h_vals, err_vals, err_full_vals, err_cut_vals)
 end
 
 """
+    compute_pairwise_orders(h_vals, err_vals)
+
+Return per-level convergence orders computed between consecutive mesh levels:
+`p_i = log(e_{i-1}/e_i) / log(h_{i-1}/h_i)` for `i >= 2`. Entries with
+insufficient data are filled with `NaN`.
+"""
+function compute_pairwise_orders(h_vals, err_vals)
+    n = length(h_vals)
+    orders = fill(NaN, n)
+    for i in 2:n
+        h_prev = h_vals[i-1]
+        h_curr = h_vals[i]
+        e_prev = err_vals[i-1]
+        e_curr = err_vals[i]
+        if h_prev > 0 && h_curr > 0 && e_prev > 0 && e_curr > 0 && h_prev != h_curr
+            orders[i] = log(e_prev / e_curr) / log(h_prev / h_curr)
+        end
+    end
+    return orders
+end
+
+"""
     make_convergence_dataframe(method_name, data)
 
 Create a `DataFrame` with convergence information for a given method.
@@ -71,6 +93,10 @@ function make_convergence_dataframe(method_name, data)
         fill!(lp_label, "L^$(norm_value)")
     end
 
+    pair_all = compute_pairwise_orders(data.h_vals, data.err_vals)
+    pair_full = compute_pairwise_orders(data.h_vals, data.err_full_vals)
+    pair_cut = compute_pairwise_orders(data.h_vals, data.err_cut_vals)
+
     df = DataFrame(
         method = fill(method_name, n),
         h = data.h_vals,
@@ -80,7 +106,10 @@ function make_convergence_dataframe(method_name, data)
         all_err = data.err_vals,
         full_err = data.err_full_vals,
         cut_err = data.err_cut_vals,
-        empty_err = data.err_empty_vals
+        empty_err = data.err_empty_vals,
+        pair_order_all = pair_all,
+        pair_order_full = pair_full,
+        pair_order_cut = pair_cut
     )
 
     return df

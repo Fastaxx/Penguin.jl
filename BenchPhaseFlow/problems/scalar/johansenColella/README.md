@@ -21,3 +21,13 @@ VARIABLE-COEFFICIENT DIFFUSION OPERATOR IMPLEMENTATION.
 Implemented in `Problem3_FlowerLaplace.jl`, this problem focuses on solving the Laplace equation
 outside the star-shaped domain, with Dirichlet boundary conditions applied on the interface.
 Diagnostic outputs are the evaluations of potential overshoots and undershoots in the domain.
+
+## Problem 4: Poisson Equation in 3D with Spherical Interface
+Implemented in `Problem4_SchwartzColella_Poisson3D.jl`, this problem involves solving the Poisson equation
+in a three-dimensional domain with a spherical interface. The exact solution is known, and
+error norms are computed for convergence analysis.
+
+## Problem 5: Heat Equation in 3D with Spherical Interface
+Implemented in `Problem5_SchwartzColella_Heat3D.jl`, this problem addresses the heat equation
+in a three-dimensional domain with a spherical interface. The solution evolves over time,
+and error norms are calculated at the final time for convergence studies.
