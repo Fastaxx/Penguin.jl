@@ -15,7 +15,7 @@ rectangle and all moving elliptical holes. The interface centers translate with
 the prescribed velocities from the problem statement.
 """
 
-const BENCH_ROOT = normpath(joinpath(@__DIR__, "..", ".."))
+const BENCH_ROOT = normpath(joinpath(@__DIR__, "..", "..", "..", ".."))
 include(joinpath(BENCH_ROOT, "utils", "convergence.jl"))
 
 function run_moving_dirichlet_convergence(
@@ -38,7 +38,8 @@ function run_moving_dirichlet_convergence(
 
     for (nx, ny) in zip(nx_list, ny_list)
         mesh = Penguin.Mesh((nx, ny), (lx, ly), (x0, y0))
-        Δt = 0.25 * min((lx / nx)^2, (ly / ny)^2)
+        k = 0.75
+        Δt = k * (ly / ny)^2
         Tstart = Δt
 
         st_mesh = Penguin.SpaceTimeMesh(mesh, [0.0, Δt])
@@ -93,7 +94,7 @@ end
 
 function write_convergence_csv(method_name, data; csv_path=nothing)
     df = make_convergence_dataframe(method_name, data)
-    default_dir = joinpath(BENCH_ROOT, "results", "scalar", "PrescribedMotion")
+    default_dir = joinpath(BENCH_ROOT, "results", "scalar")
     results_dir = isnothing(csv_path) ? default_dir : dirname(csv_path)
     mkpath(results_dir)
     csv_out = isnothing(csv_path) ? joinpath(results_dir, "$(method_name)_Convergence.csv") : csv_path
@@ -102,7 +103,7 @@ function write_convergence_csv(method_name, data; csv_path=nothing)
 end
 
 function main(; csv_path=nothing, nx_list=nothing, ny_list=nothing)
-    nx_vals = isnothing(nx_list) ? [16, 32, 64] : nx_list
+    nx_vals = isnothing(nx_list) ? [4, 9, 16, 33] : nx_list
     ny_vals = isnothing(ny_list) ? nx_vals : ny_list
     Tend = 0.1
 

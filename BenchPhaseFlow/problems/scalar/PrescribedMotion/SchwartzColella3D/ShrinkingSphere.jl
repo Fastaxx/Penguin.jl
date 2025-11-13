@@ -10,6 +10,7 @@ using Test
 The exact solution and source are identical to the fixed case, but the radius
 decreases in time. Dirichlet data track the analytic solution along the moving
 boundary and the outer box.
+NOTE : THIS SCRIPT CURRENTLY NOT WORKING
 """
 
 const BENCH_ROOT = normpath(joinpath(@__DIR__, "..", "..", "..", ".."))

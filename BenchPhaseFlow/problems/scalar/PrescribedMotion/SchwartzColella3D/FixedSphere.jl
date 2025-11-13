@@ -14,6 +14,7 @@ and the source term is
                  * exp(-(x² + y² + z²)/(5 (t + 1))).
 Dirichlet data on both the immersed sphere and the external box boundaries
 match the analytical solution. This script performs a mesh-convergence study.
+NOTE : THIS SCRIPT CURRENTLY NOT WORKING
 """
 
 const BENCH_ROOT = normpath(joinpath(@__DIR__, "..", "..", "..", ".."))
