@@ -414,7 +414,7 @@ end
 Optimized boundary condition application with single pass through boundary cells.
 """
 function BC_border_mono!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Float64}, 
-                                   bc_b::BorderConditions, mesh::AbstractMesh)
+                                   bc_b::BorderConditions, mesh::AbstractMesh; t=nothing)
     # Single pass through boundary cells - O(n) complexity
     for (ci, pos) in mesh.tag.border_cells
         # Classify boundary in O(1) time
@@ -428,7 +428,7 @@ function BC_border_mono!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Float64},
         li = cell_to_index(mesh, ci)
         
         # Apply boundary condition
-        apply_boundary_condition_fast!(A, b, li, pos, condition, boundary_key, bc_b, mesh)
+        apply_boundary_condition_fast!(A, b, li, pos, condition, boundary_key, bc_b, mesh, t)
     end
 end
 
@@ -437,12 +437,21 @@ end
 
 Fast application of a single boundary condition.
 """
-function apply_boundary_condition_fast!(A, b, li, pos, condition, boundary_key, bc_b, mesh)
+eval_bc_value(value, pos, t) = value isa Function ? (
+    t === nothing ? value(pos...) :
+        try
+            value(pos..., t)
+        catch e
+            e isa MethodError ? value(pos...) : rethrow()
+        end
+) : value
+
+function apply_boundary_condition_fast!(A, b, li, pos, condition, boundary_key, bc_b, mesh, t=nothing)
     if condition isa Dirichlet
         # Dirichlet: A[li, li] = 1, b[li] = value
         A[li, :] .= 0.0
         A[li, li] = 1.0
-        b[li] = condition.value isa Function ? condition.value(pos...) : condition.value
+        b[li] = eval_bc_value(condition.value, pos, t)
         
     elseif condition isa Periodic
         # Find corresponding cell efficiently
@@ -473,7 +482,7 @@ function apply_boundary_condition_fast!(A, b, li, pos, condition, boundary_key, 
                 li_adj = boundary_key == :left ? min(li+1, dims[1]) : max(li-1, 1)
             end
 
-            gval = condition.value isa Function ? condition.value(pos...) : condition.value
+            gval = eval_bc_value(condition.value, pos, t)
 
             A[li, :] .= 0.0
             A[li, li] =  1.0/Δx

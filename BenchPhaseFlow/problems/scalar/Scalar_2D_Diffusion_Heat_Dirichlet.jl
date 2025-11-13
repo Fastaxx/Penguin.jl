@@ -9,7 +9,7 @@ using Test
 
 """
 Scalar 2D Diffusion Heat Equation Convergence Test
-This script performs a mesh-convergence study for the 2D heat equation
+This script performs a mesh-convergence study for the 2D heat equation with Dirichlet boundary conditions
 using the Penguin.jl library. It computes errors and estimated orders of convergence
 for different mesh sizes and writes the results to a CSV file.
 Analytical solution : u(r,t) = (1 - Σ A_n * exp(-a * (α_n^2) * t / R^2) * J0(α_n * (r / R))) * (wr - w0) + w0
@@ -28,7 +28,7 @@ function radial_heat_solution(center::Tuple{Float64,Float64}, R::Float64;
     Nzeros::Int = 200
 )
     function j0_zeros_robin(N, k, R; guess_shift = 0.25)
-        eq(alpha) = alpha * besselj1(alpha) - k * R * besselj0(alpha)
+        eq(alpha) = besselj0(alpha)
         zs = zeros(Float64, N)
         for m in 1:N
             x_left  = max((m - guess_shift - 0.5) * π, 1e-6)
@@ -47,10 +47,9 @@ function radial_heat_solution(center::Tuple{Float64,Float64}, R::Float64;
         end
         s = 0.0
         for α in alphas
-            An = 2.0 * k * R / ((k^2 * R^2 + α^2) * besselj0(α))
-            s += An * exp(-a * α^2 * t / R^2) * besselj0(α * (r / R))
+            s += exp(-α^2 * t) * besselj0(α * (r / R)) / (α * besselj1(α))
         end
-        return (1.0 - s) * (wr - w0) + w0
+        return 1.0 - 2.0*s
     end
 end
 
@@ -81,7 +80,7 @@ function run_mesh_convergence_heat(
 
         w0 = 0.0
         wr = 1.0
-        bc_boundary = Robin(1.0, 1.0, wr)
+        bc_boundary = Dirichlet(wr)
         bc0 = Dirichlet(w0)
         bc_b = BorderConditions(Dict(
             :left   => bc0,

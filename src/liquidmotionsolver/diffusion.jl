@@ -166,7 +166,7 @@ function MovingLiquidDiffusionUnsteadyMono(phase::Phase, bc_b::BorderConditions,
         s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, "BE")
         s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc_i, Tᵢ, Δt, 0.0, "BE")
     end
-    BC_border_mono!(s.A, s.b, bc_b, mesh)
+    BC_border_mono!(s.A, s.b, bc_b, mesh; t=0.0)
     return s
 end
 
@@ -287,7 +287,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
         s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc, scheme)
         s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc, Tᵢ, Δt, t, scheme)
 
-        BC_border_mono!(s.A, s.b, bc_b, mesh)
+        BC_border_mono!(s.A, s.b, bc_b, mesh; t=tn1)
 
         # 5) Update variables
         current_xf = new_xf
@@ -348,7 +348,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
         s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc, scheme)
         s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc, Tᵢ, Δt, 0.0, scheme)
 
-        BC_border_mono!(s.A, s.b, bc_b, mesh)
+        BC_border_mono!(s.A, s.b, bc_b, mesh; t=t)
 
         err = Inf
         iter = 0
@@ -412,7 +412,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono!(s::Solver, phase::Phase, xf, �
             s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc, scheme)
             s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc, Tᵢ, Δt, t, scheme)
 
-            BC_border_mono!(s.A, s.b, bc_b, mesh) # use mesh instead of phase.capacity.mesh for BC
+            BC_border_mono!(s.A, s.b, bc_b, mesh; t=tn1) # use mesh instead of phase.capacity.mesh for BC
 
             # 5) Update variables
             current_xf = new_xf

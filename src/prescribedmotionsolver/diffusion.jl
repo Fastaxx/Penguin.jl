@@ -28,7 +28,7 @@ function MovingDiffusionUnsteadyMono(phase::Phase, bc_b::BorderConditions, bc_i:
         s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, "BE")
         s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc_i, Tᵢ, Δt, 0.0, "BE")
     end
-    BC_border_mono!(s.A, s.b, bc_b, mesh)
+    BC_border_mono!(s.A, s.b, bc_b, mesh; t=0.0)
     return s
 end
 
@@ -105,6 +105,7 @@ function A_mono_unstead_diff_moving(operator::DiffusionOps, capacity::Capacity, 
     # Pick capacity.A index based on dimension
     #  => 2 for 1D: capacity.A[2]
     #  => 3 for 2D: capacity.A[3]
+    #  => 4 for 3D: capacity.A[4]
     cap_index = len_dims
     
     # Extract Vr (current) & Vr-1 (previous) from capacity
@@ -133,6 +134,10 @@ function A_mono_unstead_diff_moving(operator::DiffusionOps, capacity::Capacity, 
         # 2D problem
         nx, ny, nt = dims
         n = nx*ny
+    elseif len_dims == 4
+        # 3D problem
+        nx, ny, nz, nt = dims
+        n = nx*ny*nz
     else
         error("A_mono_unstead_diff_moving_generic not supported for dimension $(len_dims).")
     end
@@ -188,6 +193,10 @@ function b_mono_unstead_diff_moving(operator::DiffusionOps, capacity::Capacity, 
         # 2D case
         nx, ny, nt = dims
         n = nx*ny
+    elseif len_dims == 4
+        # 3D case
+        nx, ny, nz, nt = dims
+        n = nx*ny*nz
     else
         error("b_mono_unstead_diff_moving not supported for dimension $len_dims")
     end
@@ -215,7 +224,7 @@ function b_mono_unstead_diff_moving(operator::DiffusionOps, capacity::Capacity, 
     return [b1; b2]
 end
 
-function solve_MovingDiffusionUnsteadyMono!(s::Solver, phase::Phase, body::Function, Δt::Float64, Tₛ::Float64, Tₑ::Float64, bc_b::BorderConditions, bc::AbstractBoundary, mesh::AbstractMesh, scheme::String; method = IterativeSolvers.gmres, algorithm=nothing, kwargs...)
+function solve_MovingDiffusionUnsteadyMono!(s::Solver, phase::Phase, body::Function, Δt::Float64, Tₛ::Float64, Tₑ::Float64, bc_b::BorderConditions, bc::AbstractBoundary, mesh::AbstractMesh, scheme::String; method = IterativeSolvers.gmres, algorithm=nothing, geometry_method="VOFI", kwargs...)
     if s.A === nothing
         error("Solver is not initialized. Call a solver constructor first.")
     end
@@ -240,13 +249,13 @@ function solve_MovingDiffusionUnsteadyMono!(s::Solver, phase::Phase, body::Funct
         t += Δt
         println("Time : $(t)")
         STmesh = Penguin.SpaceTimeMesh(mesh, [t, t+Δt], tag=mesh.tag)
-        capacity = Capacity(body, STmesh; compute_centroids=true)
+        capacity = Capacity(body, STmesh; compute_centroids=true, method=geometry_method)
         operator = DiffusionOps(capacity)
 
         s.A = A_mono_unstead_diff_moving(operator, capacity, phase.Diffusion_coeff, bc, scheme)
         s.b = b_mono_unstead_diff_moving(operator, capacity, phase.Diffusion_coeff, phase.source, bc, Tᵢ, Δt, t, scheme)
 
-        BC_border_mono!(s.A, s.b, bc_b, mesh)  
+        BC_border_mono!(s.A, s.b, bc_b, mesh; t=t) 
 
         # Solve system
         solve_system!(s; method, algorithm=algorithm, kwargs...)

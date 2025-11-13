@@ -181,7 +181,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono2D!(s::Solver, phase::Phase, Int
         s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc, scheme)
         s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc, Tᵢ, Δt, t, scheme)
 
-        BC_border_mono!(s.A, s.b, bc_b, mesh)
+        BC_border_mono!(s.A, s.b, bc_b, mesh; t=tₙ₊₁)
 
         # 10) Update variables
         current_Hₙ = new_Hₙ
@@ -284,7 +284,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono2D!(s::Solver, phase::Phase, Int
         s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc, scheme)
         s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc, Tᵢ, Δt, 0.0, scheme)
 
-        BC_border_mono!(s.A, s.b, bc_b, mesh)
+        BC_border_mono!(s.A, s.b, bc_b, mesh; t=tₙ₊₁)
 
         push!(reconstruct, sₙ₊₁)
 
@@ -411,7 +411,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono2D!(s::Solver, phase::Phase, Int
             s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc, scheme)
             s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc, Tᵢ, Δt, 0.0, scheme)
 
-            BC_border_mono!(s.A, s.b, bc_b, mesh)
+            BC_border_mono!(s.A, s.b, bc_b, mesh; t=tₙ₊₁)
 
             # 10) Update variables
             current_Hₙ = new_Hₙ

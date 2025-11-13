@@ -164,7 +164,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono_coupledNewton!(s::Solver, phase
 
             s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc, scheme)
             s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc, vcat(φω, φγ), Δt, tn, scheme)
-            BC_border_mono!(s.A, s.b, bc_b, mesh)
+            BC_border_mono!(s.A, s.b, bc_b, mesh; t=tn1)
 
             rhsω = s.b[1:n]
             rhsγ = s.b[n+1:2n]
@@ -196,7 +196,7 @@ function solve_MovingLiquidDiffusionUnsteadyMono_coupledNewton!(s::Solver, phase
 
         s.A = A_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc, scheme)
         s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc, Tᵢ, Δt, 0.0, scheme)
-        BC_border_mono!(s.A, s.b, bc_b, mesh)
+        BC_border_mono!(s.A, s.b, bc_b, mesh; t=t)
 
         rhsω = s.b[1:n]
         rhsγ = s.b[n+1:2n]

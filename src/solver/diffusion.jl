@@ -204,7 +204,7 @@ function DiffusionUnsteadyMono(phase::Phase, bc_b::BorderConditions, bc_i::Abstr
         s.A = A_mono_unstead_diff(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, Δt, "BE")
         s.b = b_mono_unstead_diff(phase.operator, phase.source, phase.Diffusion_coeff, phase.capacity, bc_i, Tᵢ, Δt, 0.0, "BE")
     end
-    BC_border_mono!(s.A, s.b, bc_b, phase.capacity.mesh)
+    BC_border_mono!(s.A, s.b, bc_b, phase.capacity.mesh; t=0.0)
 
     return s
 end
@@ -289,7 +289,7 @@ function solve_DiffusionUnsteadyMono!(s::Solver, phase::Phase, Δt::Float64, T�
 
         s.b = b_mono_unstead_diff(phase.operator, phase.source, phase.Diffusion_coeff, phase.capacity, bc, Tᵢ, Δt, t, scheme)
 
-        BC_border_mono!(s.A, s.b, bc_b, phase.capacity.mesh)
+        BC_border_mono!(s.A, s.b, bc_b, phase.capacity.mesh; t=t)
         
         solve_system!(s; method, algorithm=algorithm, kwargs...)
 

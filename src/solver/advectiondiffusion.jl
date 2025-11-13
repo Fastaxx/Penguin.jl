@@ -270,7 +270,7 @@ function solve_AdvectionDiffusionUnsteadyMono!(s::Solver, phase::Phase, Δt::Flo
         println("Time: ", t)
         s.A = A_mono_unstead_advdiff(phase.operator, phase.capacity, phase.Diffusion_coeff, bc, Δt, scheme)
         s.b = b_mono_unstead_advdiff(phase.operator, phase.source, phase.capacity, bc, s.x, Δt, t, scheme)
-        BC_border_mono!(s.A, s.b, bc_b, phase.capacity.mesh)
+        BC_border_mono!(s.A, s.b, bc_b, phase.capacity.mesh; t=t)
         
         solve_system!(s; method, algorithm=algorithm, kwargs...)
 

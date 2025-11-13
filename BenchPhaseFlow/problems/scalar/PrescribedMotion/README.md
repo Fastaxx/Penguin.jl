@@ -34,3 +34,5 @@ the moving boundary, and $u_0(x)$ is the initial scalar field.
 - `SchwartzColella/ShrinkingDisk.jl`: A 2D heat diffusion problem with a circular body that shrinks over time. This problem tests the method's capability to handle disappearing cut-cells and verifies convergence rates.
 
 - `Heat_1D_Moving_ConstantBC.jl`: A 1D heat diffusion problem with a moving boundary where the boundary condition is constant. This problem verifies that the numerical solution preserves the constant state while the cut location moves.
+
+- `JohansenColella/FixedDirichlet.jl`: A 2D heat diffusion problem with a fixed elliptical body and Dirichlet boundary conditions on both the outer box and the ellipse boundaries. This problem verifies convergence rates for fixed boundaries.

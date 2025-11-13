@@ -53,7 +53,7 @@ function DarcyFlowUnsteady(phase::Phase, bc_b::BorderConditions, bc_i::AbstractB
     s.A = A_mono_unstead_diff(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, Δt, scheme)
     s.b = b_mono_unstead_diff(phase.operator, phase.source, phase.Diffusion_coeff, phase.capacity, bc_i, Tᵢ, Δt, 0.0, scheme)
 
-    BC_border_mono!(s.A, s.b, bc_b, phase.capacity.mesh)
+    BC_border_mono!(s.A, s.b, bc_b, phase.capacity.mesh; t=0.0)
     return s
 end
 
@@ -79,7 +79,7 @@ function solve_DarcyFlowUnsteady!(s::Solver, phase::Phase, Δt::Float64, Tₑ::F
         s.A = A_mono_unstead_diff(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, Δt, scheme)
         s.b = b_mono_unstead_diff(phase.operator, phase.source, phase.Diffusion_coeff, phase.capacity, bc_i, Tᵢ, Δt, t, scheme)
 
-        BC_border_mono!(s.A, s.b, bc_b, phase.capacity.mesh)
+        BC_border_mono!(s.A, s.b, bc_b, phase.capacity.mesh; t=t)
 
         solve_system!(s; method, algorithm=algorithm, kwargs...)
 

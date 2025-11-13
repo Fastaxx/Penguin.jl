@@ -357,7 +357,7 @@ function StefanMono2D(phase::Phase, bc_b::BorderConditions, bc_i::AbstractBounda
         s.b = b_mono_unstead_diff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc_i, Tᵢ, Δt, 0.0, "BE")
     end
     
-    BC_border_mono!(s.A, s.b, bc_b, mesh)
+    BC_border_mono!(s.A, s.b, bc_b, mesh; t=0.0)
     
     s.x = Tᵢ
     return s
@@ -1079,7 +1079,7 @@ function solve_StefanMono2D!(s::Solver, phase::Phase, front::FrontTracker, Δt::
                                             phase_updated.Diffusion_coeff, phase_updated.source, 
                                             bc, Tᵢ, Δt, tₙ, scheme)
             
-            BC_border_mono!(s.A, s.b, bc_b, mesh)
+            BC_border_mono!(s.A, s.b, bc_b, mesh; t=tₙ₊₁)
             
             # 10. Update phase for next iteration
             phase = phase_updated
@@ -1352,7 +1352,7 @@ function solve_StefanMono2D_geom!(s::Solver, phase::Phase, front::FrontTracker, 
                                             phase_updated.Diffusion_coeff, phase_updated.source,
                                             bc, Tᵢ, Δt, tₙ, scheme)
 
-            BC_border_mono!(s.A, s.b, bc_b, mesh)
+            BC_border_mono!(s.A, s.b, bc_b, mesh; t=tₙ₊₁)
 
             phase = phase_updated
 

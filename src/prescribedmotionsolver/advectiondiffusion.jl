@@ -28,7 +28,7 @@ function MovingAdvDiffusionUnsteadyMono(phase::Phase, bc_b::BorderConditions, bc
         s.A = A_mono_unstead_advdiff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, bc_i, "BE")
         s.b = b_mono_unstead_advdiff_moving(phase.operator, phase.capacity, phase.Diffusion_coeff, phase.source, bc_i, Tᵢ, Δt, 0.0, "BE")
     end
-    BC_border_mono!(s.A, s.b, bc_b, mesh)
+    BC_border_mono!(s.A, s.b, bc_b, mesh; t=0.0)
     return s
 end
 
@@ -229,7 +229,7 @@ function solve_MovingAdvDiffusionUnsteadyMono!(s::Solver, phase::Phase, body::Fu
         s.A = A_mono_unstead_advdiff_moving(operator, capacity, phase.Diffusion_coeff, bc, scheme)
         s.b = b_mono_unstead_advdiff_moving(operator, capacity, phase.Diffusion_coeff, phase.source, bc, Tᵢ, Δt, t, scheme)
 
-        BC_border_mono!(s.A, s.b, bc_b, mesh)  
+        BC_border_mono!(s.A, s.b, bc_b, mesh; t=t)
 
         # Solve system
         solve_system!(s; method, algorithm=algorithm, kwargs...)
