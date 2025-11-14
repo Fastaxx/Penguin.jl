@@ -187,7 +187,7 @@ solve_StokesMono!(solver; method=Base.:\)
 println("Couette cylinder benchmark solved. Unknowns = ", length(solver.x))
 
 ###########
-# Post-processing: tangential profile along x=0 (vertical)
+# Post-processing: select aligned points along x=0 (upper half)
 ###########
 x_nodes_x = mesh_ux.nodes[1]
 y_nodes_x = mesh_ux.nodes[2]
@@ -201,16 +201,14 @@ i_axis = argmin(abs.(x_nodes_x .- 0.0))
 
 profile_points = Tuple{Float64,Float64,Float64,Float64,Float64}[]
 for (j, yval) in enumerate(y_nodes_x)
-    yval < 0 && continue  # use only the upper half-plane to keep radii ordered
-    r = yval
-    if r <= params.R₁ + 1dy || r >= params.R₂ - 1dy
+    if yval <= params.R₁ + 3dy || yval >= params.R₂ - 3dy
         continue
     end
     idx = LI_ux[i_axis, j]
     Ux_val = uωx[idx]
-    ux_exact = -tangential_velocity(r, params)
+    ux_exact = -tangential_velocity(yval, params)
     uθ_num = -Ux_val
-    push!(profile_points, (r, yval, Ux_val, ux_exact, uθ_num))
+    push!(profile_points, (yval, yval, Ux_val, ux_exact, uθ_num))
 end
 
 num_vals = [val[3] for val in profile_points]
@@ -240,43 +238,15 @@ end
 # uθ(r) profile plot
 ###########
 if !isempty(profile_points)
-    radii = [pt[1] for pt in profile_points]
-    order = sortperm(radii)
-    r_sorted = radii[order]
-    uθ_num_sorted = [profile_points[i][5] for i in order]
-    uθ_exact_sorted = [tangential_velocity(r_sorted[i], params) for i in 1:length(r_sorted)]
-
-    function linear_interp(xs::Vector{Float64}, ys::Vector{Float64}, targets)
-        n = length(xs)
-        n == 1 && return fill(ys[1], length(targets))
-        vals = similar(targets)
-        for (k, t) in enumerate(targets)
-            if t <= xs[1]
-                vals[k] = ys[1]
-            elseif t >= xs[end]
-                vals[k] = ys[end]
-            else
-                j = searchsortedlast(xs, t)
-                j = clamp(j, 1, n-1)
-                x1, x2 = xs[j], xs[j+1]
-                y1, y2 = ys[j], ys[j+1]
-                α = (t - x1) / (x2 - x1)
-                vals[k] = (1-α) * y1 + α * y2
-            end
-        end
-        return vals
-    end
-
-    r_dense = collect(range(first(r_sorted), last(r_sorted), length=200))
-    uθ_num_dense = linear_interp(r_sorted, uθ_num_sorted, r_dense)
-    uθ_exact_dense = [tangential_velocity(r, params) for r in r_dense]
+    r_sorted = [pt[1] for pt in profile_points]
+    uθ_num_sorted = [pt[5] for pt in profile_points]
+    uθ_exact_sorted = [tangential_velocity(r, params) for r in r_sorted]
 
     fig_profile = Figure(resolution=(640, 360))
     axp = Axis(fig_profile[1, 1], xlabel="r", ylabel="uθ", title="Tangential velocity profile")
-    lines!(axp, r_dense, uθ_num_dense; label="numerical (interp)")
-    scatter!(axp, r_sorted, uθ_num_sorted; color=:black, markersize=6)
-    lines!(axp, r_dense, uθ_exact_dense; color=:red, linestyle=:dash, label="exact")
-    axislegend(axp, position=:rt)
+    scatter!(axp, r_sorted, uθ_num_sorted; color=:blue, markersize=6, label="numerical points")
+    lines!(axp, r_sorted, uθ_exact_sorted; color=:red, linestyle=:dash, label="exact")
+    axislegend(axp, position=:rb)
     display(fig_profile)
     save("stokes2d_couettecylinder_profile.png", fig_profile)
 end
