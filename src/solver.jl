@@ -446,23 +446,25 @@ eval_bc_value(value, pos, t) = value isa Function ? (
         end
 ) : value
 
-function apply_boundary_condition_fast!(A, b, li, pos, condition, boundary_key, bc_b, mesh, t=nothing)
+function apply_boundary_condition_fast!(A, b, li, pos, condition, boundary_key, bc_b, mesh, t=nothing; offset::Int=0)
+    row_idx = li + offset
     if condition isa Dirichlet
         # Dirichlet: A[li, li] = 1, b[li] = value
-        A[li, :] .= 0.0
-        A[li, li] = 1.0
-        b[li] = eval_bc_value(condition.value, pos, t)
+        A[row_idx, :] .= 0.0
+        A[row_idx, row_idx] = 1.0
+        b[row_idx] = eval_bc_value(condition.value, pos, t)
         
     elseif condition isa Periodic
         # Find corresponding cell efficiently
         opposite_key = get_opposite_boundary(boundary_key)
         if haskey(bc_b.borders, opposite_key)
             corresponding_idx = find_corresponding_cell_optimized(li, boundary_key, mesh)
-            A[li, :] .= 0.0
+            corresponding_idx += offset
+            A[row_idx, :] .= 0.0
             # Apply periodic constraint: x_li - x_corresponding = 0
-            A[li, li] += 1.0
-            A[li, corresponding_idx] -= 1.0
-            b[li] = 0.0
+            A[row_idx, row_idx] += 1.0
+            A[row_idx, corresponding_idx] -= 1.0
+            b[row_idx] = 0.0
         end
         
     elseif condition isa Neumann
@@ -484,10 +486,10 @@ function apply_boundary_condition_fast!(A, b, li, pos, condition, boundary_key, 
 
             gval = eval_bc_value(condition.value, pos, t)
 
-            A[li, :] .= 0.0
-            A[li, li] =  1.0/Δx
-            A[li, li_adj] += -1.0/Δx
-            b[li] = gval
+            A[row_idx, :] .= 0.0
+            A[row_idx, row_idx] =  1.0/Δx
+            A[row_idx, li_adj + offset] += -1.0/Δx
+            b[row_idx] = gval
         else
             @warn "Neumann BC currently implemented for 1D only in BC_border_mono!" maxlog=1
         end
@@ -533,51 +535,24 @@ end
 Optimized diphasic boundary condition application with single pass.
 """
 function BC_border_diph!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Float64}, 
-                                   bc_b::BorderConditions, mesh::AbstractMesh)
-    phase_size = size(A, 1) ÷ 4
-    
-    # Single pass through boundary cells
+                                   bc_b::BorderConditions, mesh::AbstractMesh; t=nothing)
+    nrows = size(A, 1)
+    phase_size = nrows ÷ 4
+    if phase_size * 4 != nrows
+        error("BC_border_diph! expects a 4-block system, got size $(nrows)")
+    end
+
+    phase_offsets = (0, 2 * phase_size)
+
     for (ci, pos) in mesh.tag.border_cells
         boundary_key = classify_boundary_cell_fast(ci, mesh)
         condition = get(bc_b.borders, boundary_key, nothing)
         isnothing(condition) && continue
-        
+
         li = cell_to_index(mesh, ci)
-        
-        # Apply to both phases efficiently
-        apply_diphasic_boundary_condition_fast!(A, b, li, pos, condition, phase_size)
-    end
-end
-
-"""
-    apply_diphasic_boundary_condition_fast!(A, b, li, pos, condition, phase_size)
-
-Fast application of boundary conditions to both phases in diphasic problems.
-"""
-function apply_diphasic_boundary_condition_fast!(A, b, li, pos, condition, phase_size)
-    # Calculate indices for both phases and both fields (ω, γ)
-    li_ω1 = li                           # Phase 1 bulk
-    li_γ1 = li + phase_size              # Phase 1 interface  
-    li_ω2 = li + 2 * phase_size          # Phase 2 bulk
-    li_γ2 = li + 3 * phase_size          # Phase 2 interface
-    
-    value = condition.value isa Function ? condition.value(pos...) : condition.value
-    
-    if condition isa Dirichlet
-        # Apply Dirichlet to all four fields
-        for idx in [li_ω1, li_γ1, li_ω2, li_γ2]
-            A[idx, :] .= 0.0
-            A[idx, idx] = 1.0
-            b[idx] = value
+        for offset in phase_offsets
+            apply_boundary_condition_fast!(A, b, li, pos, condition, boundary_key, bc_b, mesh, t; offset=offset)
         end
-        
-    elseif condition isa Periodic
-        # Apply periodic constraints to all four fields
-        # (Implementation would depend on specific periodic boundary logic)
-        @warn "Periodic BC for diphasic not fully implemented" maxlog=1
-        
-    elseif condition isa Neumann || condition isa Robin
-        @warn "Neumann/Robin BC for diphasic not yet implemented" maxlog=1
     end
 end
 
