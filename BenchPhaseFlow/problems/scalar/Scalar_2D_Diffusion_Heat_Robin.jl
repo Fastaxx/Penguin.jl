@@ -137,7 +137,7 @@ function write_convergence_csv(method_name, data; csv_path=nothing)
 end
 
 function main(; csv_path=nothing, nx_list=nothing)
-    nx_vals = isnothing(nx_list) ? [4, 8, 16, 32, 64] : nx_list
+    nx_vals = isnothing(nx_list) ? [4, 8, 16, 32, 64, 128] : nx_list
     ny_vals = nx_vals
     radius = 1.0
     center = (2.01, 2.01)

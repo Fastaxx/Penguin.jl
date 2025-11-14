@@ -3,7 +3,7 @@
 # Weighted Lp or L∞ norm helper
 function lp_norm(errors, indices, pval, capacity)
     if pval == Inf
-        return maximum(abs.(errors[indices]))
+        return maximum(abs.(errors[indices]), init=0.0)
     else
         part_sum = 0.0
         for i in indices

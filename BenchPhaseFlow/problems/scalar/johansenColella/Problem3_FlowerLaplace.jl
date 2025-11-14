@@ -86,7 +86,7 @@ function write_stats_csv(method_name, stats; csv_path=nothing)
 end
 
 function main(; nx_list=nothing, csv_path=nothing)
-    nx_vals = isnothing(nx_list) ? [32, 64, 128, 256] : nx_list
+    nx_vals = isnothing(nx_list) ? [4, 8, 16, 32, 64, 128, 256] : nx_list
     stats = run_flower_study(nx_vals)
     csv_info = write_stats_csv("JohansenColella_P3", stats; csv_path=csv_path)
     return (stats = stats, csv_path = csv_info.csv_path, table = csv_info.table)
