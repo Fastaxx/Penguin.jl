@@ -89,7 +89,7 @@ function AdvectionDiffusionSteadyDiph(phase1::Phase, phase2::Phase, bc_b::Border
     s.A = A_diph_stead_advdiff(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic)
     s.b = b_diph_stead_advdiff(phase1.operator, phase2.operator, phase1.source, phase2.source, phase1.capacity, phase2.capacity, ic)
 
-    BC_border_diph!(s.A, s.b, bc_b, phase2.capacity.mesh)
+    BC_border_diph!(s.A, s.b, bc_b, phase1.capacity, phase2.capacity)
 
     return s
 end
@@ -407,7 +407,7 @@ function solve_AdvectionDiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phase2:
 
         s.A = A_diph_unstead_advdiff(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Δt, scheme)
         s.b = b_diph_unstead_advdiff(phase1.operator, phase2.operator, phase1.source, phase2.source, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Tᵢ, Δt, t, scheme)
-        BC_border_diph!(s.A, s.b, bc_b, phase2.capacity.mesh)
+        BC_border_diph!(s.A, s.b, bc_b, phase1.capacity, phase2.capacity)
         
         solve_system!(s; method, algorithm=algorithm, kwargs...)
 

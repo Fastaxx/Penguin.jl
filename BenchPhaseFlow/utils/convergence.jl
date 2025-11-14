@@ -114,3 +114,53 @@ function make_convergence_dataframe(method_name, data)
 
     return df
 end
+
+"""
+    make_diphasic_convergence_dataframe(method_name, data)
+
+Create a `DataFrame` with per-phase and combined convergence information for a
+two-phase configuration. `data` must provide the same fields as the monophasic
+case plus per-phase errors and cell counts.
+"""
+function make_diphasic_convergence_dataframe(method_name, data)
+    n = length(data.h_vals)
+    lp_label = Vector{Union{Missing,String}}(undef, n)
+    norm_value = haskey(data, :norm) ? data.norm : nothing
+
+    if isnothing(norm_value)
+        fill!(lp_label, missing)
+    else
+        fill!(lp_label, "L^$(norm_value)")
+    end
+
+    pair_all = compute_pairwise_orders(data.h_vals, data.err_vals)
+    pair_full = compute_pairwise_orders(data.h_vals, data.err_full_vals)
+    pair_cut = compute_pairwise_orders(data.h_vals, data.err_cut_vals)
+
+    df = DataFrame(
+        method = fill(method_name, n),
+        h = data.h_vals,
+        lp_norm = lp_label,
+        inside_cells = data.inside_cells,
+        inside_cells_phase1 = data.inside_cells_phase1,
+        inside_cells_phase2 = data.inside_cells_phase2,
+        inside_cells_by_dim = data.inside_cells_by_dim,
+        all_err = data.err_vals,
+        full_err = data.err_full_vals,
+        cut_err = data.err_cut_vals,
+        empty_err = data.err_empty_vals,
+        phase1_all_err = data.phase1_all_errs,
+        phase1_full_err = data.phase1_full_errs,
+        phase1_cut_err = data.phase1_cut_errs,
+        phase1_empty_err = data.phase1_empty_errs,
+        phase2_all_err = data.phase2_all_errs,
+        phase2_full_err = data.phase2_full_errs,
+        phase2_cut_err = data.phase2_cut_errs,
+        phase2_empty_err = data.phase2_empty_errs,
+        pair_order_all = pair_all,
+        pair_order_full = pair_full,
+        pair_order_cut = pair_cut
+    )
+
+    return df
+end

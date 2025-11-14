@@ -529,13 +529,27 @@ function find_corresponding_cell_optimized(li::Int, boundary_key::Symbol, mesh::
 end
 
 """
-    BC_border_diph_optimized!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Float64}, 
-                               bc_b::BorderConditions, mesh::AbstractMesh)
+    BC_border_diph!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Float64}, 
+                    bc_b::BorderConditions, args...; t=nothing)
 
-Optimized diphasic boundary condition application with single pass.
+Apply diphasic boundary conditions either using only the mesh (legacy behavior)
+or, when capacities for each phase are provided, applying them only where the
+phase exists.
 """
 function BC_border_diph!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Float64}, 
-                                   bc_b::BorderConditions, mesh::AbstractMesh; t=nothing)
+                         bc_b::BorderConditions, mesh::AbstractMesh; t=nothing)
+    _BC_border_diph!(A, b, bc_b, mesh, nothing; t=t)
+end
+
+function BC_border_diph!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Float64}, 
+                         bc_b::BorderConditions, cap1::Capacity, cap2::Capacity; t=nothing)
+    mesh = cap1.mesh
+    mesh === cap2.mesh || error("Phase capacities must share the same mesh.")
+    _BC_border_diph!(A, b, bc_b, mesh, (cap1, cap2); t=t)
+end
+
+function _BC_border_diph!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Float64}, 
+                          bc_b::BorderConditions, mesh::AbstractMesh, capacities; t=nothing)
     nrows = size(A, 1)
     phase_size = nrows ÷ 4
     if phase_size * 4 != nrows
@@ -550,8 +564,16 @@ function BC_border_diph!(A::SparseMatrixCSC{Float64, Int}, b::Vector{Float64},
         isnothing(condition) && continue
 
         li = cell_to_index(mesh, ci)
-        for offset in phase_offsets
-            apply_boundary_condition_fast!(A, b, li, pos, condition, boundary_key, bc_b, mesh, t; offset=offset)
+        if capacities === nothing
+            for offset in phase_offsets
+                apply_boundary_condition_fast!(A, b, li, pos, condition, boundary_key, bc_b, mesh, t; offset=offset)
+            end
+        else
+            for (offset, cap) in zip(phase_offsets, capacities)
+                cell_type = cap.cell_types[li]
+                cell_type == 0 && continue
+                apply_boundary_condition_fast!(A, b, li, pos, condition, boundary_key, bc_b, mesh, t; offset=offset)
+            end
         end
     end
 end

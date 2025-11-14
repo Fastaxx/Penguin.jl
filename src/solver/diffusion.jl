@@ -96,7 +96,7 @@ function DiffusionSteadyDiph(phase1::Phase, phase2::Phase, bc_b::BorderCondition
     s.A = A_diph_stead_diff(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, bc_b, ic)
     s.b = b_diph_stead_diff(phase1.operator, phase2.operator, phase1.source, phase2.source, phase1.capacity, phase2.capacity, bc_b, ic)
 
-    BC_border_diph!(s.A, s.b, bc_b, phase2.capacity.mesh)
+    BC_border_diph!(s.A, s.b, bc_b, phase1.capacity, phase2.capacity)
 
     return s
 end
@@ -327,7 +327,7 @@ function DiffusionUnsteadyDiph(phase1::Phase, phase2::Phase, bc_b::BorderConditi
     s.A = A_diph_unstead_diff(phase1.operator, phase2.operator, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Δt, scheme)
     s.b = b_diph_unstead_diff(phase1.operator, phase2.operator, phase1.source, phase2.source, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Tᵢ, Δt, 0.0, scheme)
 
-    BC_border_diph!(s.A, s.b, bc_b, phase2.capacity.mesh)
+    BC_border_diph!(s.A, s.b, bc_b, phase1.capacity, phase2.capacity)
     return s
 end
 
@@ -443,7 +443,7 @@ function solve_DiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phase2::Phase, �
 
         s.b = b_diph_unstead_diff(phase1.operator, phase2.operator, phase1.source, phase2.source, phase1.capacity, phase2.capacity, phase1.Diffusion_coeff, phase2.Diffusion_coeff, ic, Tᵢ, Δt, t, scheme)
 
-        BC_border_diph!(s.A, s.b, bc_b, phase2.capacity.mesh)
+        BC_border_diph!(s.A, s.b, bc_b, phase1.capacity, phase2.capacity)
         
         solve_system!(s; method, algorithm=algorithm, kwargs...)
 
@@ -452,4 +452,3 @@ function solve_DiffusionUnsteadyDiph!(s::Solver, phase1::Phase, phase2::Phase, �
         Tᵢ = s.x
     end
 end
-
