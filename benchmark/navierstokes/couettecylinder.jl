@@ -140,7 +140,7 @@ bc_uy = BorderConditions(Dict(
 pressure_gauge = MeanPressureGauge()
 
 function couette_cut_component(component::Symbol, params::CouetteCylinderParams)
-    tol = 2e-3
+    tol = 1e-2
     return (x, y, _=0.0) -> begin
         r = hypot(x, y)
         if abs(r - params.R₁) <= tol
@@ -277,7 +277,7 @@ xp = mesh_p.nodes[1]; yp = mesh_p.nodes[2]
 P_field = reshape(pω, (length(xp), length(yp)))
 fig_p = Figure(resolution=(600, 420))
 axp2 = Axis(fig_p[1, 1], xlabel="x", ylabel="y", title="Couette cylinder: pressure")
-heatmap!(axp2, xp, yp, P_field'; colormap=:balance)
+heatmap!(axp2, xp, yp, P_field'; colormap=:viridis)
 contour!(axp2, mesh_ux.nodes[1], mesh_ux.nodes[2], body_values'; levels=[0.0], color=:white, linewidth=2)
 Colorbar(fig_p[1, 2], label="p")
 display(fig_p)

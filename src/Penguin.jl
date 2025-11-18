@@ -153,11 +153,6 @@ export CouplingStrategy, PassiveCoupling, PicardCoupling, MonolithicCoupling
 export NavierStokesScalarCoupler, step!, solve_NavierStokesScalarCoupling!, solve_NavierStokesScalarCoupling_steady!,
        solve_NavierStokesScalarCoupling_steady_monolithic!
 
-include("solver/navierstokes_levelset.jl")
-export NavierStokesVelocitySampler, update_velocity_sampler!
-export body_function_from_levelset, update_solver_geometry!
-export build_levelset_advection_equation, solve_NavierStokesLevelSet_unsteady!
-
 include("solver/streamfunction_vorticity.jl")
 export StreamVorticity, solve_StreamVorticity!, step_StreamVorticity!, run_StreamVorticity!, run_until_StreamVorticity!
 end

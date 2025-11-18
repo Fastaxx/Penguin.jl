@@ -2,7 +2,7 @@
 
 julia_version = "1.11.2"
 manifest_format = "2.0"
-project_hash = "de94965810f7cc2c902b5dc13d3b33400a105358"
+project_hash = "09d3c1c88f1270e394ccd4013dcce7499a8c6a99"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "be7ae030256b8ef14a441726c4c37766b90b93a3"
@@ -1049,24 +1049,6 @@ version = "1.11.0"
 git-tree-sha1 = "a560dd966b386ac9ae60bdd3a3d3a326062d3c3e"
 uuid = "8cdb02fc-e678-4876-92c5-9defec4f444e"
 version = "0.3.1"
-
-[[deps.LevelSetMethods]]
-deps = ["LinearAlgebra", "StaticArrays"]
-git-tree-sha1 = "bdd1aa726650d6eb4fef8a26e9d3988d861c8720"
-uuid = "ca3df947-0575-4ae6-b9a3-78df393a7451"
-version = "0.1.4"
-
-    [deps.LevelSetMethods.extensions]
-    InterpolationsExt = "Interpolations"
-    MMGSurfaceExt = ["MMG_jll", "MarchingCubes"]
-    MMGVolumeExt = "MMG_jll"
-    MakieExt = "Makie"
-
-    [deps.LevelSetMethods.weakdeps]
-    Interpolations = "a98d9a8b-a2ab-59e6-89dd-64a1c18fca59"
-    MMG_jll = "86086c02-e288-5929-a127-40944b0018b7"
-    Makie = "ee78f7c6-11fb-53f2-987a-cfe4a2b5a57a"
-    MarchingCubes = "299715c1-40a9-479a-aaf9-4a633d36f717"
 
 [[deps.LibCURL]]
 deps = ["LibCURL_jll", "MozillaCACerts_jll"]
