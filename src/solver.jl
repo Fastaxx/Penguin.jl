@@ -12,6 +12,7 @@ end
     Diffusion           # ∂ₜT = ∇·(∇T) + S
     Advection           # ∂ₜT = -∇·(uT) + S
     DiffusionAdvection  # ∂ₜT = ∇·(D∇T) - ∇·(uT) + S
+    Stokes              # Momentum/continuity saddle-point systems
 end
 
 """
@@ -22,7 +23,7 @@ The `Solver` struct represents a solver for a specific type of problem.
 # Fields
 - `time_type::TT`: The type of time used in the solver : `Steady` or `Unsteady`.
 - `phase_type::PT`: The type of phase used in the solver : `Monophasic` or `Diphasic`.
-- `equation_type::ET`: The type of equation used in the solver : `Diffusion`, `Advection` or `DiffusionAdvection`.
+- `equation_type::ET`: The type of equation used in the solver : `Diffusion`, `Advection`, `DiffusionAdvection`, or `Stokes`.
 - `A::Union{SparseMatrixCSC{Float64, Int}, Nothing}`: The coefficient matrix A of the equation system, if applicable.
 - `b::Union{Vector{Float64}, Nothing}`: The right-hand side vector b of the equation system, if applicable.
 - `x::Union{Vector{Float64}, Nothing}`: The solution vector x of the equation system, if applicable.
