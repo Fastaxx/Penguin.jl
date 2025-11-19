@@ -1,227 +1,324 @@
-"""
-    StokesDiph
-
-Diphasic Stokes solver container holding phase A/B data, interface conditions, and
-assembled system matrices. Assembly is not yet implemented.
-"""
-mutable struct StokesDiph{N}
-    fluid_a::Fluid{N}
-    fluid_b::Fluid{N}
-    bc_u_a::NTuple{N, BorderConditions}
-    bc_u_b::NTuple{N, BorderConditions}
-    pressure_gauge::AbstractPressureGauge
+mutable struct StokesDiph
+    fluid_a::Fluid{2}
+    fluid_b::Fluid{2}
+    bc_u_a::NTuple{2,BorderConditions}
+    bc_u_b::NTuple{2,BorderConditions}
     interface::InterfaceConditions
-    bc_cut::AbstractBoundary
-
+    pressure_gauge_a::AbstractPressureGauge
+    pressure_gauge_b::AbstractPressureGauge
     A::SparseMatrixCSC{Float64, Int}
     b::Vector{Float64}
     x::Vector{Float64}
     ch::Vector{Any}
 end
 
-struct StokesPhaseBlocks1D
-    nu::Int
-    np::Int
-    op_u::DiffusionOps
-    cap_u::Capacity
-    visc_uω::SparseMatrixCSC{Float64,Int}
-    visc_uγ::SparseMatrixCSC{Float64,Int}
-    grad::SparseMatrixCSC{Float64,Int}
-    div_uω::SparseMatrixCSC{Float64,Int}
-    div_uγ::SparseMatrixCSC{Float64,Int}
-    mass::SparseMatrixCSC{Float64,Int}
-    V::SparseMatrixCSC{Float64,Int}
+function StokesDiph(fluid_a::Fluid{2}, fluid_b::Fluid{2},
+                    bc_u_a::NTuple{2,BorderConditions},
+                    bc_u_b::NTuple{2,BorderConditions},
+                    interface::InterfaceConditions;
+                    pressure_gauge_a::AbstractPressureGauge=DEFAULT_PRESSURE_GAUGE,
+                    pressure_gauge_b::AbstractPressureGauge=DEFAULT_PRESSURE_GAUGE,
+                    x0=zeros(0))
+    nu_components = ntuple(i -> prod(fluid_a.operator_u[i].size), 2)
+    np = prod(fluid_a.operator_p.size)
+    Ntot = 2 * sum(nu_components) + np
+    Ntot = 2 * Ntot  # two phases
+    x_init = length(x0) == Ntot ? copy(x0) : zeros(Ntot)
+    A = spzeros(Float64, Ntot, Ntot)
+    b = zeros(Ntot)
+    return StokesDiph(fluid_a, fluid_b, bc_u_a, bc_u_b, interface,
+                      pressure_gauge_a, pressure_gauge_b,
+                      A, b, x_init, Any[])
 end
 
-function build_phase_blocks_1D(fluid::Fluid{1})
-    op_u = fluid.operator_u[1]
+function stokes2D_phase_blocks(fluid::Fluid{2})
+    ops_u = fluid.operator_u
+    caps_u = fluid.capacity_u
     op_p = fluid.operator_p
-    cap_u = fluid.capacity_u[1]
     cap_p = fluid.capacity_p
 
-    nu = prod(op_u.size)
+    nu_x = prod(ops_u[1].size)
+    nu_y = prod(ops_u[2].size)
     np = prod(op_p.size)
 
     μ = fluid.μ
-    μinv = μ isa Function ? (args...)->1.0/μ(args...) : 1.0/μ
-    Iμ⁻¹ = build_I_D(op_u, μinv, cap_u)
+    Iμ_x = build_I_D(ops_u[1], μ, caps_u[1])
+    Iμ_y = build_I_D(ops_u[2], μ, caps_u[2])
 
-    WG_uG = op_u.Wꜝ * op_u.G
-    WG_uH = op_u.Wꜝ * op_u.H
+    WGx_Gx = ops_u[1].Wꜝ * ops_u[1].G
+    WGx_Hx = ops_u[1].Wꜝ * ops_u[1].H
+    visc_x_ω = (Iμ_x * ops_u[1].G' * WGx_Gx)
+    visc_x_γ = (Iμ_x * ops_u[1].G' * WGx_Hx)
 
-    visc_uω = -(Iμ⁻¹ * op_u.G' * WG_uG)
-    visc_uγ = -(Iμ⁻¹ * op_u.G' * WG_uH)
-    grad = -((op_p.G + op_p.H))
+    WGy_Gy = ops_u[2].Wꜝ * ops_u[2].G
+    WGy_Hy = ops_u[2].Wꜝ * ops_u[2].H
+    visc_y_ω = (Iμ_y * ops_u[2].G' * WGy_Gy)
+    visc_y_γ = (Iμ_y * ops_u[2].G' * WGy_Hy)
 
-    div_uω = - (op_p.G' + op_p.H')
-    div_uγ =   (op_p.H')
+    grad_full = (op_p.G + op_p.H)
+    total_grad_rows = size(grad_full, 1)
+    @assert total_grad_rows == nu_x + nu_y "Pressure gradient rows ($(total_grad_rows)) must match velocity DOFs ($(nu_x + nu_y))."
 
-    ρ = fluid.ρ
-    Iρ = build_I_D(op_u, ρ, cap_u)
-    mass = Iρ * op_u.V
-
-    return StokesPhaseBlocks1D(nu, np, op_u, cap_u,
-                               visc_uω, visc_uγ,
-                               grad, div_uω, div_uγ,
-                               mass, op_u.V)
-end
-
-struct StokesPhaseBlocks2D
-    nu_x::Int
-    nu_y::Int
-    np::Int
-    op_ux::DiffusionOps
-    op_uy::DiffusionOps
-    op_p::DiffusionOps
-    cap_ux::Capacity
-    cap_uy::Capacity
-    visc_x_ω::SparseMatrixCSC{Float64,Int}
-    visc_x_γ::SparseMatrixCSC{Float64,Int}
-    visc_y_ω::SparseMatrixCSC{Float64,Int}
-    visc_y_γ::SparseMatrixCSC{Float64,Int}
-    grad_x::SparseMatrixCSC{Float64,Int}
-    grad_y::SparseMatrixCSC{Float64,Int}
-    div_x_ω::SparseMatrixCSC{Float64,Int}
-    div_x_γ::SparseMatrixCSC{Float64,Int}
-    div_y_ω::SparseMatrixCSC{Float64,Int}
-    div_y_γ::SparseMatrixCSC{Float64,Int}
-    mass_x::SparseMatrixCSC{Float64,Int}
-    mass_y::SparseMatrixCSC{Float64,Int}
-    Vx::SparseMatrixCSC{Float64,Int}
-    Vy::SparseMatrixCSC{Float64,Int}
-end
-
-function build_phase_blocks_2D(fluid::Fluid{2})
-    opx, opy = fluid.operator_u
-    capx, capy = fluid.capacity_u
-    opp = fluid.operator_p
-    capp = fluid.capacity_p
-
-    nu_x = prod(opx.size)
-    nu_y = prod(opy.size)
-    np = prod(opp.size)
-
-    μ = fluid.μ
-    μinv = μ isa Function ? (args...)->1.0/μ(args...) : 1.0/μ
-    Iμx⁻¹ = build_I_D(opx, μinv, capx)
-    Iμy⁻¹ = build_I_D(opy, μinv, capy)
-
-    WGx_Gx = opx.Wꜝ * opx.G
-    WGx_Hx = opx.Wꜝ * opx.H
-    Vx_x = -(Iμx⁻¹ * opx.G' * WGx_Gx)
-    Vx_y = -(Iμx⁻¹ * opx.G' * WGx_Hx)
-
-    WGy_Gy = opy.Wꜝ * opy.G
-    WGy_Hy = opy.Wꜝ * opy.H
-    Vy_x = -(Iμy⁻¹ * opy.G' * WGy_Gy)
-    Vy_y = -(Iμy⁻¹ * opy.G' * WGy_Hy)
-
-    grad_full = (opp.G + opp.H)
-    total_rows = size(grad_full, 1)
-    @assert total_rows == nu_x + nu_y
     x_rows = 1:nu_x
     y_rows = nu_x+1:nu_x+nu_y
     grad_x = -grad_full[x_rows, :]
     grad_y = -grad_full[y_rows, :]
 
-    Gp = opp.G; Hp = opp.H
-    Gp_x = Gp[x_rows, :]; Hp_x = Hp[x_rows, :]
-    Gp_y = Gp[y_rows, :]; Hp_y = Hp[y_rows, :]
+    Gp = op_p.G
+    Hp = op_p.H
+    Gp_x = Gp[x_rows, :]
+    Hp_x = Hp[x_rows, :]
+    Gp_y = Gp[y_rows, :]
+    Hp_y = Hp[y_rows, :]
     div_x_ω = - (Gp_x' + Hp_x')
     div_x_γ =   (Hp_x')
     div_y_ω = - (Gp_y' + Hp_y')
     div_y_γ =   (Hp_y')
 
     ρ = fluid.ρ
-    mass_x = build_I_D(opx, ρ, capx) * opx.V
-    mass_y = build_I_D(opy, ρ, capy) * opy.V
+    mass_x = build_I_D(ops_u[1], ρ, caps_u[1]) * ops_u[1].V
+    mass_y = build_I_D(ops_u[2], ρ, caps_u[2]) * ops_u[2].V
 
-    return StokesPhaseBlocks2D(nu_x, nu_y, np,
-                               opx, opy, opp, capx, capy,
-                               Vx_x, Vx_y, Vy_x, Vy_y,
-                               grad_x, grad_y,
-                               div_x_ω, div_x_γ, div_y_ω, div_y_γ,
-                               mass_x, mass_y,
-                               opx.V, opy.V)
+    return (; nu_x, nu_y, np,
+            op_ux = ops_u[1], op_uy = ops_u[2], op_p, cap_px = caps_u[1], cap_py = caps_u[2], cap_p,
+            visc_x_ω, visc_x_γ, visc_y_ω, visc_y_γ,
+            grad_x, grad_y,
+            div_x_ω, div_x_γ, div_y_ω, div_y_γ,
+            tie_x = I(nu_x), tie_y = I(nu_y),
+            mass_x, mass_y,
+            Vx = ops_u[1].V, Vy = ops_u[2].V)
 end
 
-function StokesDiph(fluid_a::Fluid{N}, fluid_b::Fluid{N},
-                    bc_u_a::NTuple{N,BorderConditions},
-                    bc_u_b::NTuple{N,BorderConditions},
-                    pressure_gauge::AbstractPressureGauge,
-                    interface::InterfaceConditions,
-                    bc_cut::AbstractBoundary;
-                    x0=zeros(0)) where {N}
-    nu_components_a = ntuple(i -> prod(fluid_a.operator_u[i].size), N)
-    nu_components_b = ntuple(i -> prod(fluid_b.operator_u[i].size), N)
-    np = prod(fluid_a.operator_p.size)
-    Ntot = 2 * (sum(nu_components_a) + sum(nu_components_b)) + np
-    x_init = length(x0) == Ntot ? x0 : zeros(Ntot)
-
-    A = spzeros(Float64, Ntot, Ntot)
-    b = zeros(Ntot)
-
-    return StokesDiph{N}(fluid_a, fluid_b,
-                         bc_u_a, bc_u_b,
-                         pressure_gauge, interface, bc_cut,
-                         A, b, x_init, Any[])
+@inline function velocity_coords(mesh::AbstractMesh)
+    xs = mesh.nodes[1]
+    ys = mesh.nodes[2]
+    coords = Vector{Tuple{Float64,Float64}}(undef, length(xs) * length(ys))
+    idx = 1
+    for j in eachindex(ys)
+        for i in eachindex(xs)
+            coords[idx] = (xs[i], ys[j])
+            idx += 1
+        end
+    end
+    return coords
 end
 
-StokesDiph(fluid_a::Fluid{1}, fluid_b::Fluid{1},
-           bc_u_a::BorderConditions,
-           bc_u_b::BorderConditions,
-           pressure_gauge::AbstractPressureGauge,
-           interface::InterfaceConditions,
-           bc_cut::AbstractBoundary;
-           x0=zeros(0)) = StokesDiph(fluid_a, fluid_b,
-                                     (bc_u_a,), (bc_u_b,),
-                                     pressure_gauge, interface, bc_cut;
-                                     x0=x0)
-
-function StokesDiph(fluid_a::Fluid{N}, fluid_b::Fluid{N},
-                    bc_u_a::NTuple{N,BorderConditions},
-                    bc_u_b::NTuple{N,BorderConditions},
-                    bc_p::BorderConditions,
-                    interface::InterfaceConditions,
-                    bc_cut::AbstractBoundary;
-                    x0=zeros(0)) where {N}
-    return StokesDiph(fluid_a, fluid_b,
-                      bc_u_a, bc_u_b,
-                      normalize_pressure_gauge(bc_p),
-                      interface, bc_cut; x0=x0)
-end
-
-StokesDiph(fluid_a::Fluid{1}, fluid_b::Fluid{1},
-           bc_u_a::BorderConditions,
-           bc_u_b::BorderConditions,
-           bc_p::BorderConditions,
-           interface::InterfaceConditions,
-           bc_cut::AbstractBoundary;
-           x0=zeros(0)) = StokesDiph(fluid_a, fluid_b,
-                                     (bc_u_a,), (bc_u_b,),
-                                     normalize_pressure_gauge(bc_p),
-                                     interface, bc_cut;
-                                     x0=x0)
-
-function assemble_stokes!(s::StokesDiph)
-    N = length(s.fluid_a.operator_u)
-    if N == 1
-        return assemble_stokes1D!(s)
-    elseif N == 2
-        return assemble_stokes2D!(s)
+@inline function coeff_vector(coeff, coords)
+    if coeff isa Function
+        return Float64[coeff(c...) for c in coords]
     else
-        error("StokesDiph assembly not implemented for N=$(N)")
+        return fill(Float64(coeff), length(coords))
     end
 end
 
-function solve_StokesDiph!(s::StokesDiph; method=Base.:\, algorithm=nothing, kwargs...)
-    assemble_stokes!(s)
+function assemble_stokes_diph!(s::StokesDiph)
+    data_a = stokes2D_phase_blocks(s.fluid_a)
+    data_b = stokes2D_phase_blocks(s.fluid_b)
+
+    @assert data_a.nu_x == data_b.nu_x "Velocity x-grid mismatch"
+    @assert data_a.nu_y == data_b.nu_y "Velocity y-grid mismatch"
+    @assert data_a.np == data_b.np "Pressure grid mismatch"
+    mesh_ux = s.fluid_a.mesh_u[1]
+    mesh_uy = s.fluid_a.mesh_u[2]
+    ux_coords = velocity_coords(mesh_ux)
+    uy_coords = velocity_coords(mesh_uy)
+
+    nu_x = data_a.nu_x
+    nu_y = data_a.nu_y
+    sum_nu = nu_x + nu_y
+    np = data_a.np
+
+    rows_phase = 2 * sum_nu + np
+    jump_rows = nu_x + nu_y
+    flux_rows = nu_x + nu_y
+    total_rows = 2 * rows_phase + jump_rows + flux_rows
+    total_cols = 2 * (2 * sum_nu + np)
+
+    A = spzeros(Float64, total_rows, total_cols)
+    b = zeros(total_rows)
+
+    # Phase offsets
+    off_u1ωx = 0
+    off_u1γx = nu_x
+    off_u1ωy = 2 * nu_x
+    off_u1γy = 2 * nu_x + nu_y
+    off_p1   = 2 * sum_nu
+
+    base2 = off_p1 + np
+    off_u2ωx = base2
+    off_u2γx = base2 + nu_x
+    off_u2ωy = base2 + 2 * nu_x
+    off_u2γy = base2 + 2 * nu_x + nu_y
+    off_p2   = base2 + 2 * sum_nu
+
+    # Row offsets
+    row_phase1 = 0
+    row_phase2 = rows_phase
+    row_jump = 2 * rows_phase
+    row_flux = row_jump + jump_rows
+
+    # --- Phase 1 blocks (identical to StokesMono 2D) ---
+    row_u1ωx = row_phase1
+    row_u1γx = row_phase1 + nu_x
+    row_u1ωy = row_phase1 + 2 * nu_x
+    row_u1γy = row_phase1 + 2 * nu_x + nu_y
+    row_con1 = row_phase1 + 2 * sum_nu
+
+    A[row_u1ωx+1:row_u1ωx+nu_x, off_u1ωx+1:off_u1ωx+nu_x] = data_a.visc_x_ω
+    A[row_u1ωx+1:row_u1ωx+nu_x, off_u1γx+1:off_u1γx+nu_x] = data_a.visc_x_γ
+    A[row_u1ωx+1:row_u1ωx+nu_x, off_p1+1:off_p1+np]       = data_a.grad_x
+    A[row_u1γx+1:row_u1γx+nu_x, off_u1γx+1:off_u1γx+nu_x] = data_a.tie_x
+
+    A[row_u1ωy+1:row_u1ωy+nu_y, off_u1ωy+1:off_u1ωy+nu_y] = data_a.visc_y_ω
+    A[row_u1ωy+1:row_u1ωy+nu_y, off_u1γy+1:off_u1γy+nu_y] = data_a.visc_y_γ
+    A[row_u1ωy+1:row_u1ωy+nu_y, off_p1+1:off_p1+np]       = data_a.grad_y
+    A[row_u1γy+1:row_u1γy+nu_y, off_u1γy+1:off_u1γy+nu_y] = data_a.tie_y
+
+    con_rows = row_con1+1:row_con1+np
+    A[con_rows, off_u1ωx+1:off_u1ωx+nu_x] = data_a.div_x_ω
+    A[con_rows, off_u1γx+1:off_u1γx+nu_x] = data_a.div_x_γ
+    A[con_rows, off_u1ωy+1:off_u1ωy+nu_y] = data_a.div_y_ω
+    A[con_rows, off_u1γy+1:off_u1γy+nu_y] = data_a.div_y_γ
+
+    f₁x = safe_build_source(data_a.op_ux, s.fluid_a.fᵤ, data_a.cap_px, nothing)
+    f₁y = safe_build_source(data_a.op_uy, s.fluid_a.fᵤ, data_a.cap_py, nothing)
+    b[row_u1ωx+1:row_u1ωx+nu_x] = data_a.Vx * f₁x
+    b[row_u1ωy+1:row_u1ωy+nu_y] = data_a.Vy * f₁y
+    b[row_u1γx+1:row_u1γx+nu_x] .= 0.0
+    b[row_u1γy+1:row_u1γy+nu_y] .= 0.0
+
+    # --- Phase 2 blocks ---
+    row_u2ωx = row_phase2
+    row_u2γx = row_phase2 + nu_x
+    row_u2ωy = row_phase2 + 2 * nu_x
+    row_u2γy = row_phase2 + 2 * nu_x + nu_y
+    row_con2 = row_phase2 + 2 * sum_nu
+
+    A[row_u2ωx+1:row_u2ωx+nu_x, off_u2ωx+1:off_u2ωx+nu_x] = data_b.visc_x_ω
+    A[row_u2ωx+1:row_u2ωx+nu_x, off_u2γx+1:off_u2γx+nu_x] = data_b.visc_x_γ
+    A[row_u2ωx+1:row_u2ωx+nu_x, off_p2+1:off_p2+np]       = data_b.grad_x
+    A[row_u2γx+1:row_u2γx+nu_x, off_u2γx+1:off_u2γx+nu_x] = data_b.tie_x
+
+    A[row_u2ωy+1:row_u2ωy+nu_y, off_u2ωy+1:off_u2ωy+nu_y] = data_b.visc_y_ω
+    A[row_u2ωy+1:row_u2ωy+nu_y, off_u2γy+1:off_u2γy+nu_y] = data_b.visc_y_γ
+    A[row_u2ωy+1:row_u2ωy+nu_y, off_p2+1:off_p2+np]       = data_b.grad_y
+    A[row_u2γy+1:row_u2γy+nu_y, off_u2γy+1:off_u2γy+nu_y] = data_b.tie_y
+
+    con_rows2 = row_con2+1:row_con2+np
+    A[con_rows2, off_u2ωx+1:off_u2ωx+nu_x] = data_b.div_x_ω
+    A[con_rows2, off_u2γx+1:off_u2γx+nu_x] = data_b.div_x_γ
+    A[con_rows2, off_u2ωy+1:off_u2ωy+nu_y] = data_b.div_y_ω
+    A[con_rows2, off_u2γy+1:off_u2γy+nu_y] = data_b.div_y_γ
+
+    f₂x = safe_build_source(data_b.op_ux, s.fluid_b.fᵤ, data_b.cap_px, nothing)
+    f₂y = safe_build_source(data_b.op_uy, s.fluid_b.fᵤ, data_b.cap_py, nothing)
+    b[row_u2ωx+1:row_u2ωx+nu_x] = data_b.Vx * f₂x
+    b[row_u2ωy+1:row_u2ωy+nu_y] = data_b.Vy * f₂y
+    b[row_u2γx+1:row_u2γx+nu_x] .= 0.0
+    b[row_u2γy+1:row_u2γy+nu_y] .= 0.0
+
+    # --- Interface scalar jump (uγ continuity) ---
+    jump = s.interface.scalar
+    jump_vec_x1 = coeff_vector(jump.α₁, ux_coords)
+    jump_vec_x2 = coeff_vector(jump.α₂, ux_coords)
+    jump_vec_y1 = coeff_vector(jump.α₁, uy_coords)
+    jump_vec_y2 = coeff_vector(jump.α₂, uy_coords)
+
+    row_sx = row_jump + 1
+    row_sy = row_jump + nu_x + 1
+    A[row_sx-1+1:row_sx-1+nu_x, off_u1γx+1:off_u1γx+nu_x] = spdiagm(0 => jump_vec_x1)
+    A[row_sx-1+1:row_sx-1+nu_x, off_u2γx+1:off_u2γx+nu_x] -= spdiagm(0 => jump_vec_x2)
+    b[row_sx:row_sx+nu_x-1] = safe_build_g(data_a.op_ux, jump, data_a.cap_px, nothing)
+
+    A[row_sy-1+1:row_sy-1+nu_y, off_u1γy+1:off_u1γy+nu_y] = spdiagm(0 => jump_vec_y1)
+    A[row_sy-1+1:row_sy-1+nu_y, off_u2γy+1:off_u2γy+nu_y] -= spdiagm(0 => jump_vec_y2)
+    b[row_sy:row_sy+nu_y-1] = safe_build_g(data_a.op_uy, jump, data_a.cap_py, nothing)
+
+    # --- Interface flux jump (traction continuity) ---
+    flux = s.interface.flux
+    flux_vec_x1 = coeff_vector(flux.β₁, ux_coords)
+    flux_vec_x2 = coeff_vector(flux.β₂, ux_coords)
+    flux_vec_y1 = coeff_vector(flux.β₁, uy_coords)
+    flux_vec_y2 = coeff_vector(flux.β₂, uy_coords)
+
+    Txω_a = data_a.op_ux.H' * (data_a.op_ux.Wꜝ * data_a.op_ux.G)
+    Txγ_a = data_a.op_ux.H' * (data_a.op_ux.Wꜝ * data_a.op_ux.H)
+    Txω_b = data_b.op_ux.H' * (data_b.op_ux.Wꜝ * data_b.op_ux.G)
+    Txγ_b = data_b.op_ux.H' * (data_b.op_ux.Wꜝ * data_b.op_ux.H)
+
+    Tyω_a = data_a.op_uy.H' * (data_a.op_uy.Wꜝ * data_a.op_uy.G)
+    Tyγ_a = data_a.op_uy.H' * (data_a.op_uy.Wꜝ * data_a.op_uy.H)
+    Tyω_b = data_b.op_uy.H' * (data_b.op_uy.Wꜝ * data_b.op_uy.G)
+    Tyγ_b = data_b.op_uy.H' * (data_b.op_uy.Wꜝ * data_b.op_uy.H)
+
+    row_fx = row_flux + 1
+    row_fy = row_flux + nu_x + 1
+
+    A[row_fx-1+1:row_fx-1+nu_x, off_u1ωx+1:off_u1ωx+nu_x] = spdiagm(0 => flux_vec_x1) * Txω_a
+    A[row_fx-1+1:row_fx-1+nu_x, off_u1γx+1:off_u1γx+nu_x] = spdiagm(0 => flux_vec_x1) * Txγ_a
+    A[row_fx-1+1:row_fx-1+nu_x, off_u2ωx+1:off_u2ωx+nu_x] -= spdiagm(0 => flux_vec_x2) * Txω_b
+    A[row_fx-1+1:row_fx-1+nu_x, off_u2γx+1:off_u2γx+nu_x] -= spdiagm(0 => flux_vec_x2) * Txγ_b
+    b[row_fx:row_fx+nu_x-1] = safe_build_g(data_a.op_ux, flux, data_a.cap_px, nothing)
+
+    A[row_fy-1+1:row_fy-1+nu_y, off_u1ωy+1:off_u1ωy+nu_y] = spdiagm(0 => flux_vec_y1) * Tyω_a
+    A[row_fy-1+1:row_fy-1+nu_y, off_u1γy+1:off_u1γy+nu_y] = spdiagm(0 => flux_vec_y1) * Tyγ_a
+    A[row_fy-1+1:row_fy-1+nu_y, off_u2ωy+1:off_u2ωy+nu_y] -= spdiagm(0 => flux_vec_y2) * Tyω_b
+    A[row_fy-1+1:row_fy-1+nu_y, off_u2γy+1:off_u2γy+nu_y] -= spdiagm(0 => flux_vec_y2) * Tyγ_b
+    b[row_fy:row_fy+nu_y-1] = safe_build_g(data_a.op_uy, flux, data_a.cap_py, nothing)
+
+    # Boundary conditions
+    apply_velocity_dirichlet_2D!(A, b, s.bc_u_a[1], s.bc_u_a[2], s.fluid_a.mesh_u;
+                                 nu_x=nu_x, nu_y=nu_y,
+                                 uωx_off=off_u1ωx, uγx_off=off_u1γx,
+                                 uωy_off=off_u1ωy, uγy_off=off_u1γy,
+                                 row_uωx_off=row_u1ωx, row_uγx_off=row_u1γx,
+                                 row_uωy_off=row_u1ωy, row_uγy_off=row_u1γy)
+    apply_velocity_dirichlet_2D!(A, b, s.bc_u_b[1], s.bc_u_b[2], s.fluid_b.mesh_u;
+                                 nu_x=nu_x, nu_y=nu_y,
+                                 uωx_off=off_u2ωx, uγx_off=off_u2γx,
+                                 uωy_off=off_u2ωy, uγy_off=off_u2γy,
+                                 row_uωx_off=row_u2ωx, row_uγx_off=row_u2γx,
+                                 row_uωy_off=row_u2ωy, row_uγy_off=row_u2γy)
+
+    apply_pressure_gauge!(A, b, s.pressure_gauge_a, s.fluid_a.mesh_p, s.fluid_a.capacity_p;
+                                 p_offset=off_p1, np=np, row_start=row_con1+1)
+    apply_pressure_gauge!(A, b, s.pressure_gauge_b, s.fluid_b.mesh_p, s.fluid_b.capacity_p;
+                                 p_offset=off_p2, np=np, row_start=row_con2+1)
+
+    s.A = A
+    s.b = b
+    return nothing
+end
+
+function solve_stokes_linear_system!(s::StokesDiph; method=Base.:\, algorithm=nothing, kwargs...)
     Ared, bred, keep_idx_rows, keep_idx_cols = remove_zero_rows_cols!(s.A, s.b)
+
+    kwargs_nt = (; kwargs...)
+    precond_builder = haskey(kwargs_nt, :precond_builder) ? kwargs_nt.precond_builder : nothing
+    if precond_builder !== nothing
+        kwargs_nt = Base.structdiff(kwargs_nt, (precond_builder=precond_builder,))
+    end
+
+    precond_kwargs = (;)
+    if precond_builder !== nothing
+        precond_result = try
+            precond_builder(Ared, s)
+        catch err
+            if err isa MethodError
+                precond_builder(Ared)
+            else
+                rethrow(err)
+            end
+        end
+        precond_kwargs = _preconditioner_kwargs(precond_result)
+    end
+
+    solve_kwargs = merge(kwargs_nt, precond_kwargs)
 
     xred = nothing
     if algorithm !== nothing
         prob = LinearSolve.LinearProblem(Ared, bred)
-        sol = LinearSolve.solve(prob, algorithm; kwargs...)
+        sol = LinearSolve.solve(prob, algorithm; solve_kwargs...)
         xred = sol.u
     elseif method === Base.:\
         try
@@ -235,13 +332,12 @@ function solve_StokesDiph!(s::StokesDiph; method=Base.:\, algorithm=nothing, kwa
             end
         end
     else
-        kwargs_nt = (; kwargs...)
-        log = get(kwargs_nt, :log, false)
+        log = get(solve_kwargs, :log, false)
         if log
-            xred, ch = method(Ared, bred; kwargs...)
+            xred, ch = method(Ared, bred; solve_kwargs...)
             push!(s.ch, ch)
         else
-            xred = method(Ared, bred; kwargs...)
+            xred = method(Ared, bred; solve_kwargs...)
         end
     end
 
@@ -251,265 +347,9 @@ function solve_StokesDiph!(s::StokesDiph; method=Base.:\, algorithm=nothing, kwa
     return s
 end
 
-function assemble_stokes2D!(s::StokesDiph)
-    A1 = build_phase_blocks_2D(s.fluid_a)
-    A2 = build_phase_blocks_2D(s.fluid_b)
-
-    @assert A1.nu_x == A2.nu_x && A1.nu_y == A2.nu_y "Velocity DOFs mismatch between phases"
-    @assert A1.np == A2.np "Pressure DOFs mismatch between phases"
-
-    nx = A1.nu_x; ny = A1.nu_y; np = A1.np
-    sum_nu = nx + ny
-
-    rows = 4 * sum_nu + 2 * np
-    cols = 4 * sum_nu + 2 * np
-    A = spzeros(Float64, rows, cols)
-
-    # Offsets for unknowns (phase 1 then phase 2)
-    off_u1ωx = 0
-    off_u1γx = nx
-    off_u1ωy = 2 * nx
-    off_u1γy = 2 * nx + ny
-    off_p1   = 2 * sum_nu
-
-    off_u2ωx = off_p1 + np
-    off_u2γx = off_u2ωx + nx
-    off_u2ωy = off_u2γx + nx
-    off_u2γy = off_u2ωy + ny
-    off_p2   = off_u2γy + ny
-
-    # Row offsets
-    row_m1x = 0
-    row_m1y = nx
-    row_m2x = 2 * nx + ny
-    row_m2y = 2 * (nx + ny)
-    row_jumpx = 2 * nx + 2 * ny
-    row_jumpy = row_jumpx + nx
-    row_fluxx = row_jumpy + ny
-    row_fluxy = row_fluxx + nx
-    row_div1 = row_fluxy + ny
-    row_div2 = row_div1 + np
-
-    # Momentum phase 1
-    A[row_m1x+1:row_m1x+nx, off_u1ωx+1:off_u1ωx+nx] = A1.visc_x_ω
-    A[row_m1x+1:row_m1x+nx, off_u1γx+1:off_u1γx+nx] = A1.visc_x_γ
-    A[row_m1x+1:row_m1x+nx, off_p1+1:off_p1+np]     = A1.grad_x
-
-    A[row_m1y+1:row_m1y+ny, off_u1ωy+1:off_u1ωy+ny] = A1.visc_y_ω
-    A[row_m1y+1:row_m1y+ny, off_u1γy+1:off_u1γy+ny] = A1.visc_y_γ
-    A[row_m1y+1:row_m1y+ny, off_p1+1:off_p1+np]     = A1.grad_y
-
-    # Momentum phase 2
-    A[row_m2x+1:row_m2x+nx, off_u2ωx+1:off_u2ωx+nx] = A2.visc_x_ω
-    A[row_m2x+1:row_m2x+nx, off_u2γx+1:off_u2γx+nx] = A2.visc_x_γ
-    A[row_m2x+1:row_m2x+nx, off_p2+1:off_p2+np]     = A2.grad_x
-
-    A[row_m2y+1:row_m2y+ny, off_u2ωy+1:off_u2ωy+ny] = A2.visc_y_ω
-    A[row_m2y+1:row_m2y+ny, off_u2γy+1:off_u2γy+ny] = A2.visc_y_γ
-    A[row_m2y+1:row_m2y+ny, off_p2+1:off_p2+np]     = A2.grad_y
-
-    # Interface velocity continuity u1γ = u2γ (per component)
-    jump = s.interface.scalar
-    α1 = jump === nothing ? 1.0 : jump.α₁
-    α2 = jump === nothing ? 1.0 : jump.α₂
-    g_jump_x = jump === nothing ? zeros(nx) : build_g_g(A1.op_ux, jump, A1.cap_ux)
-    g_jump_y = jump === nothing ? zeros(ny) : build_g_g(A1.op_uy, jump, A1.cap_uy)
-
-    A[row_jumpx+1:row_jumpx+nx, off_u1γx+1:off_u1γx+nx] = α1 * I(nx)
-    A[row_jumpx+1:row_jumpx+nx, off_u2γx+1:off_u2γx+nx] = -α2 * I(nx)
-
-    A[row_jumpy+1:row_jumpy+ny, off_u1γy+1:off_u1γy+ny] = α1 * I(ny)
-    A[row_jumpy+1:row_jumpy+ny, off_u2γy+1:off_u2γy+ny] = -α2 * I(ny)
-
-    # Flux continuity μ(H'W†G uω + H'W†H uγ) equal across phases per component
-    flux = s.interface.flux
-    β1 = flux === nothing ? 1.0 : flux.β₁
-    β2 = flux === nothing ? 1.0 : flux.β₂
-    g_flux_x = flux === nothing ? zeros(nx) : build_g_g(A1.op_ux, flux, A1.cap_ux)
-    g_flux_y = flux === nothing ? zeros(ny) : build_g_g(A1.op_uy, flux, A1.cap_uy)
-
-    WG1x = A1.op_ux.Wꜝ * A1.op_ux.G
-    WH1x = A1.op_ux.Wꜝ * A1.op_ux.H
-    WG2x = A2.op_ux.Wꜝ * A2.op_ux.G
-    WH2x = A2.op_ux.Wꜝ * A2.op_ux.H
-    WG1y = A1.op_uy.Wꜝ * A1.op_uy.G
-    WH1y = A1.op_uy.Wꜝ * A1.op_uy.H
-    WG2y = A2.op_uy.Wꜝ * A2.op_uy.G
-    WH2y = A2.op_uy.Wꜝ * A2.op_uy.H
-
-    H1xT = A1.op_ux.H'
-    H2xT = A2.op_ux.H'
-    H1yT = A1.op_uy.H'
-    H2yT = A2.op_uy.H'
-
-    μ1x = build_I_D(A1.op_ux, s.fluid_a.μ, A1.cap_ux)
-    μ2x = build_I_D(A2.op_ux, s.fluid_b.μ, A2.cap_ux)
-    μ1y = build_I_D(A1.op_uy, s.fluid_a.μ, A1.cap_uy)
-    μ2y = build_I_D(A2.op_uy, s.fluid_b.μ, A2.cap_uy)
-
-    A[row_fluxx+1:row_fluxx+nx, off_u1ωx+1:off_u1ωx+nx] = -β1 * (μ1x * (H1xT * WG1x))
-    A[row_fluxx+1:row_fluxx+nx, off_u1γx+1:off_u1γx+nx] = -β1 * (μ1x * (H1xT * WH1x))
-    A[row_fluxx+1:row_fluxx+nx, off_u2ωx+1:off_u2ωx+nx] =  β2 * (μ2x * (H2xT * WG2x))
-    A[row_fluxx+1:row_fluxx+nx, off_u2γx+1:off_u2γx+nx] =  β2 * (μ2x * (H2xT * WH2x))
-
-    A[row_fluxy+1:row_fluxy+ny, off_u1ωy+1:off_u1ωy+ny] = -β1 * (μ1y * (H1yT * WG1y))
-    A[row_fluxy+1:row_fluxy+ny, off_u1γy+1:off_u1γy+ny] = -β1 * (μ1y * (H1yT * WH1y))
-    A[row_fluxy+1:row_fluxy+ny, off_u2ωy+1:off_u2ωy+ny] =  β2 * (μ2y * (H2yT * WG2y))
-    A[row_fluxy+1:row_fluxy+ny, off_u2γy+1:off_u2γy+ny] =  β2 * (μ2y * (H2yT * WH2y))
-
-    # Divergence per phase
-    A[row_div1+1:row_div1+np, off_u1ωx+1:off_u1ωx+nx] = A1.div_x_ω
-    A[row_div1+1:row_div1+np, off_u1γx+1:off_u1γx+nx] = A1.div_x_γ
-    A[row_div1+1:row_div1+np, off_u1ωy+1:off_u1ωy+ny] = A1.div_y_ω
-    A[row_div1+1:row_div1+np, off_u1γy+1:off_u1γy+ny] = A1.div_y_γ
-
-    A[row_div2+1:row_div2+np, off_u2ωx+1:off_u2ωx+nx] = A2.div_x_ω
-    A[row_div2+1:row_div2+np, off_u2γx+1:off_u2γx+nx] = A2.div_x_γ
-    A[row_div2+1:row_div2+np, off_u2ωy+1:off_u2ωy+ny] = A2.div_y_ω
-    A[row_div2+1:row_div2+np, off_u2γy+1:off_u2γy+ny] = A2.div_y_γ
-
-    # RHS
-    f1x = safe_build_source(A1.op_ux, s.fluid_a.fᵤ, A1.cap_ux, nothing)
-    f1y = safe_build_source(A1.op_uy, s.fluid_a.fᵤ, A1.cap_uy, nothing)
-    f2x = safe_build_source(A2.op_ux, s.fluid_b.fᵤ, A2.cap_ux, nothing)
-    f2y = safe_build_source(A2.op_uy, s.fluid_b.fᵤ, A2.cap_uy, nothing)
-    b_m1x = A1.Vx * f1x
-    b_m1y = A1.Vy * f1y
-    b_m2x = A2.Vx * f2x
-    b_m2y = A2.Vy * f2y
-    b_jumpx = g_jump_x
-    b_jumpy = g_jump_y
-    b_fluxx = g_flux_x
-    b_fluxy = g_flux_y
-    b_div1 = zeros(np)
-    b_div2 = zeros(np)
-
-    b = vcat(b_m1x, b_m1y, b_m2x, b_m2y, b_jumpx, b_jumpy, b_fluxx, b_fluxy, b_div1, b_div2)
-
-    # Apply Dirichlet BCs for velocities of both phases
-    apply_velocity_dirichlet_2D!(A, b, s.bc_u_a[1], s.bc_u_a[2], s.fluid_a.mesh_u;
-                                 nu_x=nx, nu_y=ny,
-                                 uωx_off=off_u1ωx, uγx_off=off_u1γx,
-                                 uωy_off=off_u1ωy, uγy_off=off_u1γy,
-                                 row_uωx_off=row_m1x, row_uγx_off=row_m1x+nx,
-                                 row_uωy_off=row_m1y, row_uγy_off=row_m1y+ny)
-
-    apply_velocity_dirichlet_2D!(A, b, s.bc_u_b[1], s.bc_u_b[2], s.fluid_b.mesh_u;
-                                 nu_x=nx, nu_y=ny,
-                                 uωx_off=off_u2ωx, uγx_off=off_u2γx,
-                                 uωy_off=off_u2ωy, uγy_off=off_u2γy,
-                                 row_uωx_off=row_m2x, row_uγx_off=row_m2x+nx,
-                                 row_uωy_off=row_m2y, row_uγy_off=row_m2y+ny)
-
-    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid_a.mesh_p, s.fluid_a.capacity_p;
-                          p_offset=off_p1, np=np, row_start=row_div1+1)
-    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid_b.mesh_p, s.fluid_b.capacity_p;
-                          p_offset=off_p2, np=np, row_start=row_div2+1)
-
-    s.A = A
-    s.b = b
-    return nothing
-end
-
-function assemble_stokes1D!(s::StokesDiph)
-    blocks_a = build_phase_blocks_1D(s.fluid_a)
-    blocks_b = build_phase_blocks_1D(s.fluid_b)
-
-    @assert blocks_a.nu == blocks_b.nu "Interface requires matching velocity DOFs per phase"
-    @assert blocks_a.np == blocks_b.np "Pressure grids must have matching DOFs"
-
-    nu = blocks_a.nu
-    np = blocks_a.np
-
-    rows = 4 * nu + 2 * np
-    cols = 4 * nu + 2 * np
-    A = spzeros(Float64, rows, cols)
-
-    off_u1ω = 0
-    off_u1γ = nu
-    off_p1  = 2 * nu
-    off_u2ω = off_p1 + np
-    off_u2γ = off_u2ω + nu
-    off_p2  = off_u2γ + nu
-
-    row_mom1 = 0
-    row_jump = nu
-    row_mom2 = 2 * nu
-    row_flux = 3 * nu
-    row_div1 = 4 * nu
-    row_div2 = row_div1 + np
-
-    # Phase A momentum
-    A[row_mom1+1:row_mom1+nu, off_u1ω+1:off_u1ω+nu] = blocks_a.visc_uω
-    A[row_mom1+1:row_mom1+nu, off_u1γ+1:off_u1γ+nu] = blocks_a.visc_uγ
-    A[row_mom1+1:row_mom1+nu, off_p1+1:off_p1+np]   = blocks_a.grad
-
-    # Phase B momentum
-    A[row_mom2+1:row_mom2+nu, off_u2ω+1:off_u2ω+nu] = blocks_b.visc_uω
-    A[row_mom2+1:row_mom2+nu, off_u2γ+1:off_u2γ+nu] = blocks_b.visc_uγ
-    A[row_mom2+1:row_mom2+nu, off_p2+1:off_p2+np]   = blocks_b.grad
-
-    jump = s.interface.scalar
-    α1 = jump === nothing ? 1.0 : jump.α₁
-    α2 = jump === nothing ? 1.0 : jump.α₂
-    g_jump = jump === nothing ? zeros(nu) : build_g_g(blocks_a.op_u, jump, blocks_a.cap_u)
-
-    A[row_jump+1:row_jump+nu, off_u1γ+1:off_u1γ+nu] = α1 * I(nu)
-    A[row_jump+1:row_jump+nu, off_u2γ+1:off_u2γ+nu] = -α2 * I(nu)
-
-    flux = s.interface.flux
-    β1 = flux === nothing ? 1.0 : flux.β₁
-    β2 = flux === nothing ? 1.0 : flux.β₂
-    g_flux = flux === nothing ? zeros(nu) : build_g_g(blocks_a.op_u, flux, blocks_a.cap_u)
-
-    WG_a = blocks_a.op_u.Wꜝ * blocks_a.op_u.G
-    WH_a = blocks_a.op_u.Wꜝ * blocks_a.op_u.H
-    WG_b = blocks_b.op_u.Wꜝ * blocks_b.op_u.G
-    WH_b = blocks_b.op_u.Wꜝ * blocks_b.op_u.H
-
-    traction_a_ω = blocks_a.op_u.H' * WG_a
-    traction_a_γ = blocks_a.op_u.H' * WH_a
-    traction_b_ω = blocks_b.op_u.H' * WG_b
-    traction_b_γ = blocks_b.op_u.H' * WH_b
-
-    μa = build_I_D(blocks_a.op_u, s.fluid_a.μ, blocks_a.cap_u)
-    μb = build_I_D(blocks_b.op_u, s.fluid_b.μ, blocks_b.cap_u)
-
-    A[row_flux+1:row_flux+nu, off_u1ω+1:off_u1ω+nu] = -β1 * (μa * traction_a_ω)
-    A[row_flux+1:row_flux+nu, off_u1γ+1:off_u1γ+nu] = -β1 * (μa * traction_a_γ)
-    A[row_flux+1:row_flux+nu, off_u2ω+1:off_u2ω+nu] =  β2 * (μb * traction_b_ω)
-    A[row_flux+1:row_flux+nu, off_u2γ+1:off_u2γ+nu] =  β2 * (μb * traction_b_γ)
-
-    # Divergence (phase A)
-    A[row_div1+1:row_div1+np, off_u1ω+1:off_u1ω+nu] = blocks_a.div_uω
-    A[row_div1+1:row_div1+np, off_u1γ+1:off_u1γ+nu] = blocks_a.div_uγ
-
-    # Divergence (phase B)
-    A[row_div2+1:row_div2+np, off_u2ω+1:off_u2ω+nu] = blocks_b.div_uω
-    A[row_div2+1:row_div2+np, off_u2γ+1:off_u2γ+nu] = blocks_b.div_uγ
-
-    f_a = safe_build_source(blocks_a.op_u, s.fluid_a.fᵤ, blocks_a.cap_u, nothing)
-    f_b = safe_build_source(blocks_b.op_u, s.fluid_b.fᵤ, blocks_b.cap_u, nothing)
-    b_mom1 = blocks_a.V * f_a
-    b_mom2 = blocks_b.V * f_b
-    b_div1 = zeros(np)
-    b_div2 = zeros(np)
-
-    b = vcat(b_mom1, g_jump, b_mom2, g_flux, b_div1, b_div2)
-
-    # Apply velocity Dirichlet BCs per phase
-    apply_velocity_dirichlet!(A, b, s.bc_u_a[1], s.fluid_a.mesh_u[1];
-                              nu=nu, uω_offset=off_u1ω, uγ_offset=off_u1γ)
-    apply_velocity_dirichlet!(A, b, s.bc_u_b[1], s.fluid_b.mesh_u[1];
-                              nu=nu, uω_offset=off_u2ω, uγ_offset=off_u2γ)
-
-    # Pressure gauge/Dirichlet for each phase
-    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid_a.mesh_p, s.fluid_a.capacity_p;
-                          p_offset=off_p1, np=np, row_start=row_div1+1)
-    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid_b.mesh_p, s.fluid_b.capacity_p;
-                          p_offset=off_p2, np=np, row_start=row_div2+1)
-
-    s.A = A
-    s.b = b
-    return nothing
+function solve_StokesDiph!(s::StokesDiph; method=Base.:\, algorithm=nothing, kwargs...)
+    println("[StokesDiph] Assembling steady diphasic Stokes system")
+    assemble_stokes_diph!(s)
+    solve_stokes_linear_system!(s; method=method, algorithm=algorithm, kwargs...)
+    return s
 end

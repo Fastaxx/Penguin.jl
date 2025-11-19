@@ -136,12 +136,11 @@ export write_vtk
 include("solver/stokes.jl")
 export AbstractPressureGauge, PinPressureGauge, MeanPressureGauge
 export StokesMono, solve_StokesMono!, solve_StokesMono_unsteady!
+include("solver/stokes_diph.jl")
+export StokesDiph, solve_StokesDiph!
 
 include("prescribedmotionsolver/stokes.jl")
 export MovingStokesMono, solve_MovingStokesMono!
-
-include("solver/stokes_diph.jl")
-export StokesDiph, solve_StokesDiph!
 
 include("solver/navierstokes.jl")
 export NavierStokesMono, solve_NavierStokesMono_unsteady!, solve_NavierStokesMono_unsteady_picard!, solve_NavierStokesMono_steady!, build_convection_operators
