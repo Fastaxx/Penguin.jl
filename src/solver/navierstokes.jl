@@ -266,6 +266,81 @@ function navierstokes2D_blocks(s::NavierStokesMono)
             Vx = ops_u[1].V, Vy = ops_u[2].V)
 end
 
+function navierstokes3D_blocks(s::NavierStokesMono)
+    ops_u = s.fluid.operator_u
+    caps_u = s.fluid.capacity_u
+    op_p = s.fluid.operator_p
+    cap_p = s.fluid.capacity_p
+
+    nu_x = prod(ops_u[1].size)
+    nu_y = prod(ops_u[2].size)
+    nu_z = prod(ops_u[3].size)
+    np = prod(op_p.size)
+
+    μ = s.fluid.μ
+    Iμ_x = build_I_D(ops_u[1], μ, caps_u[1])
+    Iμ_y = build_I_D(ops_u[2], μ, caps_u[2])
+    Iμ_z = build_I_D(ops_u[3], μ, caps_u[3])
+
+    WGx_Gx = ops_u[1].Wꜝ * ops_u[1].G
+    WGx_Hx = ops_u[1].Wꜝ * ops_u[1].H
+    visc_x_ω = (Iμ_x * ops_u[1].G' * WGx_Gx)
+    visc_x_γ = (Iμ_x * ops_u[1].G' * WGx_Hx)
+
+    WGy_Gy = ops_u[2].Wꜝ * ops_u[2].G
+    WGy_Hy = ops_u[2].Wꜝ * ops_u[2].H
+    visc_y_ω = (Iμ_y * ops_u[2].G' * WGy_Gy)
+    visc_y_γ = (Iμ_y * ops_u[2].G' * WGy_Hy)
+
+    WGz_Gz = ops_u[3].Wꜝ * ops_u[3].G
+    WGz_Hz = ops_u[3].Wꜝ * ops_u[3].H
+    visc_z_ω = (Iμ_z * ops_u[3].G' * WGz_Gz)
+    visc_z_γ = (Iμ_z * ops_u[3].G' * WGz_Hz)
+
+    grad_full = (op_p.G + op_p.H)
+    total_grad_rows = size(grad_full, 1)
+    @assert total_grad_rows == nu_x + nu_y + nu_z "Pressure gradient rows ($(total_grad_rows)) must match velocity DOFs ($(nu_x + nu_y + nu_z))."
+
+    x_rows = 1:nu_x
+    y_rows = nu_x+1:nu_x+nu_y
+    z_rows = nu_x+nu_y+1:nu_x+nu_y+nu_z
+
+    grad_x = -grad_full[x_rows, :]
+    grad_y = -grad_full[y_rows, :]
+    grad_z = -grad_full[z_rows, :]
+
+    Gp = op_p.G
+    Hp = op_p.H
+    Gp_x = Gp[x_rows, :]
+    Hp_x = Hp[x_rows, :]
+    Gp_y = Gp[y_rows, :]
+    Hp_y = Hp[y_rows, :]
+    Gp_z = Gp[z_rows, :]
+    Hp_z = Hp[z_rows, :]
+    div_x_ω = - (Gp_x' + Hp_x')
+    div_x_γ =   (Hp_x')
+    div_y_ω = - (Gp_y' + Hp_y')
+    div_y_γ =   (Hp_y')
+    div_z_ω = - (Gp_z' + Hp_z')
+    div_z_γ =   (Hp_z')
+
+    ρ = s.fluid.ρ
+    mass_x = build_I_D(ops_u[1], ρ, caps_u[1]) * ops_u[1].V
+    mass_y = build_I_D(ops_u[2], ρ, caps_u[2]) * ops_u[2].V
+    mass_z = build_I_D(ops_u[3], ρ, caps_u[3]) * ops_u[3].V
+
+    return (; nu_components=(nu_x, nu_y, nu_z),
+            nu_x, nu_y, nu_z, np,
+            op_ux = ops_u[1], op_uy = ops_u[2], op_uz = ops_u[3], op_p,
+            cap_px = caps_u[1], cap_py = caps_u[2], cap_pz = caps_u[3], cap_p,
+            visc_x_ω, visc_x_γ, visc_y_ω, visc_y_γ, visc_z_ω, visc_z_γ,
+            grad_x, grad_y, grad_z,
+            div_x_ω, div_x_γ, div_y_ω, div_y_γ, div_z_ω, div_z_γ,
+            tie_x = I(nu_x), tie_y = I(nu_y), tie_z = I(nu_z),
+            mass_x, mass_y, mass_z,
+            Vx = ops_u[1].V, Vy = ops_u[2].V, Vz = ops_u[3].V)
+end
+
 # Convection helpers ---------------------------------------------------------
 
 function compute_convection_vectors!(s::NavierStokesMono,
@@ -422,7 +497,7 @@ function assemble_navierstokes1D_unsteady!(s::NavierStokesMono, data, Δt::Float
     apply_velocity_dirichlet!(A, b, s.bc_u[1], s.fluid.mesh_u[1];
                               nu=nu, uω_offset=off_uω, uγ_offset=off_uγ, t=t_next)
 
-    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
+    A, b = apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=off_p, np=np, row_start=row_con+1)
 
     s.A = A
@@ -530,7 +605,139 @@ function assemble_navierstokes2D_unsteady!(s::NavierStokesMono, data, Δt::Float
                                  row_uωy_off=row_uωy, row_uγy_off=row_uγy,
                                  t=t_next)
 
-    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
+    A, b = apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
+                          p_offset=off_p, np=np, row_start=row_con+1)
+
+    s.A = A
+    s.b = b
+    return conv_curr
+end
+
+function assemble_navierstokes3D_unsteady!(s::NavierStokesMono, data, Δt::Float64,
+                                           x_prev::AbstractVector{<:Real},
+                                           p_half_prev::AbstractVector{<:Real},
+                                           t_prev::Float64, t_next::Float64,
+                                           θ::Float64,
+                                           conv_prev::Union{Nothing,NTuple{3,Vector{Float64}}})
+    nu_x = data.nu_x
+    nu_y = data.nu_y
+    nu_z = data.nu_z
+    sum_nu = nu_x + nu_y + nu_z
+    np = data.np
+
+    rows = 2 * sum_nu + np
+    cols = 2 * sum_nu + np
+    A = spzeros(Float64, rows, cols)
+
+    mass_x_dt = (1.0 / Δt) * data.mass_x
+    mass_y_dt = (1.0 / Δt) * data.mass_y
+    mass_z_dt = (1.0 / Δt) * data.mass_z
+    θc = 1.0 - θ
+
+    off_uωx = 0
+    off_uγx = nu_x
+    off_uωy = 2 * nu_x
+    off_uγy = 2 * nu_x + nu_y
+    off_uωz = 2 * nu_x + 2 * nu_y
+    off_uγz = 2 * nu_x + 2 * nu_y + nu_z
+    off_p   = 2 * sum_nu
+
+    row_uωx = 0
+    row_uγx = nu_x
+    row_uωy = 2 * nu_x
+    row_uγy = 2 * nu_x + nu_y
+    row_uωz = 2 * nu_x + 2 * nu_y
+    row_uγz = 2 * nu_x + 2 * nu_y + nu_z
+    row_con = 2 * sum_nu
+
+    A[row_uωx+1:row_uωx+nu_x, off_uωx+1:off_uωx+nu_x] = mass_x_dt + θ * data.visc_x_ω
+    A[row_uωx+1:row_uωx+nu_x, off_uγx+1:off_uγx+nu_x] = θ * data.visc_x_γ
+    A[row_uωx+1:row_uωx+nu_x, off_p+1:off_p+np]       = data.grad_x
+
+    A[row_uωy+1:row_uωy+nu_y, off_uωy+1:off_uωy+nu_y] = mass_y_dt + θ * data.visc_y_ω
+    A[row_uωy+1:row_uωy+nu_y, off_uγy+1:off_uγy+nu_y] = θ * data.visc_y_γ
+    A[row_uωy+1:row_uωy+nu_y, off_p+1:off_p+np]       = data.grad_y
+
+    A[row_uωz+1:row_uωz+nu_z, off_uωz+1:off_uωz+nu_z] = mass_z_dt + θ * data.visc_z_ω
+    A[row_uωz+1:row_uωz+nu_z, off_uγz+1:off_uγz+nu_z] = θ * data.visc_z_γ
+    A[row_uωz+1:row_uωz+nu_z, off_p+1:off_p+np]       = data.grad_z
+
+    A[row_uγx+1:row_uγx+nu_x, off_uγx+1:off_uγx+nu_x] = data.tie_x
+    A[row_uγy+1:row_uγy+nu_y, off_uγy+1:off_uγy+nu_y] = data.tie_y
+    A[row_uγz+1:row_uγz+nu_z, off_uγz+1:off_uγz+nu_z] = data.tie_z
+
+    con_rows = row_con+1:row_con+np
+    A[con_rows, off_uωx+1:off_uωx+nu_x] = data.div_x_ω
+    A[con_rows, off_uγx+1:off_uγx+nu_x] = data.div_x_γ
+    A[con_rows, off_uωy+1:off_uωy+nu_y] = data.div_y_ω
+    A[con_rows, off_uγy+1:off_uγy+nu_y] = data.div_y_γ
+    A[con_rows, off_uωz+1:off_uωz+nu_z] = data.div_z_ω
+    A[con_rows, off_uγz+1:off_uγz+nu_z] = data.div_z_γ
+
+    uωx_prev = view(x_prev, off_uωx+1:off_uωx+nu_x)
+    uγx_prev = view(x_prev, off_uγx+1:off_uγx+nu_x)
+    uωy_prev = view(x_prev, off_uωy+1:off_uωy+nu_y)
+    uγy_prev = view(x_prev, off_uγy+1:off_uγy+nu_y)
+    uωz_prev = view(x_prev, off_uωz+1:off_uωz+nu_z)
+    uγz_prev = view(x_prev, off_uγz+1:off_uγz+nu_z)
+
+    f_prev_x = safe_build_source(data.op_ux, s.fluid.fᵤ, data.cap_px, t_prev)
+    f_next_x = safe_build_source(data.op_ux, s.fluid.fᵤ, data.cap_px, t_next)
+    load_x = data.Vx * (θ .* f_next_x .+ θc .* f_prev_x)
+
+    f_prev_y = safe_build_source(data.op_uy, s.fluid.fᵤ, data.cap_py, t_prev)
+    f_next_y = safe_build_source(data.op_uy, s.fluid.fᵤ, data.cap_py, t_next)
+    load_y = data.Vy * (θ .* f_next_y .+ θc .* f_prev_y)
+
+    f_prev_z = safe_build_source(data.op_uz, s.fluid.fᵤ, data.cap_pz, t_prev)
+    f_next_z = safe_build_source(data.op_uz, s.fluid.fᵤ, data.cap_pz, t_next)
+    load_z = data.Vz * (θ .* f_next_z .+ θc .* f_prev_z)
+
+    rhs_mom_x = mass_x_dt * Vector{Float64}(uωx_prev)
+    rhs_mom_x .-= θc * (data.visc_x_ω * Vector{Float64}(uωx_prev) + data.visc_x_γ * Vector{Float64}(uγx_prev))
+
+    rhs_mom_y = mass_y_dt * Vector{Float64}(uωy_prev)
+    rhs_mom_y .-= θc * (data.visc_y_ω * Vector{Float64}(uωy_prev) + data.visc_y_γ * Vector{Float64}(uγy_prev))
+
+    rhs_mom_z = mass_z_dt * Vector{Float64}(uωz_prev)
+    rhs_mom_z .-= θc * (data.visc_z_ω * Vector{Float64}(uωz_prev) + data.visc_z_γ * Vector{Float64}(uγz_prev))
+
+    rhs_mom_x .+= load_x
+    rhs_mom_y .+= load_y
+    rhs_mom_z .+= load_z
+
+    conv_curr = compute_convection_vectors!(s, data, x_prev)
+
+    ρ = s.fluid.ρ
+    ρ_val = ρ isa Function ? 1.0 : ρ
+
+    if conv_prev === nothing
+        rhs_mom_x .-= ρ_val .* conv_curr[1]
+        rhs_mom_y .-= ρ_val .* conv_curr[2]
+        rhs_mom_z .-= ρ_val .* conv_curr[3]
+    else
+        rhs_mom_x .-= ρ_val .* (1.5 .* conv_curr[1] .- 0.5 .* conv_prev[1])
+        rhs_mom_y .-= ρ_val .* (1.5 .* conv_curr[2] .- 0.5 .* conv_prev[2])
+        rhs_mom_z .-= ρ_val .* (1.5 .* conv_curr[3] .- 0.5 .* conv_prev[3])
+    end
+
+    g_cut_x = safe_build_g(data.op_ux, s.bc_cut, data.cap_px, t_next)
+    g_cut_y = safe_build_g(data.op_uy, s.bc_cut, data.cap_py, t_next)
+    g_cut_z = safe_build_g(data.op_uz, s.bc_cut, data.cap_pz, t_next)
+
+    b = vcat(rhs_mom_x, g_cut_x, rhs_mom_y, g_cut_y, rhs_mom_z, g_cut_z, zeros(np))
+
+    apply_velocity_dirichlet_3D!(A, b, s.bc_u[1], s.bc_u[2], s.bc_u[3], s.fluid.mesh_u;
+                                 nu_x=nu_x, nu_y=nu_y, nu_z=nu_z,
+                                 uωx_off=off_uωx, uγx_off=off_uγx,
+                                 uωy_off=off_uωy, uγy_off=off_uγy,
+                                 uωz_off=off_uωz, uγz_off=off_uγz,
+                                 row_uωx_off=row_uωx, row_uγx_off=row_uγx,
+                                 row_uωy_off=row_uωy, row_uγy_off=row_uγy,
+                                 row_uωz_off=row_uωz, row_uγz_off=row_uγz,
+                                 t=t_next)
+
+    A, b = apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=off_p, np=np, row_start=row_con+1)
 
     s.A = A
@@ -606,7 +813,7 @@ function assemble_navierstokes1D_unsteady_picard!(s::NavierStokesMono, data, Δt
     apply_velocity_dirichlet!(A, b, s.bc_u[1], s.fluid.mesh_u[1];
                               nu=nu, uω_offset=off_uω, uγ_offset=off_uγ, t=t_next)
 
-    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
+    A, b = apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=off_p, np=np, row_start=row_con+1)
 
     s.A = A
@@ -713,7 +920,142 @@ function assemble_navierstokes2D_unsteady_picard!(s::NavierStokesMono, data, Δt
                                  row_uωy_off=row_uωy, row_uγy_off=row_uγy,
                                  t=t_next)
 
-    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
+    A, b = apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
+                          p_offset=off_p, np=np, row_start=row_con+1)
+
+    s.A = A
+    s.b = b
+    return nothing
+end
+
+function assemble_navierstokes3D_unsteady_picard!(s::NavierStokesMono, data, Δt::Float64,
+                                                  x_prev::AbstractVector{<:Real},
+                                                  x_iter::AbstractVector{<:Real},
+                                                  p_half_prev::AbstractVector{<:Real},
+                                                  t_prev::Float64, t_next::Float64,
+                                                  θ::Float64,
+                                                  conv_prev::Union{Nothing,NTuple{3,Vector{Float64}}})
+    nu_x = data.nu_x
+    nu_y = data.nu_y
+    nu_z = data.nu_z
+    sum_nu = nu_x + nu_y + nu_z
+    np = data.np
+
+    rows = 2 * sum_nu + np
+    cols = 2 * sum_nu + np
+    A = spzeros(Float64, rows, cols)
+
+    mass_x_dt = (1.0 / Δt) * data.mass_x
+    mass_y_dt = (1.0 / Δt) * data.mass_y
+    mass_z_dt = (1.0 / Δt) * data.mass_z
+    θc = 1.0 - θ
+
+    off_uωx = 0
+    off_uγx = nu_x
+    off_uωy = 2 * nu_x
+    off_uγy = 2 * nu_x + nu_y
+    off_uωz = 2 * nu_x + 2 * nu_y
+    off_uγz = 2 * nu_x + 2 * nu_y + nu_z
+    off_p   = 2 * sum_nu
+
+    row_uωx = 0
+    row_uγx = nu_x
+    row_uωy = 2 * nu_x
+    row_uγy = 2 * nu_x + nu_y
+    row_uωz = 2 * nu_x + 2 * nu_y
+    row_uγz = 2 * nu_x + 2 * nu_y + nu_z
+    row_con = 2 * sum_nu
+
+    compute_convection_vectors!(s, data, x_iter)
+    ops = s.last_conv_ops
+    @assert ops !== nothing
+    bulk = ops.bulk
+    K_adv = ops.K_adv
+
+    ρ = s.fluid.ρ
+    ρ_val = ρ isa Function ? 1.0 : ρ
+
+    conv_prev_x = conv_prev === nothing ? zeros(Float64, nu_x) : conv_prev[1]
+    conv_prev_y = conv_prev === nothing ? zeros(Float64, nu_y) : conv_prev[2]
+    conv_prev_z = conv_prev === nothing ? zeros(Float64, nu_z) : conv_prev[3]
+
+    A[row_uωx+1:row_uωx+nu_x, off_uωx+1:off_uωx+nu_x] = mass_x_dt + θ * (data.visc_x_ω + ρ_val * bulk[1] - 0.5 * ρ_val * K_adv[1])
+    A[row_uωx+1:row_uωx+nu_x, off_uγx+1:off_uγx+nu_x] = θ * data.visc_x_γ
+    A[row_uωx+1:row_uωx+nu_x, off_p+1:off_p+np]       = data.grad_x
+
+    A[row_uωy+1:row_uωy+nu_y, off_uωy+1:off_uωy+nu_y] = mass_y_dt + θ * (data.visc_y_ω + ρ_val * bulk[2] - 0.5 * ρ_val * K_adv[2])
+    A[row_uωy+1:row_uωy+nu_y, off_uγy+1:off_uγy+nu_y] = θ * data.visc_y_γ
+    A[row_uωy+1:row_uωy+nu_y, off_p+1:off_p+np]       = data.grad_y
+
+    A[row_uωz+1:row_uωz+nu_z, off_uωz+1:off_uωz+nu_z] = mass_z_dt + θ * (data.visc_z_ω + ρ_val * bulk[3] - 0.5 * ρ_val * K_adv[3])
+    A[row_uωz+1:row_uωz+nu_z, off_uγz+1:off_uγz+nu_z] = θ * data.visc_z_γ
+    A[row_uωz+1:row_uωz+nu_z, off_p+1:off_p+np]       = data.grad_z
+
+    A[row_uγx+1:row_uγx+nu_x, off_uγx+1:off_uγx+nu_x] = data.tie_x
+    A[row_uγy+1:row_uγy+nu_y, off_uγy+1:off_uγy+nu_y] = data.tie_y
+    A[row_uγz+1:row_uγz+nu_z, off_uγz+1:off_uγz+nu_z] = data.tie_z
+
+    con_rows = row_con+1:row_con+np
+    A[con_rows, off_uωx+1:off_uωx+nu_x] = data.div_x_ω
+    A[con_rows, off_uγx+1:off_uγx+nu_x] = data.div_x_γ
+    A[con_rows, off_uωy+1:off_uωy+nu_y] = data.div_y_ω
+    A[con_rows, off_uγy+1:off_uγy+nu_y] = data.div_y_γ
+    A[con_rows, off_uωz+1:off_uωz+nu_z] = data.div_z_ω
+    A[con_rows, off_uγz+1:off_uγz+nu_z] = data.div_z_γ
+
+    uωx_prev = view(x_prev, off_uωx+1:off_uωx+nu_x)
+    uγx_prev = view(x_prev, off_uγx+1:off_uγx+nu_x)
+    uωy_prev = view(x_prev, off_uωy+1:off_uωy+nu_y)
+    uγy_prev = view(x_prev, off_uγy+1:off_uγy+nu_y)
+    uωz_prev = view(x_prev, off_uωz+1:off_uωz+nu_z)
+    uγz_prev = view(x_prev, off_uγz+1:off_uγz+nu_z)
+
+    f_prev_x = safe_build_source(data.op_ux, s.fluid.fᵤ, data.cap_px, t_prev)
+    f_next_x = safe_build_source(data.op_ux, s.fluid.fᵤ, data.cap_px, t_next)
+    load_x = data.Vx * (θ .* f_next_x .+ θc .* f_prev_x)
+
+    f_prev_y = safe_build_source(data.op_uy, s.fluid.fᵤ, data.cap_py, t_prev)
+    f_next_y = safe_build_source(data.op_uy, s.fluid.fᵤ, data.cap_py, t_next)
+    load_y = data.Vy * (θ .* f_next_y .+ θc .* f_prev_y)
+
+    f_prev_z = safe_build_source(data.op_uz, s.fluid.fᵤ, data.cap_pz, t_prev)
+    f_next_z = safe_build_source(data.op_uz, s.fluid.fᵤ, data.cap_pz, t_next)
+    load_z = data.Vz * (θ .* f_next_z .+ θc .* f_prev_z)
+
+    rhs_mom_x = mass_x_dt * Vector{Float64}(uωx_prev)
+    rhs_mom_x .-= θc * (data.visc_x_ω * Vector{Float64}(uωx_prev) + data.visc_x_γ * Vector{Float64}(uγx_prev))
+
+    rhs_mom_y = mass_y_dt * Vector{Float64}(uωy_prev)
+    rhs_mom_y .-= θc * (data.visc_y_ω * Vector{Float64}(uωy_prev) + data.visc_y_γ * Vector{Float64}(uγy_prev))
+
+    rhs_mom_z = mass_z_dt * Vector{Float64}(uωz_prev)
+    rhs_mom_z .-= θc * (data.visc_z_ω * Vector{Float64}(uωz_prev) + data.visc_z_γ * Vector{Float64}(uγz_prev))
+
+    rhs_mom_x .+= load_x
+    rhs_mom_y .+= load_y
+    rhs_mom_z .+= load_z
+
+    rhs_mom_x .-= (1.0 - θ) * ρ_val .* conv_prev_x
+    rhs_mom_y .-= (1.0 - θ) * ρ_val .* conv_prev_y
+    rhs_mom_z .-= (1.0 - θ) * ρ_val .* conv_prev_z
+
+    g_cut_x = safe_build_g(data.op_ux, s.bc_cut, data.cap_px, t_next)
+    g_cut_y = safe_build_g(data.op_uy, s.bc_cut, data.cap_py, t_next)
+    g_cut_z = safe_build_g(data.op_uz, s.bc_cut, data.cap_pz, t_next)
+
+    b = vcat(rhs_mom_x, g_cut_x, rhs_mom_y, g_cut_y, rhs_mom_z, g_cut_z, zeros(np))
+
+    apply_velocity_dirichlet_3D!(A, b, s.bc_u[1], s.bc_u[2], s.bc_u[3], s.fluid.mesh_u;
+                                 nu_x=nu_x, nu_y=nu_y, nu_z=nu_z,
+                                 uωx_off=off_uωx, uγx_off=off_uγx,
+                                 uωy_off=off_uωy, uγy_off=off_uγy,
+                                 uωz_off=off_uωz, uγz_off=off_uγz,
+                                 row_uωx_off=row_uωx, row_uγx_off=row_uγx,
+                                 row_uωy_off=row_uωy, row_uγy_off=row_uγy,
+                                 row_uωz_off=row_uωz, row_uγz_off=row_uγz,
+                                 t=t_next)
+
+    A, b = apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=off_p, np=np, row_start=row_con+1)
 
     s.A = A
@@ -769,7 +1111,7 @@ function assemble_navierstokes1D_steady_picard!(s::NavierStokesMono,
     apply_velocity_dirichlet!(A, b, s.bc_u[1], s.fluid.mesh_u[1];
                               nu=nu, uω_offset=off_uω, uγ_offset=off_uγ, t=nothing)
 
-    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
+    A, b = apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=off_p, np=np, row_start=row_con+1)
 
     s.A = A
@@ -851,7 +1193,100 @@ function assemble_navierstokes2D_steady_picard!(s::NavierStokesMono,
                                  row_uωy_off=row_uωy, row_uγy_off=row_uγy,
                                  t=nothing)
 
-    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
+    A, b = apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
+                          p_offset=off_p, np=np, row_start=row_con+1)
+
+    s.A = A
+    s.b = b
+    return nothing
+end
+
+function assemble_navierstokes3D_steady_picard!(s::NavierStokesMono,
+                                                data,
+                                                advecting_state::AbstractVector{<:Real})
+    nu_x = data.nu_x
+    nu_y = data.nu_y
+    nu_z = data.nu_z
+    sum_nu = nu_x + nu_y + nu_z
+    np = data.np
+
+    rows = 2 * sum_nu + np
+    cols = 2 * sum_nu + np
+    A = spzeros(Float64, rows, cols)
+
+    off_uωx = 0
+    off_uγx = nu_x
+    off_uωy = 2 * nu_x
+    off_uγy = 2 * nu_x + nu_y
+    off_uωz = 2 * nu_x + 2 * nu_y
+    off_uγz = 2 * nu_x + 2 * nu_y + nu_z
+    off_p   = 2 * sum_nu
+
+    row_uωx = 0
+    row_uγx = nu_x
+    row_uωy = 2 * nu_x
+    row_uγy = 2 * nu_x + nu_y
+    row_uωz = 2 * nu_x + 2 * nu_y
+    row_uγz = 2 * nu_x + 2 * nu_y + nu_z
+    row_con = 2 * sum_nu
+
+    compute_convection_vectors!(s, data, advecting_state)
+    ops = s.last_conv_ops
+    @assert ops !== nothing
+    bulk = ops.bulk
+    K_diag = ops.K_adv
+
+    ρ = s.fluid.ρ
+    ρ_val = ρ isa Function ? 1.0 : ρ
+
+    A[row_uωx+1:row_uωx+nu_x, off_uωx+1:off_uωx+nu_x] = data.visc_x_ω + ρ_val * bulk[1] - 0.5 * ρ_val * K_diag[1]
+    A[row_uωx+1:row_uωx+nu_x, off_uγx+1:off_uγx+nu_x] = data.visc_x_γ
+    A[row_uωx+1:row_uωx+nu_x, off_p+1:off_p+np]       = data.grad_x
+
+    A[row_uωy+1:row_uωy+nu_y, off_uωy+1:off_uωy+nu_y] = data.visc_y_ω + ρ_val * bulk[2] - 0.5 * ρ_val * K_diag[2]
+    A[row_uωy+1:row_uωy+nu_y, off_uγy+1:off_uγy+nu_y] = data.visc_y_γ
+    A[row_uωy+1:row_uωy+nu_y, off_p+1:off_p+np]       = data.grad_y
+
+    A[row_uωz+1:row_uωz+nu_z, off_uωz+1:off_uωz+nu_z] = data.visc_z_ω + ρ_val * bulk[3] - 0.5 * ρ_val * K_diag[3]
+    A[row_uωz+1:row_uωz+nu_z, off_uγz+1:off_uγz+nu_z] = data.visc_z_γ
+    A[row_uωz+1:row_uωz+nu_z, off_p+1:off_p+np]       = data.grad_z
+
+    A[row_uγx+1:row_uγx+nu_x, off_uγx+1:off_uγx+nu_x] = data.tie_x
+    A[row_uγy+1:row_uγy+nu_y, off_uγy+1:off_uγy+nu_y] = data.tie_y
+    A[row_uγz+1:row_uγz+nu_z, off_uγz+1:off_uγz+nu_z] = data.tie_z
+
+    con_rows = row_con+1:row_con+np
+    A[con_rows, off_uωx+1:off_uωx+nu_x] = data.div_x_ω
+    A[con_rows, off_uγx+1:off_uγx+nu_x] = data.div_x_γ
+    A[con_rows, off_uωy+1:off_uωy+nu_y] = data.div_y_ω
+    A[con_rows, off_uγy+1:off_uγy+nu_y] = data.div_y_γ
+    A[con_rows, off_uωz+1:off_uωz+nu_z] = data.div_z_ω
+    A[con_rows, off_uγz+1:off_uγz+nu_z] = data.div_z_γ
+
+    f_x = safe_build_source(data.op_ux, s.fluid.fᵤ, data.cap_px, nothing)
+    f_y = safe_build_source(data.op_uy, s.fluid.fᵤ, data.cap_py, nothing)
+    f_z = safe_build_source(data.op_uz, s.fluid.fᵤ, data.cap_pz, nothing)
+    load_x = data.Vx * f_x
+    load_y = data.Vy * f_y
+    load_z = data.Vz * f_z
+
+    g_cut_x = safe_build_g(data.op_ux, s.bc_cut, data.cap_px, nothing)
+    g_cut_y = safe_build_g(data.op_uy, s.bc_cut, data.cap_py, nothing)
+    g_cut_z = safe_build_g(data.op_uz, s.bc_cut, data.cap_pz, nothing)
+
+    b = vcat(load_x, g_cut_x, load_y, g_cut_y, load_z, g_cut_z, zeros(np))
+
+    apply_velocity_dirichlet_3D!(A, b, s.bc_u[1], s.bc_u[2], s.bc_u[3], s.fluid.mesh_u;
+                                 nu_x=nu_x, nu_y=nu_y, nu_z=nu_z,
+                                 uωx_off=off_uωx, uγx_off=off_uγx,
+                                 uωy_off=off_uωy, uγy_off=off_uγy,
+                                 uωz_off=off_uωz, uγz_off=off_uγz,
+                                 row_uωx_off=row_uωx, row_uγx_off=row_uγx,
+                                 row_uωy_off=row_uωy, row_uγy_off=row_uγy,
+                                 row_uωz_off=row_uωz, row_uγz_off=row_uγz,
+                                 t=nothing)
+
+    A, b = apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=off_p, np=np, row_start=row_con+1)
 
     s.A = A
@@ -1032,6 +1467,60 @@ function solve_NavierStokesMono_unsteady!(s::NavierStokesMono; Δt::Float64, T_e
 
         s.prev_conv = conv_prev
         return times, histories
+    elseif N == 3
+        data = navierstokes3D_blocks(s)
+
+        sum_nu = data.nu_x + data.nu_y + data.nu_z
+        p_offset = 2 * sum_nu
+        np = data.np
+        Ntot = p_offset + np
+
+        x_prev = length(s.x) == Ntot ? copy(s.x) : zeros(Ntot)
+
+        p_half_prev = zeros(np)
+        if length(s.x) == Ntot && !isempty(s.x)
+            p_half_prev .= s.x[p_offset+1:p_offset+np]
+        end
+
+        histories = store_states ? Vector{Vector{Float64}}() : Vector{Vector{Float64}}()
+        if store_states
+            push!(histories, copy(x_prev))
+        end
+        times = Float64[0.0]
+
+        conv_prev = s.prev_conv
+        if conv_prev !== nothing && length(conv_prev) != length(data.nu_components)
+            conv_prev = nothing
+        end
+
+        t = 0.0
+        println("[NavierStokesMono] Starting unsteady solve up to T=$(T_end) with Δt=$(Δt) and θ=$(θ)")
+        while t < T_end - 1e-12 * max(1.0, T_end)
+            dt_step = min(Δt, T_end - t)
+            t_next = t + dt_step
+
+            conv_curr = assemble_navierstokes3D_unsteady!(s, data, dt_step, x_prev, p_half_prev, t, t_next, θ, conv_prev)
+            solve_navierstokes_linear_system!(s; method=method, algorithm=algorithm, kwargs...)
+
+            x_prev = copy(s.x)
+            p_half_prev .= s.x[p_offset+1:p_offset+np]
+            N_comp = length(data.nu_components)
+            conv_prev = ntuple(Val(N_comp)) do i
+                copy(conv_curr[Int(i)])
+            end
+
+            push!(times, t_next)
+            if store_states
+                push!(histories, x_prev)
+            end
+            max_state = maximum(abs, x_prev)
+            println("[NavierStokesMono] t=$(round(t_next; digits=6)) max|state|=$(max_state)")
+
+            t = t_next
+        end
+
+        s.prev_conv = conv_prev
+        return times, histories
     else
         error("Navier–Stokes unsteady solver not implemented for N=$(N)")
     end
@@ -1188,6 +1677,76 @@ function solve_NavierStokesMono_unsteady_picard!(s::NavierStokesMono; Δt::Float
 
         s.prev_conv = nothing
         return times, histories
+    elseif N == 3
+        data = navierstokes3D_blocks(s)
+
+        p_offset = 2 * (data.nu_x + data.nu_y + data.nu_z)
+        np = data.np
+        Ntot = p_offset + np
+
+        x_prev = length(s.x) == Ntot ? copy(s.x) : zeros(Ntot)
+
+        p_half_prev = zeros(np)
+        if length(s.x) == Ntot && !isempty(s.x)
+            p_half_prev .= s.x[p_offset+1:p_offset+np]
+        end
+
+        histories = store_states ? Vector{Vector{Float64}}() : Vector{Vector{Float64}}()
+        if store_states
+            push!(histories, copy(x_prev))
+        end
+        times = Float64[0.0]
+
+        t = 0.0
+        println("[NavierStokesMono] Starting unsteady Picard solve (3D) up to T=$(T_end) with Δt=$(Δt) and θ=$(θ)")
+        while t < T_end - 1e-12 * max(1.0, T_end)
+            dt_step = min(Δt, T_end - t)
+            t_next = t + dt_step
+
+            conv_prev_tuple = (1.0 - θ) == 0.0 ? nothing : compute_convection_vectors!(s, data, x_prev)
+
+            x_iter = copy(x_prev)
+            residual = Inf
+            iter = 0
+
+            while iter < inner_maxiter && residual > inner_tol
+                assemble_navierstokes3D_unsteady_picard!(s, data, dt_step, x_prev, x_iter, p_half_prev,
+                                                         t, t_next, θ, conv_prev_tuple)
+                solve_navierstokes_linear_system!(s; method=method, algorithm=algorithm, kwargs...)
+
+                x_raw = s.x
+                x_new = θ_relax .* x_raw .+ (1.0 - θ_relax) .* x_iter
+
+                vel_residual = maximum(abs, (x_new .- x_iter)[1:p_offset])
+                residual = vel_residual
+                push!(s.residual_history, residual)
+
+                x_iter .= x_new
+                s.x .= x_new
+
+                iter += 1
+                println("[NavierStokesMono] t=$(round(t_next; digits=6)) Picard iter=$(iter) max|Δu|=$(residual)")
+            end
+
+            if residual > inner_tol
+                @warn "Navier–Stokes unsteady Picard (3D) did not reach tolerance" time=t_next final_residual=residual iterations=iter tol=inner_tol
+            end
+
+            x_prev = copy(x_iter)
+            p_half_prev .= x_prev[p_offset+1:p_offset+np]
+
+            push!(times, t_next)
+            if store_states
+                push!(histories, copy(x_prev))
+            end
+            max_state = maximum(abs, x_prev)
+            println("[NavierStokesMono] t=$(round(t_next; digits=6)) max|state|=$(max_state)")
+
+            t = t_next
+        end
+
+        s.prev_conv = nothing
+        return times, histories
     else
         error("Navier–Stokes unsteady Picard solver not implemented for N=$(N)")
     end
@@ -1200,7 +1759,7 @@ function build_convection_operators(s::NavierStokesMono, state::AbstractVector{<
     elseif N == 2
         navierstokes2D_blocks(s)
     else
-        error("Navier–Stokes convection operators not implemented for N=$(N)")
+        navierstokes3D_blocks(s)
     end
     conv_vectors = compute_convection_vectors!(s, data, state)
     return s.last_conv_ops, conv_vectors
@@ -1231,6 +1790,17 @@ function solve_NavierStokesMono_steady!(s::NavierStokesMono; tol=1e-8, maxiter::
         elseif nlsolve_method == :newton
             return solve_NavierStokesMono_steady_newton!(s; tol=tol, maxiter=maxiter,
                                                        method=method, algorithm=algorithm, kwargs...)
+        else
+            error("Unknown nlsolve_method: $(nlsolve_method). Use :picard or :newton")
+        end
+    elseif N == 3
+        if nlsolve_method == :picard
+            return solve_NavierStokesMono_steady_picard_3D!(s; tol=tol, maxiter=maxiter,
+                                                           relaxation=relaxation, method=method,
+                                                           algorithm=algorithm, kwargs...)
+        elseif nlsolve_method == :newton
+            return solve_NavierStokesMono_steady_newton!(s; tol=tol, maxiter=maxiter,
+                                                         method=method, algorithm=algorithm, kwargs...)
         else
             error("Unknown nlsolve_method: $(nlsolve_method). Use :picard or :newton")
         end
@@ -1384,12 +1954,58 @@ function solve_NavierStokesMono_steady_picard!(s::NavierStokesMono; tol=1e-8, ma
     return s.x, iter, residual
 end
 
+function solve_NavierStokesMono_steady_picard_3D!(s::NavierStokesMono; tol=1e-8, maxiter::Int=25,
+                                                 relaxation::Float64=1.0, method=Base.:\,
+                                                 algorithm=nothing, kwargs...)
+    θ_relax = clamp(relaxation, 0.0, 1.0)
+    N = length(s.fluid.operator_u)
+    N == 3 || error("Steady Navier–Stokes Picard (3D) requires N=3 (got $(N))")
+
+    data = navierstokes3D_blocks(s)
+    x_iter = copy(s.x)
+    residual = Inf
+    iter = 0
+
+    empty!(s.residual_history)
+
+    println("[NavierStokesMono] Starting steady 3D Picard iterations (tol=$(tol), maxiter=$(maxiter), relaxation=$(θ_relax))")
+
+    while iter < maxiter && residual > tol
+        assemble_navierstokes3D_steady_picard!(s, data, x_iter)
+        solve_navierstokes_linear_system!(s; method=method, algorithm=algorithm, kwargs...)
+
+        x_new = θ_relax .* s.x .+ (1.0 - θ_relax) .* x_iter
+
+        p_offset = 2 * (data.nu_x + data.nu_y + data.nu_z)
+        velocity_residual = maximum(abs, (x_new .- x_iter)[1:p_offset])
+        residual = velocity_residual
+        push!(s.residual_history, residual)
+
+        x_iter .= x_new
+        s.x .= x_new
+
+        iter += 1
+        println("[NavierStokesMono] Picard iter=$(iter) max|Δu|=$(residual)")
+    end
+
+    if residual > tol
+        @warn "Navier–Stokes steady 3D Picard did not reach tolerance" final_residual=residual iterations=iter tol=tol
+    end
+
+    s.prev_conv = nothing
+    return s.x, iter, residual
+end
+
 function solve_NavierStokesMono_steady_newton!(s::NavierStokesMono; tol=1e-8, maxiter::Int=25,
                                               method=Base.:\, algorithm=nothing, kwargs...)
     N = length(s.fluid.operator_u)
-    N == 2 || error("Steady Navier–Stokes Newton solver currently implemented for 2D (N=$(N)).")
-
-    data = navierstokes2D_blocks(s)
+    if N == 2
+        data = navierstokes2D_blocks(s)
+    elseif N == 3
+        data = navierstokes3D_blocks(s)
+    else
+        error("Steady Navier–Stokes Newton solver not implemented for N=$(N).")
+    end
     x_iter = copy(s.x)
     residual = Inf
     iter = 0
@@ -1401,32 +2017,63 @@ function solve_NavierStokesMono_steady_newton!(s::NavierStokesMono; tol=1e-8, ma
 
     while iter < maxiter && residual > tol
         # Compute residual and Jacobian
-        F_val = compute_navierstokes2D_residual!(s, data, x_iter)
-        J_val = compute_navierstokes2D_jacobian!(s, data, x_iter)
+        F_val = N == 2 ? compute_navierstokes2D_residual!(s, data, x_iter) :
+                         compute_navierstokes3D_residual!(s, data, x_iter)
+        J_val = N == 2 ? compute_navierstokes2D_jacobian!(s, data, x_iter) :
+                         compute_navierstokes3D_jacobian!(s, data, x_iter)
 
         rhs = -F_val
 
-        nu_x = data.nu_x
-        nu_y = data.nu_y
-        sum_nu = nu_x + nu_y
-        off_uωx = 0
-        off_uγx = nu_x
-        off_uωy = 2 * nu_x
-        off_uγy = 2 * nu_x + nu_y
-        off_p   = 2 * sum_nu
+        if N == 2
+            nu_x = data.nu_x
+            nu_y = data.nu_y
+            sum_nu = nu_x + nu_y
+            off_uωx = 0
+            off_uγx = nu_x
+            off_uωy = 2 * nu_x
+            off_uγy = 2 * nu_x + nu_y
+            off_p   = 2 * sum_nu
 
-        apply_velocity_dirichlet_2D_newton!(J_val, rhs, x_iter, s.bc_u[1], s.bc_u[2], s.fluid.mesh_u;
-                                             nu_x=nu_x, nu_y=nu_y,
-                                             uωx_off=off_uωx, uγx_off=off_uγx,
-                                             uωy_off=off_uωy, uγy_off=off_uγy,
-                                             row_uωx_off=0, row_uγx_off=nu_x,
-                                             row_uωy_off=2*nu_x, row_uγy_off=2*nu_x+nu_y,
-                                             t=nothing)
+            apply_velocity_dirichlet_2D_newton!(J_val, rhs, x_iter, s.bc_u[1], s.bc_u[2], s.fluid.mesh_u;
+                                                nu_x=nu_x, nu_y=nu_y,
+                                                uωx_off=off_uωx, uγx_off=off_uγx,
+                                                uωy_off=off_uωy, uγy_off=off_uγy,
+                                                row_uωx_off=0, row_uγx_off=nu_x,
+                                                row_uωy_off=2*nu_x, row_uγy_off=2*nu_x+nu_y,
+                                                t=nothing)
 
-        apply_pressure_gauge_newton!(J_val, rhs, x_iter, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
-                                     p_offset=off_p, np=data.np,
-                                     row_start=2*sum_nu+1,
-                                     t=nothing)
+            apply_pressure_gauge_newton!(J_val, rhs, x_iter, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
+                                         p_offset=off_p, np=data.np,
+                                         row_start=2*sum_nu+1,
+                                         t=nothing)
+        else
+            nu_x = data.nu_x
+            nu_y = data.nu_y
+            nu_z = data.nu_z
+            sum_nu = nu_x + nu_y + nu_z
+            off_uωx = 0
+            off_uγx = nu_x
+            off_uωy = 2 * nu_x
+            off_uγy = 2 * nu_x + nu_y
+            off_uωz = 2 * nu_x + 2 * nu_y
+            off_uγz = 2 * nu_x + 2 * nu_y + nu_z
+            off_p   = 2 * sum_nu
+
+            apply_velocity_dirichlet_3D_newton!(J_val, rhs, x_iter, s.bc_u[1], s.bc_u[2], s.bc_u[3], s.fluid.mesh_u;
+                                                nu_x=nu_x, nu_y=nu_y, nu_z=nu_z,
+                                                uωx_off=off_uωx, uγx_off=off_uγx,
+                                                uωy_off=off_uωy, uγy_off=off_uγy,
+                                                uωz_off=off_uωz, uγz_off=off_uγz,
+                                                row_uωx_off=0, row_uγx_off=nu_x,
+                                                row_uωy_off=2*nu_x, row_uγy_off=2*nu_x+nu_y,
+                                                row_uωz_off=2*nu_x+2*nu_y, row_uγz_off=2*nu_x+2*nu_y+nu_z,
+                                                t=nothing)
+
+            apply_pressure_gauge_newton!(J_val, rhs, x_iter, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
+                                         p_offset=off_p, np=data.np,
+                                         row_start=2*sum_nu+1,
+                                         t=nothing)
+        end
 
         # Solve Newton step: J * Δx = rhs
         s.A = J_val
@@ -1437,7 +2084,7 @@ function solve_NavierStokesMono_steady_newton!(s::NavierStokesMono; tol=1e-8, ma
         x_new = x_iter .+ s.x
         
         # Calculate residual only on velocity components (exclude pressure)
-        p_offset = 2 * (data.nu_x + data.nu_y)
+        p_offset = N == 2 ? 2 * (data.nu_x + data.nu_y) : 2 * (data.nu_x + data.nu_y + data.nu_z)
         velocity_residual = maximum(abs, (x_new .- x_iter)[1:p_offset])
         residual = velocity_residual
         
@@ -1655,6 +2302,131 @@ function compute_navierstokes2D_jacobian!(s::NavierStokesMono, data, x_state::Ab
     J[con_rows, off_uωy+1:off_uωy+nu_y] = data.div_y_ω
     J[con_rows, off_uγy+1:off_uγy+nu_y] = data.div_y_γ
     
+    return J
+end
+
+function compute_navierstokes3D_residual!(s::NavierStokesMono, data, x_state::AbstractVector{<:Real})
+    nu_x = data.nu_x
+    nu_y = data.nu_y
+    nu_z = data.nu_z
+    np = data.np
+
+    off_uωx = 0
+    off_uγx = nu_x
+    off_uωy = 2 * nu_x
+    off_uγy = 2 * nu_x + nu_y
+    off_uωz = 2 * nu_x + 2 * nu_y
+    off_uγz = 2 * nu_x + 2 * nu_y + nu_z
+    off_p   = 2 * (nu_x + nu_y + nu_z)
+
+    uωx = view(x_state, off_uωx+1:off_uωx+nu_x)
+    uγx = view(x_state, off_uγx+1:off_uγx+nu_x)
+    uωy = view(x_state, off_uωy+1:off_uωy+nu_y)
+    uγy = view(x_state, off_uγy+1:off_uγy+nu_y)
+    uωz = view(x_state, off_uωz+1:off_uωz+nu_z)
+    uγz = view(x_state, off_uγz+1:off_uγz+nu_z)
+    pω = view(x_state, off_p+1:off_p+np)
+
+    conv_vectors = compute_convection_vectors!(s, data, x_state)
+    ρ = s.fluid.ρ
+    ρ_val = ρ isa Function ? 1.0 : ρ
+
+    f_x = safe_build_source(data.op_ux, s.fluid.fᵤ, data.cap_px, nothing)
+    f_y = safe_build_source(data.op_uy, s.fluid.fᵤ, data.cap_py, nothing)
+    f_z = safe_build_source(data.op_uz, s.fluid.fᵤ, data.cap_pz, nothing)
+    load_x = data.Vx * f_x
+    load_y = data.Vy * f_y
+    load_z = data.Vz * f_z
+
+    uωx_vec = Vector{Float64}(uωx)
+    uγx_vec = Vector{Float64}(uγx)
+    uωy_vec = Vector{Float64}(uωy)
+    uγy_vec = Vector{Float64}(uγy)
+    uωz_vec = Vector{Float64}(uωz)
+    uγz_vec = Vector{Float64}(uγz)
+    p_vec = Vector{Float64}(pω)
+
+    F_mom_x = data.visc_x_ω * uωx_vec + data.visc_x_γ * uγx_vec + ρ_val * conv_vectors[1] + data.grad_x * p_vec - load_x
+    F_mom_y = data.visc_y_ω * uωy_vec + data.visc_y_γ * uγy_vec + ρ_val * conv_vectors[2] + data.grad_y * p_vec - load_y
+    F_mom_z = data.visc_z_ω * uωz_vec + data.visc_z_γ * uγz_vec + ρ_val * conv_vectors[3] + data.grad_z * p_vec - load_z
+
+    g_cut_x = safe_build_g(data.op_ux, s.bc_cut, data.cap_px, nothing)
+    g_cut_y = safe_build_g(data.op_uy, s.bc_cut, data.cap_py, nothing)
+    g_cut_z = safe_build_g(data.op_uz, s.bc_cut, data.cap_pz, nothing)
+
+    F_tie_x = uγx_vec - g_cut_x
+    F_tie_y = uγy_vec - g_cut_y
+    F_tie_z = uγz_vec - g_cut_z
+
+    F_cont = data.div_x_ω * uωx_vec + data.div_x_γ * uγx_vec +
+             data.div_y_ω * uωy_vec + data.div_y_γ * uγy_vec +
+             data.div_z_ω * uωz_vec + data.div_z_γ * uγz_vec
+
+    return vcat(F_mom_x, F_tie_x, F_mom_y, F_tie_y, F_mom_z, F_tie_z, F_cont)
+end
+
+function compute_navierstokes3D_jacobian!(s::NavierStokesMono, data, x_state::AbstractVector{<:Real})
+    nu_x = data.nu_x
+    nu_y = data.nu_y
+    nu_z = data.nu_z
+    sum_nu = nu_x + nu_y + nu_z
+    np = data.np
+
+    rows = 2 * sum_nu + np
+    cols = 2 * sum_nu + np
+    J = spzeros(Float64, rows, cols)
+
+    off_uωx = 0
+    off_uγx = nu_x
+    off_uωy = 2 * nu_x
+    off_uγy = 2 * nu_x + nu_y
+    off_uωz = 2 * nu_x + 2 * nu_y
+    off_uγz = 2 * nu_x + 2 * nu_y + nu_z
+    off_p   = 2 * sum_nu
+
+    row_uωx = 0
+    row_uγx = nu_x
+    row_uωy = 2 * nu_x
+    row_uγy = 2 * nu_x + nu_y
+    row_uωz = 2 * nu_x + 2 * nu_y
+    row_uγz = 2 * nu_x + 2 * nu_y + nu_z
+    row_con = 2 * sum_nu
+
+    compute_convection_vectors!(s, data, x_state)
+    ops = s.last_conv_ops
+    @assert ops !== nothing
+    bulk = ops.bulk
+    K_adv = ops.K_adv
+
+    ρ = s.fluid.ρ
+    ρ_val = ρ isa Function ? 1.0 : ρ
+
+    J[row_uωx+1:row_uωx+nu_x, off_uωx+1:off_uωx+nu_x] = data.visc_x_ω + ρ_val * bulk[1] - 0.5 * ρ_val * K_adv[1]
+    J[row_uωx+1:row_uωx+nu_x, off_uγx+1:off_uγx+nu_x] = data.visc_x_γ
+    J[row_uωx+1:row_uωx+nu_x, off_p+1:off_p+np]       = data.grad_x
+
+    J[row_uγx+1:row_uγx+nu_x, off_uγx+1:off_uγx+nu_x] = data.tie_x
+
+    J[row_uωy+1:row_uωy+nu_y, off_uωy+1:off_uωy+nu_y] = data.visc_y_ω + ρ_val * bulk[2] - 0.5 * ρ_val * K_adv[2]
+    J[row_uωy+1:row_uωy+nu_y, off_uγy+1:off_uγy+nu_y] = data.visc_y_γ
+    J[row_uωy+1:row_uωy+nu_y, off_p+1:off_p+np]       = data.grad_y
+
+    J[row_uγy+1:row_uγy+nu_y, off_uγy+1:off_uγy+nu_y] = data.tie_y
+
+    J[row_uωz+1:row_uωz+nu_z, off_uωz+1:off_uωz+nu_z] = data.visc_z_ω + ρ_val * bulk[3] - 0.5 * ρ_val * K_adv[3]
+    J[row_uωz+1:row_uωz+nu_z, off_uγz+1:off_uγz+nu_z] = data.visc_z_γ
+    J[row_uωz+1:row_uωz+nu_z, off_p+1:off_p+np]       = data.grad_z
+
+    J[row_uγz+1:row_uγz+nu_z, off_uγz+1:off_uγz+nu_z] = data.tie_z
+
+    con_rows = row_con+1:row_con+np
+    J[con_rows, off_uωx+1:off_uωx+nu_x] = data.div_x_ω
+    J[con_rows, off_uγx+1:off_uγx+nu_x] = data.div_x_γ
+    J[con_rows, off_uωy+1:off_uωy+nu_y] = data.div_y_ω
+    J[con_rows, off_uγy+1:off_uγy+nu_y] = data.div_y_γ
+    J[con_rows, off_uωz+1:off_uωz+nu_z] = data.div_z_ω
+    J[con_rows, off_uγz+1:off_uγz+nu_z] = data.div_z_γ
+
     return J
 end
 
@@ -1934,6 +2706,222 @@ function apply_velocity_dirichlet_2D_newton!(A::SparseMatrixCSC{Float64, Int}, r
                 colγ_adj = uγy_off + neighbor
                 rhs_gamma = -(Float64(x_state[colγ]) - Float64(x_state[colγ_adj]))
                 enforce_zero_gradient!(A, rhs, row_uγy_off + liy, colγ, colγ_adj, rhs_gamma)
+            end
+        end
+    end
+
+    return nothing
+end
+
+function apply_velocity_dirichlet_3D_newton!(A::SparseMatrixCSC{Float64, Int}, rhs::Vector{Float64},
+                                             x_state::AbstractVector{<:Real},
+                                             bc_ux::BorderConditions,
+                                             bc_uy::BorderConditions,
+                                             bc_uz::BorderConditions,
+                                             mesh_u::NTuple{3,AbstractMesh};
+                                             nu_x::Int, nu_y::Int, nu_z::Int,
+                                             uωx_off::Int, uγx_off::Int,
+                                             uωy_off::Int, uγy_off::Int,
+                                             uωz_off::Int, uγz_off::Int,
+                                             row_uωx_off::Int, row_uγx_off::Int,
+                                             row_uωy_off::Int, row_uγy_off::Int,
+                                             row_uωz_off::Int, row_uγz_off::Int,
+                                             t::Union{Nothing,Float64}=nothing)
+    mesh_ux, mesh_uy, mesh_uz = mesh_u
+    nx = length(mesh_ux.nodes[1]); ny = length(mesh_ux.nodes[2]); nz = length(mesh_ux.nodes[3])
+    nx_y = length(mesh_uy.nodes[1]); ny_y = length(mesh_uy.nodes[2]); nz_y = length(mesh_uy.nodes[3])
+    nx_z = length(mesh_uz.nodes[1]); ny_z = length(mesh_uz.nodes[2]); nz_z = length(mesh_uz.nodes[3])
+    @assert nx == nx_y == nx_z && ny == ny_y == ny_z && nz == nz_y == nz_z "Velocity meshes must share grid dimensions"
+
+    LIx = LinearIndices((nx, ny, nz))
+    LIy = LinearIndices((nx, ny, nz))
+    LIz = LinearIndices((nx, ny, nz))
+
+    iright = max(nx - 1, 1)
+    jtop   = max(ny - 1, 1)
+    kfront = max(nz - 1, 1)
+
+    xs_x, ys_x, zs_x = mesh_ux.nodes
+    xs_y, ys_y, zs_y = mesh_uy.nodes
+    xs_z, ys_z, zs_z = mesh_uz.nodes
+
+    eval_val(bc, x, y, z) = (bc isa Dirichlet) ? (bc.value isa Function ? eval_val_fn(bc.value, x, y, z) : bc.value) : nothing
+    eval_val(bc, x, y, z, t) = (bc isa Dirichlet) ? (bc.value isa Function ? bc.value(x, y, z, t) : bc.value) : nothing
+
+    function eval_val_fn(f, x, y, z)
+        try
+            return f(x, y, z)
+        catch MethodError
+            return f(x, y, z, 0.0)
+        end
+    end
+
+    bcx_bottom = get(bc_ux.borders, :bottom, nothing)
+    bcy_bottom = get(bc_uy.borders, :bottom, nothing)
+    bcz_bottom = get(bc_uz.borders, :bottom, nothing)
+    bcx_top    = get(bc_ux.borders, :top, nothing)
+    bcy_top    = get(bc_uy.borders, :top, nothing)
+    bcz_top    = get(bc_uz.borders, :top, nothing)
+
+    bcx_left   = get(bc_ux.borders, :left, nothing)
+    bcy_left   = get(bc_uy.borders, :left, nothing)
+    bcz_left   = get(bc_uz.borders, :left, nothing)
+    bcx_right  = get(bc_ux.borders, :right, nothing)
+    bcy_right  = get(bc_uy.borders, :right, nothing)
+    bcz_right  = get(bc_uz.borders, :right, nothing)
+
+    bcx_back  = get(bc_ux.borders, :back, get(bc_ux.borders, :backward, nothing))
+    bcy_back  = get(bc_uy.borders, :back, get(bc_uy.borders, :backward, nothing))
+    bcz_back  = get(bc_uz.borders, :back, get(bc_uz.borders, :backward, nothing))
+    bcx_front = get(bc_ux.borders, :front, get(bc_ux.borders, :forward, nothing))
+    bcy_front = get(bc_uy.borders, :front, get(bc_uy.borders, :forward, nothing))
+    bcz_front = get(bc_uz.borders, :front, get(bc_uz.borders, :forward, nothing))
+
+    function enforce_dirichlet_delta(row, col, target)
+        delta = Float64(target) - Float64(x_state[col])
+        enforce_dirichlet!(A, rhs, row, col, delta)
+    end
+
+    function zero_gradient_delta(row, col_a, col_b)
+        rhs_val = -(Float64(x_state[col_a]) - Float64(x_state[col_b]))
+        enforce_zero_gradient!(A, rhs, row, col_a, col_b, rhs_val)
+    end
+
+    # Bottom/top (vary along x and z)
+    for (jy, bcx, bcy, bcz) in ((1, bcx_bottom, bcy_bottom, bcz_bottom), (jtop, bcx_top, bcy_top, bcz_top))
+        for i in 1:nx, k in 1:nz
+            lix = LIx[i, jy, k]
+            liy = LIy[i, jy, k]
+            liz = LIz[i, jy, k]
+            if bcx isa Dirichlet
+                vx = t === nothing ? eval_val(bcx, xs_x[i], ys_x[jy], zs_x[k]) : eval_val(bcx, xs_x[i], ys_x[jy], zs_x[k], t)
+                if vx !== nothing
+                    enforce_dirichlet_delta(row_uωx_off + lix, uωx_off + lix, vx)
+                    enforce_dirichlet_delta(row_uγx_off + lix, uγx_off + lix, vx)
+                end
+            elseif bcx isa Outflow || bcx isa Symmetry
+                neighbor = jy == 1 ? LIx[i, min(jy+1, ny), k] : LIx[i, max(jy-1, 1), k]
+                zero_gradient_delta(row_uωx_off + lix, uωx_off + lix, uωx_off + neighbor)
+                zero_gradient_delta(row_uγx_off + lix, uγx_off + lix, uγx_off + neighbor)
+            end
+            if bcy isa Dirichlet
+                vy = t === nothing ? eval_val(bcy, xs_y[i], ys_y[jy], zs_y[k]) : eval_val(bcy, xs_y[i], ys_y[jy], zs_y[k], t)
+                if vy !== nothing
+                    enforce_dirichlet_delta(row_uωy_off + liy, uωy_off + liy, vy)
+                    enforce_dirichlet_delta(row_uγy_off + liy, uγy_off + liy, vy)
+                end
+            elseif bcy isa Symmetry
+                enforce_dirichlet_delta(row_uωy_off + liy, uωy_off + liy, 0.0)
+                enforce_dirichlet_delta(row_uγy_off + liy, uγy_off + liy, 0.0)
+            elseif bcy isa Outflow
+                neighbor = jy == 1 ? LIy[i, min(jy+1, ny), k] : LIy[i, max(jy-1, 1), k]
+                zero_gradient_delta(row_uωy_off + liy, uωy_off + liy, uωy_off + neighbor)
+                zero_gradient_delta(row_uγy_off + liy, uγy_off + liy, uγy_off + neighbor)
+            end
+            if bcz isa Dirichlet
+                vz = t === nothing ? eval_val(bcz, xs_z[i], ys_z[jy], zs_z[k]) : eval_val(bcz, xs_z[i], ys_z[jy], zs_z[k], t)
+                if vz !== nothing
+                    enforce_dirichlet_delta(row_uωz_off + liz, uωz_off + liz, vz)
+                    enforce_dirichlet_delta(row_uγz_off + liz, uγz_off + liz, vz)
+                end
+            elseif bcz isa Outflow || bcz isa Symmetry
+                neighbor = jy == 1 ? LIz[i, min(jy+1, ny), k] : LIz[i, max(jy-1, 1), k]
+                zero_gradient_delta(row_uωz_off + liz, uωz_off + liz, uωz_off + neighbor)
+                zero_gradient_delta(row_uγz_off + liz, uγz_off + liz, uγz_off + neighbor)
+            end
+        end
+    end
+
+    # Left/right (vary along y,z)
+    for (ix, bcx, bcy, bcz) in ((1, bcx_left, bcy_left, bcz_left), (iright, bcx_right, bcy_right, bcz_right))
+        for j in 1:ny, k in 1:nz
+            lix = LIx[ix, j, k]
+            liy = LIy[ix, j, k]
+            liz = LIz[ix, j, k]
+            if bcx isa Dirichlet
+                vx = t === nothing ? eval_val(bcx, xs_x[ix], ys_x[j], zs_x[k]) : eval_val(bcx, xs_x[ix], ys_x[j], zs_x[k], t)
+                if vx !== nothing
+                    enforce_dirichlet_delta(row_uωx_off + lix, uωx_off + lix, vx)
+                    enforce_dirichlet_delta(row_uγx_off + lix, uγx_off + lix, vx)
+                end
+            elseif bcx isa Symmetry
+                enforce_dirichlet_delta(row_uωx_off + lix, uωx_off + lix, 0.0)
+                enforce_dirichlet_delta(row_uγx_off + lix, uγx_off + lix, 0.0)
+            elseif bcx isa Outflow
+                neighbor = ix == 1 ? LIx[min(ix+1, nx), j, k] : LIx[max(ix-1, 1), j, k]
+                zero_gradient_delta(row_uωx_off + lix, uωx_off + lix, uωx_off + neighbor)
+                zero_gradient_delta(row_uγx_off + lix, uγx_off + lix, uγx_off + neighbor)
+            end
+            if bcy isa Dirichlet
+                vy = t === nothing ? eval_val(bcy, xs_y[ix], ys_y[j], zs_y[k]) : eval_val(bcy, xs_y[ix], ys_y[j], zs_y[k], t)
+                if vy !== nothing
+                    enforce_dirichlet_delta(row_uωy_off + liy, uωy_off + liy, vy)
+                    enforce_dirichlet_delta(row_uγy_off + liy, uγy_off + liy, vy)
+                end
+            elseif bcy isa Symmetry
+                neighbor = ix == 1 ? LIy[min(ix+1, nx), j, k] : LIy[max(ix-1, 1), j, k]
+                zero_gradient_delta(row_uωy_off + liy, uωy_off + liy, uωy_off + neighbor)
+                zero_gradient_delta(row_uγy_off + liy, uγy_off + liy, uγy_off + neighbor)
+            elseif bcy isa Outflow
+                neighbor = ix == 1 ? LIy[min(ix+1, nx), j, k] : LIy[max(ix-1, 1), j, k]
+                zero_gradient_delta(row_uωy_off + liy, uωy_off + liy, uωy_off + neighbor)
+                zero_gradient_delta(row_uγy_off + liy, uγy_off + liy, uγy_off + neighbor)
+            end
+            if bcz isa Dirichlet
+                vz = t === nothing ? eval_val(bcz, xs_z[ix], ys_z[j], zs_z[k]) : eval_val(bcz, xs_z[ix], ys_z[j], zs_z[k], t)
+                if vz !== nothing
+                    enforce_dirichlet_delta(row_uωz_off + liz, uωz_off + liz, vz)
+                    enforce_dirichlet_delta(row_uγz_off + liz, uγz_off + liz, vz)
+                end
+            elseif bcz isa Outflow || bcz isa Symmetry
+                neighbor = ix == 1 ? LIz[min(ix+1, nx), j, k] : LIz[max(ix-1, 1), j, k]
+                zero_gradient_delta(row_uωz_off + liz, uωz_off + liz, uωz_off + neighbor)
+                zero_gradient_delta(row_uγz_off + liz, uγz_off + liz, uγz_off + neighbor)
+            end
+        end
+    end
+
+    # Back/front (vary along x,y)
+    for (kidx, bcx, bcy, bcz) in ((1, bcx_back, bcy_back, bcz_back), (kfront, bcx_front, bcy_front, bcz_front))
+        for i in 1:nx, j in 1:ny
+            lix = LIx[i, j, kidx]
+            liy = LIy[i, j, kidx]
+            liz = LIz[i, j, kidx]
+            if bcx isa Dirichlet
+                vx = t === nothing ? eval_val(bcx, xs_x[i], ys_x[j], zs_x[kidx]) : eval_val(bcx, xs_x[i], ys_x[j], zs_x[kidx], t)
+                if vx !== nothing
+                    enforce_dirichlet_delta(row_uωx_off + lix, uωx_off + lix, vx)
+                    enforce_dirichlet_delta(row_uγx_off + lix, uγx_off + lix, vx)
+                end
+            elseif bcx isa Outflow || bcx isa Symmetry
+                neighbor = kidx == 1 ? LIx[i, j, min(kidx+1, nz)] : LIx[i, j, max(kidx-1, 1)]
+                zero_gradient_delta(row_uωx_off + lix, uωx_off + lix, uωx_off + neighbor)
+                zero_gradient_delta(row_uγx_off + lix, uγx_off + lix, uγx_off + neighbor)
+            end
+            if bcy isa Dirichlet
+                vy = t === nothing ? eval_val(bcy, xs_y[i], ys_y[j], zs_y[kidx]) : eval_val(bcy, xs_y[i], ys_y[j], zs_y[kidx], t)
+                if vy !== nothing
+                    enforce_dirichlet_delta(row_uωy_off + liy, uωy_off + liy, vy)
+                    enforce_dirichlet_delta(row_uγy_off + liy, uγy_off + liy, vy)
+                end
+            elseif bcy isa Outflow || bcy isa Symmetry
+                neighbor = kidx == 1 ? LIy[i, j, min(kidx+1, nz)] : LIy[i, j, max(kidx-1, 1)]
+                zero_gradient_delta(row_uωy_off + liy, uωy_off + liy, uωy_off + neighbor)
+                zero_gradient_delta(row_uγy_off + liy, uγy_off + liy, uγy_off + neighbor)
+            end
+            if bcz isa Dirichlet
+                vz = t === nothing ? eval_val(bcz, xs_z[i], ys_z[j], zs_z[kidx]) : eval_val(bcz, xs_z[i], ys_z[j], zs_z[kidx], t)
+                if vz !== nothing
+                    enforce_dirichlet_delta(row_uωz_off + liz, uωz_off + liz, vz)
+                    enforce_dirichlet_delta(row_uγz_off + liz, uγz_off + liz, vz)
+                end
+            elseif bcz isa Symmetry
+                enforce_dirichlet_delta(row_uωz_off + liz, uωz_off + liz, 0.0)
+                enforce_dirichlet_delta(row_uγz_off + liz, uγz_off + liz, 0.0)
+            elseif bcz isa Outflow
+                neighbor = kidx == 1 ? LIz[i, j, min(kidx+1, nz)] : LIz[i, j, max(kidx-1, 1)]
+                zero_gradient_delta(row_uωz_off + liz, uωz_off + liz, uωz_off + neighbor)
+                zero_gradient_delta(row_uγz_off + liz, uγz_off + liz, uγz_off + neighbor)
             end
         end
     end
