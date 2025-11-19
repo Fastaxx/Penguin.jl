@@ -2,6 +2,7 @@ using Penguin
 using CairoMakie
 using LinearAlgebra
 using LinearSolve
+using WriteVTK
 
 """
 Steady Stokes flow past a spherical obstacle embedded in a 3D channel.
@@ -19,14 +20,16 @@ Sphere: centered, radius R.
 # Geometry
 ###########
 # Grid & domain (center sphere inside channel)
-Nx, Ny, Nz = 24, 24, 16   # adjust for desired resolution / performance
+Nx, Ny, Nz = 32, 32, 16
 Lx, Ly, Lz = 4.0, 1.0, 1.0
 x0, y0, z0 = -Lx/2, -Ly/2, -Lz/2   # domain centered at origin
 
 sphere_center = (0.0, 0.0, 0.0)
-R = 0.20
+R = 0.2
 ###########
-sphere_body = (x, y, z, _t=0.0) -> -1.0 #R - sqrt((x - sphere_center[1])^2 + (y - sphere_center[2])^2 + (z - sphere_center[3])^2)
+sphere_body = (x, y, z, _t=0.0) -> -(sqrt((x - sphere_center[1])^2 +
+                             (y - sphere_center[2])^2 +
+                             (z - sphere_center[3])^2) - R)
 
 ###########
 # Meshes (staggered velocity, collocated pressure)
@@ -42,10 +45,14 @@ mesh_uz = Penguin.Mesh((Nx, Ny, Nz), (Lx, Ly, Lz), (x0, y0, z0 - 0.5*Δz))
 ###########
 # Capacities & Operators
 ###########
-cap_ux = Capacity(sphere_body, mesh_ux)
-cap_uy = Capacity(sphere_body, mesh_uy)
-cap_uz = Capacity(sphere_body, mesh_uz)
-cap_p  = Capacity(sphere_body, mesh_p)
+println("capacity ux...")
+cap_ux = Capacity(sphere_body, mesh_ux; method="ImplicitIntegration")
+println("capacity uy...")
+cap_uy = Capacity(sphere_body, mesh_uy; method="ImplicitIntegration")
+println("capacity uz...")
+cap_uz = Capacity(sphere_body, mesh_uz; method="ImplicitIntegration")
+println("capacity p...")
+cap_p  = Capacity(sphere_body, mesh_p; method="ImplicitIntegration")
 
 op_ux = DiffusionOps(cap_ux)
 op_uy = DiffusionOps(cap_uy)
@@ -65,7 +72,7 @@ end
 
 # For ux component
 ux_left   = Dirichlet((x,y,z) -> parabolic(x,y,z))
-ux_right  = Dirichlet((x,y,z) -> parabolic(x,y,z))
+ux_right  = Outflow()
 ux_bottom = Dirichlet(0.0)
 ux_top    = Dirichlet(0.0)
 ux_front  = Dirichlet(0.0)
@@ -140,10 +147,14 @@ off_uωz = 2*nu_x + 2*nu_y
 off_uγz = 2*nu_x + 2*nu_y + nu_z
 off_p   = 2*(nu_x + nu_y + nu_z)
 
-Ux = reshape(solver.x[off_uωx+1:off_uωx+nu_x], (length(mesh_ux.nodes[1]), length(mesh_ux.nodes[2]), length(mesh_ux.nodes[3])))
-Uy = reshape(solver.x[off_uωy+1:off_uωy+nu_y], (length(mesh_uy.nodes[1]), length(mesh_uy.nodes[2]), length(mesh_uy.nodes[3])))
-Uz = reshape(solver.x[off_uωz+1:off_uωz+nu_z], (length(mesh_uz.nodes[1]), length(mesh_uz.nodes[2]), length(mesh_uz.nodes[3])))
-P  = reshape(solver.x[off_p+1:off_p+np], (length(mesh_p.nodes[1]), length(mesh_p.nodes[2]), length(mesh_p.nodes[3])))
+Ux = reshape(solver.x[off_uωx+1:off_uωx+nu_x],
+             (length(mesh_ux.nodes[1]), length(mesh_ux.nodes[2]), length(mesh_ux.nodes[3])))
+Uy = reshape(solver.x[off_uωy+1:off_uωy+nu_y],
+             (length(mesh_uy.nodes[1]), length(mesh_uy.nodes[2]), length(mesh_uy.nodes[3])))
+Uz = reshape(solver.x[off_uωz+1:off_uωz+nu_z],
+             (length(mesh_uz.nodes[1]), length(mesh_uz.nodes[2]), length(mesh_uz.nodes[3])))
+P  = reshape(solver.x[off_p+1:off_p+np],
+             (length(mesh_p.nodes[1]), length(mesh_p.nodes[2]), length(mesh_p.nodes[3])))
 
 println("Velocity magnitude stats: min=", minimum(sqrt.(Ux.^2 .+ Uy.^2 .+ Uz.^2)),
         " max=", maximum(sqrt.(Ux.^2 .+ Uy.^2 .+ Uz.^2)))
@@ -171,3 +182,31 @@ Colorbar(fig[1,4], hm2)
 
 save("stokes3d_sphere_slice.png", fig)
 println("Saved stokes3d_sphere_slice.png")
+
+###########
+# Export to VTK for ParaView inspection
+###########
+Ux_cut = reshape(solver.x[off_uγx+1:off_uγx+nu_x], size(Ux))
+Uy_cut = reshape(solver.x[off_uγy+1:off_uγy+nu_y], size(Uy))
+Uz_cut = reshape(solver.x[off_uγz+1:off_uγz+nu_z], size(Uz))
+
+vtk_grid("stokes3d_velocity_x", mesh_ux.nodes[1], mesh_ux.nodes[2], mesh_ux.nodes[3]) do vtk
+    vtk["uωx"] = Ux
+    vtk["uγx"] = Ux_cut
+end
+
+vtk_grid("stokes3d_velocity_y", mesh_uy.nodes[1], mesh_uy.nodes[2], mesh_uy.nodes[3]) do vtk
+    vtk["uωy"] = Uy
+    vtk["uγy"] = Uy_cut
+end
+
+vtk_grid("stokes3d_velocity_z", mesh_uz.nodes[1], mesh_uz.nodes[2], mesh_uz.nodes[3]) do vtk
+    vtk["uωz"] = Uz
+    vtk["uγz"] = Uz_cut
+end
+
+vtk_grid("stokes3d_pressure", mesh_p.nodes[1], mesh_p.nodes[2], mesh_p.nodes[3]) do vtk
+    vtk["pressure"] = P
+end
+
+println("VTK files written: stokes3d_velocity_x/yz.vtr and stokes3d_pressure.vtr (open in ParaView).")

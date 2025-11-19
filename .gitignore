@@ -30,6 +30,7 @@ Manifest.toml
 # Ignore .vti, .vtk files
 *.vti
 *.vtk
+*.vtr
 
 # Ignore all files with name "sandbox"
 sandbox

@@ -183,42 +183,38 @@ function stokes3D_blocks(s::StokesMono)
     op_p = s.fluid.operator_p
     cap_p = s.fluid.capacity_p
 
-    op_ux, op_uy, op_uz = ops_u
-    cap_ux, cap_uy, cap_uz = caps_u
-
-    nu_x = prod(op_ux.size)
-    nu_y = prod(op_uy.size)
-    nu_z = prod(op_uz.size)
+    nu_x = prod(ops_u[1].size)
+    nu_y = prod(ops_u[2].size)
+    nu_z = prod(ops_u[3].size)
     np = prod(op_p.size)
-    sum_nu = nu_x + nu_y + nu_z
 
     μ = s.fluid.μ
-    Iμ_x = build_I_D(op_ux, μ, cap_ux)
-    Iμ_y = build_I_D(op_uy, μ, cap_uy)
-    Iμ_z = build_I_D(op_uz, μ, cap_uz)
+    Iμ_x = build_I_D(ops_u[1], μ, caps_u[1])
+    Iμ_y = build_I_D(ops_u[2], μ, caps_u[2])
+    Iμ_z = build_I_D(ops_u[3], μ, caps_u[3])
 
-    WGx_Gx = op_ux.Wꜝ * op_ux.G
-    WGx_Hx = op_ux.Wꜝ * op_ux.H
-    visc_x_ω = (Iμ_x * op_ux.G' * WGx_Gx)
-    visc_x_γ = (Iμ_x * op_ux.G' * WGx_Hx)
+    WGx_Gx = ops_u[1].Wꜝ * ops_u[1].G
+    WGx_Hx = ops_u[1].Wꜝ * ops_u[1].H
+    visc_x_ω = (Iμ_x * ops_u[1].G' * WGx_Gx)
+    visc_x_γ = (Iμ_x * ops_u[1].G' * WGx_Hx)
 
-    WGy_Gy = op_uy.Wꜝ * op_uy.G
-    WGy_Hy = op_uy.Wꜝ * op_uy.H
-    visc_y_ω = (Iμ_y * op_uy.G' * WGy_Gy)
-    visc_y_γ = (Iμ_y * op_uy.G' * WGy_Hy)
+    WGy_Gy = ops_u[2].Wꜝ * ops_u[2].G
+    WGy_Hy = ops_u[2].Wꜝ * ops_u[2].H
+    visc_y_ω = (Iμ_y * ops_u[2].G' * WGy_Gy)
+    visc_y_γ = (Iμ_y * ops_u[2].G' * WGy_Hy)
 
-    WGz_Gz = op_uz.Wꜝ * op_uz.G
-    WGz_Hz = op_uz.Wꜝ * op_uz.H
-    visc_z_ω = (Iμ_z * op_uz.G' * WGz_Gz)
-    visc_z_γ = (Iμ_z * op_uz.G' * WGz_Hz)
+    WGz_Gz = ops_u[3].Wꜝ * ops_u[3].G
+    WGz_Hz = ops_u[3].Wꜝ * ops_u[3].H
+    visc_z_ω = (Iμ_z * ops_u[3].G' * WGz_Gz)
+    visc_z_γ = (Iμ_z * ops_u[3].G' * WGz_Hz)
 
     grad_full = (op_p.G + op_p.H)
     total_grad_rows = size(grad_full, 1)
-    @assert total_grad_rows == sum_nu "Pressure gradient rows ($(total_grad_rows)) must match velocity DOFs ($(sum_nu))."
+    @assert total_grad_rows == nu_x + nu_y + nu_z "Pressure gradient rows ($(total_grad_rows)) must match velocity DOFs ($(nu_x + nu_y + nu_z))."
 
     x_rows = 1:nu_x
-    y_rows = nu_x + 1:nu_x + nu_y
-    z_rows = nu_x + nu_y + 1:sum_nu
+    y_rows = nu_x+1:nu_x+nu_y
+    z_rows = nu_x+nu_y+1:nu_x+nu_y+nu_z
 
     grad_x = -grad_full[x_rows, :]
     grad_y = -grad_full[y_rows, :]
@@ -233,29 +229,30 @@ function stokes3D_blocks(s::StokesMono)
     Gp_z = Gp[z_rows, :]
     Hp_z = Hp[z_rows, :]
 
-    div_x_ω = -(Gp_x' + Hp_x')
-    div_x_γ =  (Hp_x')
-    div_y_ω = -(Gp_y' + Hp_y')
-    div_y_γ =  (Hp_y')
-    div_z_ω = -(Gp_z' + Hp_z')
-    div_z_γ =  (Hp_z')
+    div_x_ω = - (Gp_x' + Hp_x')
+    div_x_γ =   (Hp_x')
+    div_y_ω = - (Gp_y' + Hp_y')
+    div_y_γ =   (Hp_y')
+    div_z_ω = - (Gp_z' + Hp_z')
+    div_z_γ =   (Hp_z')
 
     ρ = s.fluid.ρ
-    mass_x = build_I_D(op_ux, ρ, cap_ux) * op_ux.V
-    mass_y = build_I_D(op_uy, ρ, cap_uy) * op_uy.V
-    mass_z = build_I_D(op_uz, ρ, cap_uz) * op_uz.V
+    mass_x = build_I_D(ops_u[1], ρ, caps_u[1]) * ops_u[1].V
+    mass_y = build_I_D(ops_u[2], ρ, caps_u[2]) * ops_u[2].V
+    mass_z = build_I_D(ops_u[3], ρ, caps_u[3]) * ops_u[3].V
 
     return (; nu_x, nu_y, nu_z, np,
-            op_ux, op_uy, op_uz, op_p,
-            cap_ux, cap_uy, cap_uz, cap_p,
-            cap_px = cap_ux, cap_py = cap_uy, cap_pz = cap_uz,
+            op_ux = ops_u[1], op_uy = ops_u[2], op_uz = ops_u[3], op_p,
+            cap_px = caps_u[1], cap_py = caps_u[2], cap_pz = caps_u[3], cap_p,
             visc_x_ω, visc_x_γ, visc_y_ω, visc_y_γ, visc_z_ω, visc_z_γ,
             grad_x, grad_y, grad_z,
             div_x_ω, div_x_γ, div_y_ω, div_y_γ, div_z_ω, div_z_γ,
             tie_x = I(nu_x), tie_y = I(nu_y), tie_z = I(nu_z),
             mass_x, mass_y, mass_z,
-            Vx = op_ux.V, Vy = op_uy.V, Vz = op_uz.V)
+            Vx = ops_u[1].V, Vy = ops_u[2].V, Vz = ops_u[3].V)
 end
+
+
 
 @inline function enforce_dirichlet!(A::SparseMatrixCSC{Float64, Int}, b, row::Int, col::Int, value)
     val = Float64(value)
@@ -457,6 +454,11 @@ function assemble_stokes2D!(s::StokesMono)
     return nothing
 end
 
+"""
+    assemble_stokes3D!(s::StokesMono)
+
+Assemble the steady 3D Stokes system with unknowns [uωx; uγx; uωy; uγy; uωz; uγz; pω].
+"""
 function assemble_stokes3D!(s::StokesMono)
     data = stokes3D_blocks(s)
     nu_x = data.nu_x
@@ -486,24 +488,24 @@ function assemble_stokes3D!(s::StokesMono)
     row_con = 2 * sum_nu
 
     # Momentum x-component rows
-    A[row_uωx+1:row_uωx+nu_x, off_uωx+1:off_uωx+nu_x] = -data.visc_x_ω
-    A[row_uωx+1:row_uωx+nu_x, off_uγx+1:off_uγx+nu_x] = -data.visc_x_γ
+    A[row_uωx+1:row_uωx+nu_x, off_uωx+1:off_uωx+nu_x] = data.visc_x_ω
+    A[row_uωx+1:row_uωx+nu_x, off_uγx+1:off_uγx+nu_x] = data.visc_x_γ
     A[row_uωx+1:row_uωx+nu_x, off_p+1:off_p+np]       = data.grad_x
 
     # Tie x rows
     A[row_uγx+1:row_uγx+nu_x, off_uγx+1:off_uγx+nu_x] = data.tie_x
 
     # Momentum y-component rows
-    A[row_uωy+1:row_uωy+nu_y, off_uωy+1:off_uωy+nu_y] = -data.visc_y_ω
-    A[row_uωy+1:row_uωy+nu_y, off_uγy+1:off_uγy+nu_y] = -data.visc_y_γ
+    A[row_uωy+1:row_uωy+nu_y, off_uωy+1:off_uωy+nu_y] = data.visc_y_ω
+    A[row_uωy+1:row_uωy+nu_y, off_uγy+1:off_uγy+nu_y] = data.visc_y_γ
     A[row_uωy+1:row_uωy+nu_y, off_p+1:off_p+np]       = data.grad_y
 
     # Tie y rows
     A[row_uγy+1:row_uγy+nu_y, off_uγy+1:off_uγy+nu_y] = data.tie_y
 
     # Momentum z-component rows
-    A[row_uωz+1:row_uωz+nu_z, off_uωz+1:off_uωz+nu_z] = -data.visc_z_ω
-    A[row_uωz+1:row_uωz+nu_z, off_uγz+1:off_uγz+nu_z] = -data.visc_z_γ
+    A[row_uωz+1:row_uωz+nu_z, off_uωz+1:off_uωz+nu_z] = data.visc_z_ω
+    A[row_uωz+1:row_uωz+nu_z, off_uγz+1:off_uγz+nu_z] = data.visc_z_γ
     A[row_uωz+1:row_uωz+nu_z, off_p+1:off_p+np]       = data.grad_z
 
     # Tie z rows
@@ -524,14 +526,12 @@ function assemble_stokes3D!(s::StokesMono)
     b_mom_x = data.Vx * fₒx
     b_mom_y = data.Vy * fₒy
     b_mom_z = data.Vz * fₒz
-
     g_cut_x = safe_build_g(data.op_ux, s.bc_cut, data.cap_px, nothing)
     g_cut_y = safe_build_g(data.op_uy, s.bc_cut, data.cap_py, nothing)
     g_cut_z = safe_build_g(data.op_uz, s.bc_cut, data.cap_pz, nothing)
     b_con = zeros(np)
     b = vcat(b_mom_x, g_cut_x, b_mom_y, g_cut_y, b_mom_z, g_cut_z, b_con)
 
-    # Apply Dirichlet velocity BCs at domain boundaries for all three components
     apply_velocity_dirichlet_3D!(A, b, s.bc_u[1], s.bc_u[2], s.bc_u[3], s.fluid.mesh_u;
                                  nu_x=nu_x, nu_y=nu_y, nu_z=nu_z,
                                  uωx_off=off_uωx, uγx_off=off_uγx,
@@ -541,7 +541,6 @@ function assemble_stokes3D!(s::StokesMono)
                                  row_uωy_off=row_uωy, row_uγy_off=row_uγy,
                                  row_uωz_off=row_uωz, row_uγz_off=row_uγz)
 
-    # Fix pressure gauge or apply pressure Dirichlet at boundaries if provided
     apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=off_p, np=np, row_start=row_con+1)
 
@@ -549,6 +548,7 @@ function assemble_stokes3D!(s::StokesMono)
     s.b = b
     return nothing
 end
+
 
 
 
@@ -747,24 +747,24 @@ function assemble_stokes3D_unsteady!(s::StokesMono, data, Δt::Float64,
     row_con = 2 * sum_nu
 
     # Momentum x-component
-    A[row_uωx+1:row_uωx+nu_x, off_uωx+1:off_uωx+nu_x] = mass_x_dt + θ * data.visc_x_ω
-    A[row_uωx+1:row_uωx+nu_x, off_uγx+1:off_uγx+nu_x] = θ * data.visc_x_γ
+    A[row_uωx+1:row_uωx+nu_x, off_uωx+1:off_uωx+nu_x] = mass_x_dt - θ * data.visc_x_ω
+    A[row_uωx+1:row_uωx+nu_x, off_uγx+1:off_uγx+nu_x] = -θ * data.visc_x_γ
     A[row_uωx+1:row_uωx+nu_x, off_p+1:off_p+np]       = data.grad_x
 
     # Tie x rows
     A[row_uγx+1:row_uγx+nu_x, off_uγx+1:off_uγx+nu_x] = data.tie_x
 
     # Momentum y-component
-    A[row_uωy+1:row_uωy+nu_y, off_uωy+1:off_uωy+nu_y] = mass_y_dt + θ * data.visc_y_ω
-    A[row_uωy+1:row_uωy+nu_y, off_uγy+1:off_uγy+nu_y] = θ * data.visc_y_γ
+    A[row_uωy+1:row_uωy+nu_y, off_uωy+1:off_uωy+nu_y] = mass_y_dt - θ * data.visc_y_ω
+    A[row_uωy+1:row_uωy+nu_y, off_uγy+1:off_uγy+nu_y] = -θ * data.visc_y_γ
     A[row_uωy+1:row_uωy+nu_y, off_p+1:off_p+np]       = data.grad_y
 
     # Tie y rows
     A[row_uγy+1:row_uγy+nu_y, off_uγy+1:off_uγy+nu_y] = data.tie_y
 
     # Momentum z-component
-    A[row_uωz+1:row_uωz+nu_z, off_uωz+1:off_uωz+nu_z] = mass_z_dt + θ * data.visc_z_ω
-    A[row_uωz+1:row_uωz+nu_z, off_uγz+1:off_uγz+nu_z] = θ * data.visc_z_γ
+    A[row_uωz+1:row_uωz+nu_z, off_uωz+1:off_uωz+nu_z] = mass_z_dt - θ * data.visc_z_ω
+    A[row_uωz+1:row_uωz+nu_z, off_uγz+1:off_uγz+nu_z] = -θ * data.visc_z_γ
     A[row_uωz+1:row_uωz+nu_z, off_p+1:off_p+np]       = data.grad_z
 
     # Tie z rows
@@ -786,39 +786,37 @@ function assemble_stokes3D_unsteady!(s::StokesMono, data, Δt::Float64,
     uωz_prev = view(x_prev, off_uωz+1:off_uωz+nu_z)
     uγz_prev = view(x_prev, off_uγz+1:off_uγz+nu_z)
 
-    f_prev_x = safe_build_source(data.op_ux, s.fluid.fᵤ, data.cap_ux, t_prev)
-    f_next_x = safe_build_source(data.op_ux, s.fluid.fᵤ, data.cap_ux, t_next)
+    f_prev_x = safe_build_source(data.op_ux, s.fluid.fᵤ, data.cap_px, t_prev)
+    f_next_x = safe_build_source(data.op_ux, s.fluid.fᵤ, data.cap_px, t_next)
     load_x = data.Vx * (θ .* f_next_x .+ θc .* f_prev_x)
 
-    f_prev_y = safe_build_source(data.op_uy, s.fluid.fᵤ, data.cap_uy, t_prev)
-    f_next_y = safe_build_source(data.op_uy, s.fluid.fᵤ, data.cap_uy, t_next)
+    f_prev_y = safe_build_source(data.op_uy, s.fluid.fᵤ, data.cap_py, t_prev)
+    f_next_y = safe_build_source(data.op_uy, s.fluid.fᵤ, data.cap_py, t_next)
     load_y = data.Vy * (θ .* f_next_y .+ θc .* f_prev_y)
 
-    f_prev_z = safe_build_source(data.op_uz, s.fluid.fᵤ, data.cap_uz, t_prev)
-    f_next_z = safe_build_source(data.op_uz, s.fluid.fᵤ, data.cap_uz, t_next)
+    f_prev_z = safe_build_source(data.op_uz, s.fluid.fᵤ, data.cap_pz, t_prev)
+    f_next_z = safe_build_source(data.op_uz, s.fluid.fᵤ, data.cap_pz, t_next)
     load_z = data.Vz * (θ .* f_next_z .+ θc .* f_prev_z)
 
     rhs_mom_x = mass_x_dt * uωx_prev
     rhs_mom_x .-= θc * (data.visc_x_ω * uωx_prev + data.visc_x_γ * uγx_prev)
+    rhs_mom_x .+= load_x
 
     rhs_mom_y = mass_y_dt * uωy_prev
     rhs_mom_y .-= θc * (data.visc_y_ω * uωy_prev + data.visc_y_γ * uγy_prev)
+    rhs_mom_y .+= load_y
 
     rhs_mom_z = mass_z_dt * uωz_prev
     rhs_mom_z .-= θc * (data.visc_z_ω * uωz_prev + data.visc_z_γ * uγz_prev)
-
-    rhs_mom_x .+= load_x
-    rhs_mom_y .+= load_y
     rhs_mom_z .+= load_z
 
-    g_cut_x = safe_build_g(data.op_ux, s.bc_cut, data.cap_ux, t_next)
-    g_cut_y = safe_build_g(data.op_uy, s.bc_cut, data.cap_uy, t_next)
-    g_cut_z = safe_build_g(data.op_uz, s.bc_cut, data.cap_uz, t_next)
+    g_cut_x = safe_build_g(data.op_ux, s.bc_cut, data.cap_px, t_next)
+    g_cut_y = safe_build_g(data.op_uy, s.bc_cut, data.cap_py, t_next)
+    g_cut_z = safe_build_g(data.op_uz, s.bc_cut, data.cap_pz, t_next)
 
     b = vcat(rhs_mom_x, g_cut_x, rhs_mom_y, g_cut_y, rhs_mom_z, g_cut_z, zeros(np))
 
-    apply_velocity_dirichlet_3D!(A, b,
-                                 s.bc_u[1], s.bc_u[2], s.bc_u[3], s.fluid.mesh_u;
+    apply_velocity_dirichlet_3D!(A, b, s.bc_u[1], s.bc_u[2], s.bc_u[3], s.fluid.mesh_u;
                                  nu_x=nu_x, nu_y=nu_y, nu_z=nu_z,
                                  uωx_off=off_uωx, uγx_off=off_uγx,
                                  uωy_off=off_uωy, uγy_off=off_uγy,
@@ -1128,10 +1126,6 @@ function apply_velocity_dirichlet_2D!(A::SparseMatrixCSC{Float64, Int}, b,
     return nothing
 end
 
-"""
-Apply Dirichlet BC for 3D velocity components on their respective meshes.
-Enforces values on both uω and uγ rows for each component and boundary node.
-"""
 function apply_velocity_dirichlet_3D!(A::SparseMatrixCSC{Float64, Int}, b,
                                       bc_ux::BorderConditions,
                                       bc_uy::BorderConditions,
@@ -1149,152 +1143,209 @@ function apply_velocity_dirichlet_3D!(A::SparseMatrixCSC{Float64, Int}, b,
     nx = length(mesh_ux.nodes[1]); ny = length(mesh_ux.nodes[2]); nz = length(mesh_ux.nodes[3])
     nx_y = length(mesh_uy.nodes[1]); ny_y = length(mesh_uy.nodes[2]); nz_y = length(mesh_uy.nodes[3])
     nx_z = length(mesh_uz.nodes[1]); ny_z = length(mesh_uz.nodes[2]); nz_z = length(mesh_uz.nodes[3])
-    @assert nx == nx_y == nx_z && ny == ny_y == ny_z && nz == nz_y == nz_z "Velocity component meshes must share grid dimensions"
+    @assert nx == nx_y && nx == nx_z && ny == ny_y && ny == ny_z && nz == nz_y && nz == nz_z "Velocity component meshes must share grid dimensions"
 
     LIx = LinearIndices((nx, ny, nz))
-    LIy = LinearIndices((nx_y, ny_y, nz_y))
-    LIz = LinearIndices((nx_z, ny_z, nz_z))
+    LIy = LinearIndices((nx, ny, nz))
+    LIz = LinearIndices((nx, ny, nz))
 
-    # Apply at last interior velocity node consistent with BC patterns
     iright = max(nx - 1, 1)
     jtop   = max(ny - 1, 1)
     kfront = max(nz - 1, 1)
 
-    xs_x = mesh_ux.nodes[1]; ys_x = mesh_ux.nodes[2]; zs_x = mesh_ux.nodes[3]
-    xs_y = mesh_uy.nodes[1]; ys_y = mesh_uy.nodes[2]; zs_y = mesh_uy.nodes[3]
-    xs_z = mesh_uz.nodes[1]; ys_z = mesh_uz.nodes[2]; zs_z = mesh_uz.nodes[3]
+    xs_x, ys_x, zs_x = mesh_ux.nodes
+    xs_y, ys_y, zs_y = mesh_uy.nodes
+    xs_z, ys_z, zs_z = mesh_uz.nodes
 
-    # Helper: evaluate Dirichlet value
-    eval_val(bc, x, y, z) = (bc isa Dirichlet) ? (bc.value isa Function ? eval_boundary_func(bc.value, x, y, z) : bc.value) : nothing
-    eval_val(bc, x, y, z, t) = (bc isa Dirichlet) ? (bc.value isa Function ? bc.value(x, y, z, t) : bc.value) : nothing
+    spacing(nodes) = length(nodes) > 1 ? (nodes[2] - nodes[1]) : 1.0
+    Δx_x, Δy_x, Δz_x = spacing.(mesh_ux.nodes)
+    Δx_y, Δy_y, Δz_y = spacing.(mesh_uy.nodes)
+    Δx_z, Δy_z, Δz_z = spacing.(mesh_uz.nodes)
 
-    # Helper to handle both time-dependent and time-independent boundary functions
-    function eval_boundary_func(f, x, y, z)
+    eval_bc(val, x, y, z) = val isa Function ? begin
         try
-            return f(x, y, z)  # Try 3-argument form first
-        catch MethodError
-            return f(x, y, z, 0.0)  # Fall back to 4-argument form with t=0
+            val(x, y, z)
+        catch err
+            err isa MethodError ? val(x, y, z, 0.0) : rethrow(err)
+        end
+    end : val
+    eval_bc(val, x, y, z, t) = val isa Function ? begin
+        try
+            val(x, y, z, t)
+        catch err
+            err isa MethodError ? eval_bc(val, x, y, z) : rethrow(err)
+        end
+    end : val
+
+    dirichlet_value(bc::AbstractBoundary, x, y, z) = bc isa Dirichlet ? (t === nothing ? eval_bc(bc.value, x, y, z) : eval_bc(bc.value, x, y, z, t)) : nothing
+
+    get_bc_entry(bc::BorderConditions, keys::Symbol...) = begin
+        for key in keys
+            if haskey(bc.borders, key)
+                return bc.borders[key]
+            end
+        end
+        return nothing
+    end
+
+    bcx_bottom = get_bc_entry(bc_ux, :bottom)
+    bcy_bottom = get_bc_entry(bc_uy, :bottom)
+    bcz_bottom = get_bc_entry(bc_uz, :bottom)
+    bcx_top = get_bc_entry(bc_ux, :top)
+    bcy_top = get_bc_entry(bc_uy, :top)
+    bcz_top = get_bc_entry(bc_uz, :top)
+
+    bcx_left = get_bc_entry(bc_ux, :left)
+    bcy_left = get_bc_entry(bc_uy, :left)
+    bcz_left = get_bc_entry(bc_uz, :left)
+    bcx_right = get_bc_entry(bc_ux, :right)
+    bcy_right = get_bc_entry(bc_uy, :right)
+    bcz_right = get_bc_entry(bc_uz, :right)
+
+    bcx_backward = get_bc_entry(bc_ux, :backward, :back)
+    bcy_backward = get_bc_entry(bc_uy, :backward, :back)
+    bcz_backward = get_bc_entry(bc_uz, :backward, :back)
+    bcx_forward = get_bc_entry(bc_ux, :forward, :front)
+    bcy_forward = get_bc_entry(bc_uy, :forward, :front)
+    bcz_forward = get_bc_entry(bc_uz, :forward, :front)
+
+    dims = (nx, ny, nz)
+    periodic_extrema = (iright, jtop, kfront)
+
+    comp_x = (coords=(xs_x, ys_x, zs_x),
+              LI=LIx,
+              Δs=(Δx_x, Δy_x, Δz_x),
+              u_offsets=(uωx_off, uγx_off),
+              row_offsets=(row_uωx_off, row_uγx_off))
+    comp_y = (coords=(xs_y, ys_y, zs_y),
+              LI=LIy,
+              Δs=(Δx_y, Δy_y, Δz_y),
+              u_offsets=(uωy_off, uγy_off),
+              row_offsets=(row_uωy_off, row_uγy_off))
+    comp_z = (coords=(xs_z, ys_z, zs_z),
+              LI=LIz,
+              Δs=(Δx_z, Δy_z, Δz_z),
+              u_offsets=(uωz_off, uγz_off),
+              row_offsets=(row_uωz_off, row_uγz_off))
+
+    neighbor_index(idx::Int, axis_len::Int, normal::Symbol) = (normal in (:left, :bottom, :backward, :back)) ? min(idx + 1, axis_len) : max(idx - 1, 1)
+    function periodic_partner(i::Int, j::Int, k::Int, axis::Int)
+        if axis == 1
+            return i == 1 ? periodic_extrema[1] : 1
+        elseif axis == 2
+            return j == 1 ? periodic_extrema[2] : 1
+        else
+            return k == 1 ? periodic_extrema[3] : 1
         end
     end
 
-    # Gather BCs - 3D has 6 faces
-    bcx_bottom = get(bc_ux.borders, :bottom, nothing); bcy_bottom = get(bc_uy.borders, :bottom, nothing); bcz_bottom = get(bc_uz.borders, :bottom, nothing)
-    bcx_top    = get(bc_ux.borders, :top, nothing);    bcy_top    = get(bc_uy.borders, :top, nothing);    bcz_top    = get(bc_uz.borders, :top, nothing)
-    bcx_left   = get(bc_ux.borders, :left, nothing);   bcy_left   = get(bc_uy.borders, :left, nothing);   bcz_left   = get(bc_uz.borders, :left, nothing)
-    bcx_right  = get(bc_ux.borders, :right, nothing);  bcy_right  = get(bc_uy.borders, :right, nothing);  bcz_right  = get(bc_uz.borders, :right, nothing)
-    bcx_back   = get(bc_ux.borders, :back, nothing);   bcy_back   = get(bc_uy.borders, :back, nothing);   bcz_back   = get(bc_uz.borders, :back, nothing)
-    bcx_front  = get(bc_ux.borders, :front, nothing);  bcy_front  = get(bc_uy.borders, :front, nothing);  bcz_front  = get(bc_uz.borders, :front, nothing)
+    function apply_component_bc!(bc::Union{Nothing,AbstractBoundary},
+                                 axis::Int, normal::Symbol,
+                                 i::Int, j::Int, k::Int,
+                                 comp, is_normal_component::Bool)
+        bc === nothing && return
+        LI = comp.LI
+        lix = LI[i, j, k]
+        row_uω = comp.row_offsets[1] + lix
+        row_uγ = comp.row_offsets[2] + lix
+        col_uω = comp.u_offsets[1] + lix
+        col_uγ = comp.u_offsets[2] + lix
+        coords = comp.coords
+        x = coords[1][i]; y = coords[2][j]; z = coords[3][k]
+        if bc isa Dirichlet
+            val = dirichlet_value(bc, x, y, z)
+            if val !== nothing
+                val = Float64(val)
+                enforce_dirichlet!(A, b, row_uω, col_uω, val)
+                enforce_dirichlet!(A, b, row_uγ, col_uγ, val)
+            end
+        elseif bc isa Symmetry
+            if is_normal_component
+                enforce_dirichlet!(A, b, row_uω, col_uω, 0.0)
+                enforce_dirichlet!(A, b, row_uγ, col_uγ, 0.0)
+            else
+                axis_len = axis == 1 ? dims[1] : axis == 2 ? dims[2] : dims[3]
+                neighbor = neighbor_index(axis == 1 ? i : axis == 2 ? j : k, axis_len, normal)
+                li_adj = axis == 1 ? LI[neighbor, j, k] :
+                         axis == 2 ? LI[i, neighbor, k] :
+                                     LI[i, j, neighbor]
+                enforce_zero_gradient!(A, b, row_uω, col_uω, comp.u_offsets[1] + li_adj)
+                enforce_zero_gradient!(A, b, row_uγ, col_uγ, comp.u_offsets[2] + li_adj)
+            end
+        elseif bc isa Neumann
+            g = t === nothing ? eval_bc(bc.value, x, y, z) : eval_bc(bc.value, x, y, z, t)
+            g = Float64(g)
+            Δ = axis == 1 ? comp.Δs[1] : axis == 2 ? comp.Δs[2] : comp.Δs[3]
+            axis_len = axis == 1 ? dims[1] : axis == 2 ? dims[2] : dims[3]
+            neighbor = neighbor_index(axis == 1 ? i : axis == 2 ? j : k, axis_len, normal)
+            li_adj = axis == 1 ? LI[neighbor, j, k] :
+                     axis == 2 ? LI[i, neighbor, k] :
+                                 LI[i, j, neighbor]
+            r = row_uω
+            A[r, :] .= 0.0
+            A[r, col_uω] =  1.0/Δ
+            A[r, comp.u_offsets[1] + li_adj] += -1.0/Δ
+            b[r] = g
+        elseif bc isa Outflow
+            axis_len = axis == 1 ? dims[1] : axis == 2 ? dims[2] : dims[3]
+            neighbor = neighbor_index(axis == 1 ? i : axis == 2 ? j : k, axis_len, normal)
+            li_adj = axis == 1 ? LI[neighbor, j, k] :
+                     axis == 2 ? LI[i, neighbor, k] :
+                                 LI[i, j, neighbor]
+            enforce_zero_gradient!(A, b, row_uω, col_uω, comp.u_offsets[1] + li_adj)
+            enforce_zero_gradient!(A, b, row_uγ, col_uγ, comp.u_offsets[2] + li_adj)
+        elseif bc isa Periodic
+            opp = periodic_partner(i, j, k, axis)
+            li_opp = axis == 1 ? LI[opp, j, k] :
+                     axis == 2 ? LI[i, opp, k] :
+                                 LI[i, j, opp]
+            r = row_uω
+            A[r, :] .= 0.0
+            A[r, col_uω] = 1.0
+            A[r, comp.u_offsets[1] + li_opp] -= 1.0
+            b[r] = 0.0
+            rt = row_uγ
+            A[rt, :] .= 0.0
+            A[rt, col_uγ] = 1.0
+            A[rt, comp.u_offsets[2] + li_opp] -= 1.0
+            b[rt] = 0.0
+        end
+    end
 
-    # Apply along each face for x, y, z components using their respective meshes
-    # Bottom/top faces (vary along x, z)
-    for jside in ((1, bcx_bottom, bcy_bottom, bcz_bottom), (jtop, bcx_top, bcy_top, bcz_top))
-        jx, bcx, bcy, bcz = jside
-        isnothing(bcx) && isnothing(bcy) && isnothing(bcz) && continue
-        jy = jx; jz = jx  # meshes share sizes
+    for (jy, normal, bcx, bcy, bcz) in ((1, :bottom, bcx_bottom, bcy_bottom, bcz_bottom),
+                                        (jtop, :top, bcx_top, bcy_top, bcz_top))
+        (bcx === nothing && bcy === nothing && bcz === nothing) && continue
         for i in 1:nx, k in 1:nz
-            vx = t === nothing ? eval_val(bcx, xs_x[i], ys_x[jx], zs_x[k]) : eval_val(bcx, xs_x[i], ys_x[jx], zs_x[k], t)
-            vy = t === nothing ? eval_val(bcy, xs_y[i], ys_y[jy], zs_y[k]) : eval_val(bcy, xs_y[i], ys_y[jy], zs_y[k], t)
-            vz = t === nothing ? eval_val(bcz, xs_z[i], ys_z[jz], zs_z[k]) : eval_val(bcz, xs_z[i], ys_z[jz], zs_z[k], t)
-            if vx !== nothing
-                vx = Float64(vx)
-                lix = LIx[i, jx, k]
-                r = row_uωx_off + lix
-                enforce_dirichlet!(A, b, r, uωx_off + lix, vx)
-                rt = row_uγx_off + lix
-                enforce_dirichlet!(A, b, rt, uγx_off + lix, vx)
-            end
-            if vy !== nothing
-                vy = Float64(vy)
-                liy = LIy[i, jy, k]
-                r = row_uωy_off + liy
-                enforce_dirichlet!(A, b, r, uωy_off + liy, vy)
-                rt = row_uγy_off + liy
-                enforce_dirichlet!(A, b, rt, uγy_off + liy, vy)
-            end
-            if vz !== nothing
-                vz = Float64(vz)
-                liz = LIz[i, jz, k]
-                r = row_uωz_off + liz
-                enforce_dirichlet!(A, b, r, uωz_off + liz, vz)
-                rt = row_uγz_off + liz
-                enforce_dirichlet!(A, b, rt, uγz_off + liz, vz)
-            end
+            apply_component_bc!(bcx, 2, normal, i, jy, k, comp_x, false)
+            apply_component_bc!(bcy, 2, normal, i, jy, k, comp_y, true)
+            apply_component_bc!(bcz, 2, normal, i, jy, k, comp_z, false)
         end
     end
 
-    # Left/right faces (vary along y, z)
-    for iside in ((1, bcx_left, bcy_left, bcz_left), (iright, bcx_right, bcy_right, bcz_right))
-        ix, bcx, bcy, bcz = iside
-        isnothing(bcx) && isnothing(bcy) && isnothing(bcz) && continue
-        iy = ix; iz = ix
+    for (ix, normal, bcx, bcy, bcz) in ((1, :left, bcx_left, bcy_left, bcz_left),
+                                        (iright, :right, bcx_right, bcy_right, bcz_right))
+        (bcx === nothing && bcy === nothing && bcz === nothing) && continue
         for j in 1:ny, k in 1:nz
-            vx = t === nothing ? eval_val(bcx, xs_x[ix], ys_x[j], zs_x[k]) : eval_val(bcx, xs_x[ix], ys_x[j], zs_x[k], t)
-            vy = t === nothing ? eval_val(bcy, xs_y[iy], ys_y[j], zs_y[k]) : eval_val(bcy, xs_y[iy], ys_y[j], zs_y[k], t)
-            vz = t === nothing ? eval_val(bcz, xs_z[iz], ys_z[j], zs_z[k]) : eval_val(bcz, xs_z[iz], ys_z[j], zs_z[k], t)
-            if vx !== nothing
-                vx = Float64(vx)
-                lix = LIx[ix, j, k]
-                r = row_uωx_off + lix
-                enforce_dirichlet!(A, b, r, uωx_off + lix, vx)
-                rt = row_uγx_off + lix
-                enforce_dirichlet!(A, b, rt, uγx_off + lix, vx)
-            end
-            if vy !== nothing
-                vy = Float64(vy)
-                liy = LIy[iy, j, k]
-                r = row_uωy_off + liy
-                enforce_dirichlet!(A, b, r, uωy_off + liy, vy)
-                rt = row_uγy_off + liy
-                enforce_dirichlet!(A, b, rt, uγy_off + liy, vy)
-            end
-            if vz !== nothing
-                vz = Float64(vz)
-                liz = LIz[iz, j, k]
-                r = row_uωz_off + liz
-                enforce_dirichlet!(A, b, r, uωz_off + liz, vz)
-                rt = row_uγz_off + liz
-                enforce_dirichlet!(A, b, rt, uγz_off + liz, vz)
-            end
+            apply_component_bc!(bcx, 1, normal, ix, j, k, comp_x, true)
+            apply_component_bc!(bcy, 1, normal, ix, j, k, comp_y, false)
+            apply_component_bc!(bcz, 1, normal, ix, j, k, comp_z, false)
         end
     end
 
-    # Back/front faces (vary along x, y)
-    for kside in ((1, bcx_back, bcy_back, bcz_back), (kfront, bcx_front, bcy_front, bcz_front))
-        kx, bcx, bcy, bcz = kside
-        isnothing(bcx) && isnothing(bcy) && isnothing(bcz) && continue
-        ky = kx; kz = kx
+    for (kidx, normal, bcx, bcy, bcz) in ((1, :backward, bcx_backward, bcy_backward, bcz_backward),
+                                          (kfront, :forward, bcx_forward, bcy_forward, bcz_forward))
+        (bcx === nothing && bcy === nothing && bcz === nothing) && continue
         for i in 1:nx, j in 1:ny
-            vx = t === nothing ? eval_val(bcx, xs_x[i], ys_x[j], zs_x[kx]) : eval_val(bcx, xs_x[i], ys_x[j], zs_x[kx], t)
-            vy = t === nothing ? eval_val(bcy, xs_y[i], ys_y[j], zs_y[ky]) : eval_val(bcy, xs_y[i], ys_y[j], zs_y[ky], t)
-            vz = t === nothing ? eval_val(bcz, xs_z[i], ys_z[j], zs_z[kz]) : eval_val(bcz, xs_z[i], ys_z[j], zs_z[kz], t)
-            if vx !== nothing
-                vx = Float64(vx)
-                lix = LIx[i, j, kx]
-                r = row_uωx_off + lix
-                enforce_dirichlet!(A, b, r, uωx_off + lix, vx)
-                rt = row_uγx_off + lix
-                enforce_dirichlet!(A, b, rt, uγx_off + lix, vx)
-            end
-            if vy !== nothing
-                vy = Float64(vy)
-                liy = LIy[i, j, ky]
-                r = row_uωy_off + liy
-                enforce_dirichlet!(A, b, r, uωy_off + liy, vy)
-                rt = row_uγy_off + liy
-                enforce_dirichlet!(A, b, rt, uγy_off + liy, vy)
-            end
-            if vz !== nothing
-                vz = Float64(vz)
-                liz = LIz[i, j, kz]
-                r = row_uωz_off + liz
-                enforce_dirichlet!(A, b, r, uωz_off + liz, vz)
-                rt = row_uγz_off + liz
-                enforce_dirichlet!(A, b, rt, uγz_off + liz, vz)
-            end
+            apply_component_bc!(bcx, 3, normal, i, j, kidx, comp_x, false)
+            apply_component_bc!(bcy, 3, normal, i, j, kidx, comp_y, false)
+            apply_component_bc!(bcz, 3, normal, i, j, kidx, comp_z, true)
         end
     end
+
     return nothing
 end
+
+
 
 
 
