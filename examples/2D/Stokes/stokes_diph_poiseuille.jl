@@ -51,7 +51,7 @@ fluid2 = Fluid((mesh_ux, mesh_uy),
                mesh_p,
                cap_p₂,
                op_p2,
-               0.2, 1.0,
+               1.0, 1.0,
                (x,y,_=0) -> 0.0,
                (x,y,_=0) -> 0.0)
 
@@ -62,7 +62,7 @@ parabolic = (x,y) -> begin
 end
 
 inlet = Dirichlet((x,y) -> parabolic(x,y))
-outlet = Dirichlet((x,y) -> parabolic(x,y))
+outlet = Outflow()
 noslip = Dirichlet(0.0)
 
 bc_ux = BorderConditions(Dict(:left=>inlet, :right=>outlet, :bottom=>noslip, :top=>noslip))
@@ -101,12 +101,23 @@ u2x = solver.x[off_u2ωx+1:off_u2ωx+nu_x]
 println("Phase 1 velocity range: ", extrema(u1x))
 println("Phase 2 velocity range: ", extrema(u2x))
 
-# Simple heatmap of phase-averaged velocity magnitude at uωx locations
-ux_grid = reshape((u1x .+ u2x)./2, length(mesh_ux.nodes[1]), length(mesh_ux.nodes[2]))
+# Simple heatmap of u_x at uωx locations
+ux_grid = reshape(u1x, length(mesh_ux.nodes[1]), length(mesh_ux.nodes[2]))
 fig = Figure(resolution=(800,400))
-ax = Axis(fig[1,1], title="Average u_x", xlabel="x", ylabel="y")
+ax = Axis(fig[1,1], title="u_x", xlabel="x", ylabel="y")
 hm = heatmap!(ax, mesh_ux.nodes[1], mesh_ux.nodes[2], ux_grid; colormap=:plasma)
 Colorbar(fig[1,2], hm; label="u_x")
 
 save("stokes_diph_poiseuille_velocity.png", fig)
 println("Saved stokes_diph_poiseuille_velocity.png")
+
+# Mid-column profile of averaged u_x
+xs = mesh_ux.nodes[1]; ys = mesh_ux.nodes[2]
+icol = Int(cld(length(xs), 2))
+profile = ux_grid[icol, :]
+fig_profile = Figure(resolution=(500,400))
+axp = Axis(fig_profile[1,1], title="u_x profile at x[mid]", xlabel="u_x", ylabel="y")
+lines!(axp, profile, ys)
+scatter!(axp, profile, ys; markersize=4)
+save("stokes_diph_poiseuille_profile.png", fig_profile)
+println("Saved stokes_diph_poiseuille_profile.png at column ", icol)

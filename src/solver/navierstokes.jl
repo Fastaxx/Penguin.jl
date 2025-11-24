@@ -497,7 +497,7 @@ function assemble_navierstokes1D_unsteady!(s::NavierStokesMono, data, Δt::Float
     apply_velocity_dirichlet!(A, b, s.bc_u[1], s.fluid.mesh_u[1];
                               nu=nu, uω_offset=off_uω, uγ_offset=off_uγ, t=t_next)
 
-    A, b = apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
+    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=off_p, np=np, row_start=row_con+1)
 
     s.A = A
@@ -605,7 +605,7 @@ function assemble_navierstokes2D_unsteady!(s::NavierStokesMono, data, Δt::Float
                                  row_uωy_off=row_uωy, row_uγy_off=row_uγy,
                                  t=t_next)
 
-    A, b = apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
+    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=off_p, np=np, row_start=row_con+1)
 
     s.A = A
@@ -737,7 +737,7 @@ function assemble_navierstokes3D_unsteady!(s::NavierStokesMono, data, Δt::Float
                                  row_uωz_off=row_uωz, row_uγz_off=row_uγz,
                                  t=t_next)
 
-    A, b = apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
+    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=off_p, np=np, row_start=row_con+1)
 
     s.A = A
@@ -813,7 +813,7 @@ function assemble_navierstokes1D_unsteady_picard!(s::NavierStokesMono, data, Δt
     apply_velocity_dirichlet!(A, b, s.bc_u[1], s.fluid.mesh_u[1];
                               nu=nu, uω_offset=off_uω, uγ_offset=off_uγ, t=t_next)
 
-    A, b = apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
+    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=off_p, np=np, row_start=row_con+1)
 
     s.A = A
@@ -920,7 +920,7 @@ function assemble_navierstokes2D_unsteady_picard!(s::NavierStokesMono, data, Δt
                                  row_uωy_off=row_uωy, row_uγy_off=row_uγy,
                                  t=t_next)
 
-    A, b = apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
+    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=off_p, np=np, row_start=row_con+1)
 
     s.A = A
@@ -1055,7 +1055,7 @@ function assemble_navierstokes3D_unsteady_picard!(s::NavierStokesMono, data, Δt
                                  row_uωz_off=row_uωz, row_uγz_off=row_uγz,
                                  t=t_next)
 
-    A, b = apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
+    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=off_p, np=np, row_start=row_con+1)
 
     s.A = A
@@ -1111,7 +1111,7 @@ function assemble_navierstokes1D_steady_picard!(s::NavierStokesMono,
     apply_velocity_dirichlet!(A, b, s.bc_u[1], s.fluid.mesh_u[1];
                               nu=nu, uω_offset=off_uω, uγ_offset=off_uγ, t=nothing)
 
-    A, b = apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
+    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=off_p, np=np, row_start=row_con+1)
 
     s.A = A
@@ -1193,7 +1193,7 @@ function assemble_navierstokes2D_steady_picard!(s::NavierStokesMono,
                                  row_uωy_off=row_uωy, row_uγy_off=row_uγy,
                                  t=nothing)
 
-    A, b = apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
+    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=off_p, np=np, row_start=row_con+1)
 
     s.A = A
@@ -1286,7 +1286,7 @@ function assemble_navierstokes3D_steady_picard!(s::NavierStokesMono,
                                  row_uωz_off=row_uωz, row_uγz_off=row_uγz,
                                  t=nothing)
 
-    A, b = apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
+    apply_pressure_gauge!(A, b, s.pressure_gauge, s.fluid.mesh_p, s.fluid.capacity_p;
                           p_offset=off_p, np=np, row_start=row_con+1)
 
     s.A = A

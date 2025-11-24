@@ -78,7 +78,10 @@ times = solve_MovingStokesMono!(solver, fluid, body,
                                 Δt, Tstart, Tend;
                                 pressure_gauge=pressure_gauge,
                                 scheme="BE",
-                                method=gmres)
+                                method=gmres,
+                                reltol=1e-12,
+                                maxiter=10000)
+                    
 
 println("Stored states: ", length(solver.states))
 
@@ -119,7 +122,7 @@ function create_cylinder_animation(solver, mesh, times; filename="moving_stokes_
     vel_obs = Observable(reshape(solver.states[1][1:nu], (nx_nodes, ny_nodes)))
     fig = Figure(resolution=(600, 500))
     ax = Axis(fig[1, 1], title="|u|", xlabel="x", ylabel="y")
-    hm = heatmap!(ax, xs, ys, abs.(vel_obs[]); colormap=:plasma)
+    hm = heatmap!(ax, xs, ys, abs.(vel_obs[]); colormap=:viridis)
 
     record(fig, filename, 1:length(solver.states)) do i
         state = solver.states[i]

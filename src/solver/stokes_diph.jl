@@ -167,12 +167,10 @@ function assemble_stokes_diph!(s::StokesDiph)
     A[row_u1ωx+1:row_u1ωx+nu_x, off_u1ωx+1:off_u1ωx+nu_x] = data_a.visc_x_ω
     A[row_u1ωx+1:row_u1ωx+nu_x, off_u1γx+1:off_u1γx+nu_x] = data_a.visc_x_γ
     A[row_u1ωx+1:row_u1ωx+nu_x, off_p1+1:off_p1+np]       = data_a.grad_x
-    A[row_u1γx+1:row_u1γx+nu_x, off_u1γx+1:off_u1γx+nu_x] = data_a.tie_x
 
     A[row_u1ωy+1:row_u1ωy+nu_y, off_u1ωy+1:off_u1ωy+nu_y] = data_a.visc_y_ω
     A[row_u1ωy+1:row_u1ωy+nu_y, off_u1γy+1:off_u1γy+nu_y] = data_a.visc_y_γ
     A[row_u1ωy+1:row_u1ωy+nu_y, off_p1+1:off_p1+np]       = data_a.grad_y
-    A[row_u1γy+1:row_u1γy+nu_y, off_u1γy+1:off_u1γy+nu_y] = data_a.tie_y
 
     con_rows = row_con1+1:row_con1+np
     A[con_rows, off_u1ωx+1:off_u1ωx+nu_x] = data_a.div_x_ω
@@ -197,12 +195,10 @@ function assemble_stokes_diph!(s::StokesDiph)
     A[row_u2ωx+1:row_u2ωx+nu_x, off_u2ωx+1:off_u2ωx+nu_x] = data_b.visc_x_ω
     A[row_u2ωx+1:row_u2ωx+nu_x, off_u2γx+1:off_u2γx+nu_x] = data_b.visc_x_γ
     A[row_u2ωx+1:row_u2ωx+nu_x, off_p2+1:off_p2+np]       = data_b.grad_x
-    A[row_u2γx+1:row_u2γx+nu_x, off_u2γx+1:off_u2γx+nu_x] = data_b.tie_x
 
     A[row_u2ωy+1:row_u2ωy+nu_y, off_u2ωy+1:off_u2ωy+nu_y] = data_b.visc_y_ω
     A[row_u2ωy+1:row_u2ωy+nu_y, off_u2γy+1:off_u2γy+nu_y] = data_b.visc_y_γ
     A[row_u2ωy+1:row_u2ωy+nu_y, off_p2+1:off_p2+np]       = data_b.grad_y
-    A[row_u2γy+1:row_u2γy+nu_y, off_u2γy+1:off_u2γy+nu_y] = data_b.tie_y
 
     con_rows2 = row_con2+1:row_con2+np
     A[con_rows2, off_u2ωx+1:off_u2ωx+nu_x] = data_b.div_x_ω
@@ -226,12 +222,13 @@ function assemble_stokes_diph!(s::StokesDiph)
 
     row_sx = row_jump + 1
     row_sy = row_jump + nu_x + 1
-    A[row_sx-1+1:row_sx-1+nu_x, off_u1γx+1:off_u1γx+nu_x] = spdiagm(0 => jump_vec_x1)
-    A[row_sx-1+1:row_sx-1+nu_x, off_u2γx+1:off_u2γx+nu_x] -= spdiagm(0 => jump_vec_x2)
+    # [[αu]] = α₂u₂ - α₁u₁ = g  (signs matter for continuity)
+    A[row_sx-1+1:row_sx-1+nu_x, off_u1γx+1:off_u1γx+nu_x] = -spdiagm(0 => jump_vec_x1)
+    A[row_sx-1+1:row_sx-1+nu_x, off_u2γx+1:off_u2γx+nu_x] =  spdiagm(0 => jump_vec_x2)
     b[row_sx:row_sx+nu_x-1] = safe_build_g(data_a.op_ux, jump, data_a.cap_px, nothing)
 
-    A[row_sy-1+1:row_sy-1+nu_y, off_u1γy+1:off_u1γy+nu_y] = spdiagm(0 => jump_vec_y1)
-    A[row_sy-1+1:row_sy-1+nu_y, off_u2γy+1:off_u2γy+nu_y] -= spdiagm(0 => jump_vec_y2)
+    A[row_sy-1+1:row_sy-1+nu_y, off_u1γy+1:off_u1γy+nu_y] = -spdiagm(0 => jump_vec_y1)
+    A[row_sy-1+1:row_sy-1+nu_y, off_u2γy+1:off_u2γy+nu_y] =  spdiagm(0 => jump_vec_y2)
     b[row_sy:row_sy+nu_y-1] = safe_build_g(data_a.op_uy, jump, data_a.cap_py, nothing)
 
     # --- Interface flux jump (traction continuity) ---
@@ -241,29 +238,35 @@ function assemble_stokes_diph!(s::StokesDiph)
     flux_vec_y1 = coeff_vector(flux.β₁, uy_coords)
     flux_vec_y2 = coeff_vector(flux.β₂, uy_coords)
 
-    Txω_a = data_a.op_ux.H' * (data_a.op_ux.Wꜝ * data_a.op_ux.G)
-    Txγ_a = data_a.op_ux.H' * (data_a.op_ux.Wꜝ * data_a.op_ux.H)
-    Txω_b = data_b.op_ux.H' * (data_b.op_ux.Wꜝ * data_b.op_ux.G)
-    Txγ_b = data_b.op_ux.H' * (data_b.op_ux.Wꜝ * data_b.op_ux.H)
+    Iμx_a = build_I_D(data_a.op_ux, s.fluid_a.μ, s.fluid_a.capacity_u[1])
+    Iμx_b = build_I_D(data_b.op_ux, s.fluid_b.μ, s.fluid_b.capacity_u[1])
+    Iμy_a = build_I_D(data_a.op_uy, s.fluid_a.μ, s.fluid_a.capacity_u[2])
+    Iμy_b = build_I_D(data_b.op_uy, s.fluid_b.μ, s.fluid_b.capacity_u[2])
 
-    Tyω_a = data_a.op_uy.H' * (data_a.op_uy.Wꜝ * data_a.op_uy.G)
-    Tyγ_a = data_a.op_uy.H' * (data_a.op_uy.Wꜝ * data_a.op_uy.H)
-    Tyω_b = data_b.op_uy.H' * (data_b.op_uy.Wꜝ * data_b.op_uy.G)
-    Tyγ_b = data_b.op_uy.H' * (data_b.op_uy.Wꜝ * data_b.op_uy.H)
+    Txω_a = Iμx_a * (data_a.op_ux.H' * (data_a.op_ux.Wꜝ * data_a.op_ux.G))
+    Txγ_a = Iμx_a * (data_a.op_ux.H' * (data_a.op_ux.Wꜝ * data_a.op_ux.H))
+    Txω_b = Iμx_b * (data_b.op_ux.H' * (data_b.op_ux.Wꜝ * data_b.op_ux.G))
+    Txγ_b = Iμx_b * (data_b.op_ux.H' * (data_b.op_ux.Wꜝ * data_b.op_ux.H))
+
+    Tyω_a = Iμy_a * (data_a.op_uy.H' * (data_a.op_uy.Wꜝ * data_a.op_uy.G))
+    Tyγ_a = Iμy_a * (data_a.op_uy.H' * (data_a.op_uy.Wꜝ * data_a.op_uy.H))
+    Tyω_b = Iμy_b * (data_b.op_uy.H' * (data_b.op_uy.Wꜝ * data_b.op_uy.G))
+    Tyγ_b = Iμy_b * (data_b.op_uy.H' * (data_b.op_uy.Wꜝ * data_b.op_uy.H))
 
     row_fx = row_flux + 1
     row_fy = row_flux + nu_x + 1
 
-    A[row_fx-1+1:row_fx-1+nu_x, off_u1ωx+1:off_u1ωx+nu_x] = spdiagm(0 => flux_vec_x1) * Txω_a
-    A[row_fx-1+1:row_fx-1+nu_x, off_u1γx+1:off_u1γx+nu_x] = spdiagm(0 => flux_vec_x1) * Txγ_a
-    A[row_fx-1+1:row_fx-1+nu_x, off_u2ωx+1:off_u2ωx+nu_x] -= spdiagm(0 => flux_vec_x2) * Txω_b
-    A[row_fx-1+1:row_fx-1+nu_x, off_u2γx+1:off_u2γx+nu_x] -= spdiagm(0 => flux_vec_x2) * Txγ_b
+    # [[βσ·n]] = β₂σ₂·n - β₁σ₁·n = g (traction continuity)
+    A[row_fx-1+1:row_fx-1+nu_x, off_u1ωx+1:off_u1ωx+nu_x] = -spdiagm(0 => flux_vec_x1) * Txω_a
+    A[row_fx-1+1:row_fx-1+nu_x, off_u1γx+1:off_u1γx+nu_x] = -spdiagm(0 => flux_vec_x1) * Txγ_a
+    A[row_fx-1+1:row_fx-1+nu_x, off_u2ωx+1:off_u2ωx+nu_x] =  spdiagm(0 => flux_vec_x2) * Txω_b
+    A[row_fx-1+1:row_fx-1+nu_x, off_u2γx+1:off_u2γx+nu_x] =  spdiagm(0 => flux_vec_x2) * Txγ_b
     b[row_fx:row_fx+nu_x-1] = safe_build_g(data_a.op_ux, flux, data_a.cap_px, nothing)
 
-    A[row_fy-1+1:row_fy-1+nu_y, off_u1ωy+1:off_u1ωy+nu_y] = spdiagm(0 => flux_vec_y1) * Tyω_a
-    A[row_fy-1+1:row_fy-1+nu_y, off_u1γy+1:off_u1γy+nu_y] = spdiagm(0 => flux_vec_y1) * Tyγ_a
-    A[row_fy-1+1:row_fy-1+nu_y, off_u2ωy+1:off_u2ωy+nu_y] -= spdiagm(0 => flux_vec_y2) * Tyω_b
-    A[row_fy-1+1:row_fy-1+nu_y, off_u2γy+1:off_u2γy+nu_y] -= spdiagm(0 => flux_vec_y2) * Tyγ_b
+    A[row_fy-1+1:row_fy-1+nu_y, off_u1ωy+1:off_u1ωy+nu_y] = -spdiagm(0 => flux_vec_y1) * Tyω_a
+    A[row_fy-1+1:row_fy-1+nu_y, off_u1γy+1:off_u1γy+nu_y] = -spdiagm(0 => flux_vec_y1) * Tyγ_a
+    A[row_fy-1+1:row_fy-1+nu_y, off_u2ωy+1:off_u2ωy+nu_y] =  spdiagm(0 => flux_vec_y2) * Tyω_b
+    A[row_fy-1+1:row_fy-1+nu_y, off_u2γy+1:off_u2γy+nu_y] =  spdiagm(0 => flux_vec_y2) * Tyγ_b
     b[row_fy:row_fy+nu_y-1] = safe_build_g(data_a.op_uy, flux, data_a.cap_py, nothing)
 
     # Boundary conditions
@@ -282,8 +285,6 @@ function assemble_stokes_diph!(s::StokesDiph)
 
     apply_pressure_gauge!(A, b, s.pressure_gauge_a, s.fluid_a.mesh_p, s.fluid_a.capacity_p;
                                  p_offset=off_p1, np=np, row_start=row_con1+1)
-    apply_pressure_gauge!(A, b, s.pressure_gauge_b, s.fluid_b.mesh_p, s.fluid_b.capacity_p;
-                                 p_offset=off_p2, np=np, row_start=row_con2+1)
 
     s.A = A
     s.b = b

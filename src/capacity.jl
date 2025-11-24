@@ -680,3 +680,173 @@ function Capacity(front::FrontTracker1D, mesh::AbstractMesh; compute_centroids::
     
     return Capacity{1}(A, B, V, W, C_ω, C_γ, Γ, cell_types, mesh, dummy_body)
 end
+
+# Utilities for capacity cleaning / clamping
+
+"""
+    removed = remove_small_volumes!(cap::Capacity{N}, tol::Float64)
+
+Set to zero all capacity entries for cells whose volume `V[i,i] < tol`.
+Returns the vector of removed indices.
+This is a destructive in-place operation.
+"""
+function remove_small_volumes!(cap::Capacity{N}, tol::Float64) where N
+    nc = size(cap.V, 1)
+    removed = Int[]
+    # Extract diagonal volumes efficiently
+    for i in 1:nc
+        Vi = cap.V[i, i]
+        if Vi < tol
+            push!(removed, i)
+            # zero-out primary quantities
+            cap.V[i, i] = 0.0
+            cap.Γ[i, i] = 0.0
+            cap.cell_types[i] = 0.0
+            cap.C_ω[i] = SVector{N,Float64}(ntuple(_->0.0, N))
+            # zero face / center / staggered capacities
+            for A_mat in cap.A
+                if size(A_mat,1) ≥ i
+                    A_mat[i, i] = 0.0
+                end
+            end
+            for B_mat in cap.B
+                if size(B_mat,1) ≥ i
+                    B_mat[i, i] = 0.0
+                end
+            end
+            for W_mat in cap.W
+                if size(W_mat,1) ≥ i
+                    W_mat[i, i] = 0.0
+                end
+            end
+        end
+    end
+    return removed
+end
+
+"""
+    mapping = clamp_merge_small_cells!(cap::Capacity{N}; tol=1e-12)
+
+For each cell with volume < tol, find the nearest cell (by Euclidean distance
+between cell centroids C_ω) that has volume >= tol and merge the small cell
+into that neighbour.
+
+Merging behaviour (in-place):
+- volumes, interface measures (Γ) and staggered volumes are summed into the target
+- diagonal entries of A and B are summed into the target; source diagonals zeroed
+- centroids C_ω are updated by volume-weighted averaging
+- source cell entries are zeroed (volume, capacities, Γ, cell_type, centroids)
+
+Returns a Vector{Tuple{Int,Int}} of (source_idx, target_idx) merges performed.
+
+Notes:
+- This is a pragmatic heuristic for "clamping" tiny cut cells into nearby
+  valid cells. It attempts to preserve total volume and capacity magnitudes.
+"""
+function clamp_merge_small_cells!(cap::Capacity{N}; tol::Float64=1e-12) where N
+    nc = size(cap.V, 1)
+    Vs = [cap.V[i,i] for i in 1:nc]
+    # indices with small volume
+    small_idx = findall(v -> v < tol, Vs)
+    # candidates with sufficient volume
+    good_idx = findall(v -> v >= tol, Vs)
+    merges = Tuple{Int,Int}[]
+    if isempty(good_idx)
+        # nothing to merge into
+        return merges
+    end
+
+    # Precompute numeric centroids as vectors for distance computations
+    centroids = [collect(cap.C_ω[i]) for i in 1:nc]
+
+    for i in small_idx
+        Vi = Vs[i]
+        # find nearest good index by Euclidean distance of centroids
+        best = nothing
+        bestd = Inf
+        ci = centroids[i]
+        for k in good_idx
+            ck = centroids[k]
+            # if target has zero volume skip (shouldn't happen)
+            if cap.V[k,k] < tol
+                continue
+            end
+            d2 = sum((ci .- ck).^2)
+            if d2 < bestd
+                bestd = d2
+                best = k
+            end
+        end
+
+        if best === nothing
+            # nothing to merge with, skip
+            continue
+        end
+        k = best
+        # perform merge: keep previous values
+        Vk = cap.V[k,k]
+        Γk = cap.Γ[k,k]
+        # add volumes and interface measure
+        cap.V[k,k] = Vk + cap.V[i,i]
+        cap.Γ[k,k] = Γk + cap.Γ[i,i]
+
+        # merge diagonal entries of A, B, W into target and zero source
+        for m in 1:length(cap.A)
+            A_mat = cap.A[m]
+            if size(A_mat,1) ≥ max(i,k)
+                Ai = A_mat[i,i]
+                Ak = A_mat[k,k]
+                A_mat[k,k] = Ak + Ai
+                A_mat[i,i] = 0.0
+            end
+        end
+        for m in 1:length(cap.B)
+            B_mat = cap.B[m]
+            if size(B_mat,1) ≥ max(i,k)
+                Bi = B_mat[i,i]
+                Bk = B_mat[k,k]
+                B_mat[k,k] = Bk + Bi
+                B_mat[i,i] = 0.0
+            end
+        end
+        for m in 1:length(cap.W)
+            W_mat = cap.W[m]
+            if size(W_mat,1) ≥ max(i,k)
+                Wi = W_mat[i,i]
+                Wk = W_mat[k,k]
+                W_mat[k,k] = Wk + Wi
+                W_mat[i,i] = 0.0
+            end
+        end
+
+        # volume-weighted centroid update (avoid div by zero)
+        newV = cap.V[k,k]
+        if newV > 0
+            old_ck = collect(cap.C_ω[k])
+            old_ci = collect(cap.C_ω[i])
+            # use previous Vk and Vi for weighting (Vk may have been zero)
+            wk = Vk
+            wi = cap.V[i,i]
+            if (wk + wi) > 0
+                newc = ((wk .* old_ck) .+ (wi .* old_ci)) ./ (wk + wi)
+                cap.C_ω[k] = SVector{N,Float64}(Tuple(newc...))
+            end
+        end
+
+        # update cell_types heuristically: prefer larger (fluid) type if any
+        ct_k = cap.cell_types[k]
+        ct_i = cap.cell_types[i]
+        cap.cell_types[k] = ifelse(abs(ct_k) >= abs(ct_i), ct_k, ct_i)
+
+        # zero-out source entries
+        cap.V[i,i] = 0.0
+        cap.Γ[i,i] = 0.0
+        cap.cell_types[i] = 0.0
+        cap.C_ω[i] = SVector{N,Float64}(ntuple(_->0.0, N))
+
+        push!(merges, (i, k))
+    end
+
+    return merges
+end
+
